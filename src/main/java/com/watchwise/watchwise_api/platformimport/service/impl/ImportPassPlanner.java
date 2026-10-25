@@ -38,6 +38,7 @@ public class ImportPassPlanner {
         Map<UUID, Integer> nextPassByContent = new HashMap<>();
         Map<UUID, Integer> watchNumbers = new LinkedHashMap<>();
         Map<UUID, String> issues = new LinkedHashMap<>();
+        Map<UUID, List<Integer>> matchingPassesByItem = new LinkedHashMap<>();
         Set<UUID> linkedExistingPasses = new LinkedHashSet<>();
         Map<CandidateKey, List<DateCandidate>> candidatesByScope = new HashMap<>();
 
@@ -91,6 +92,7 @@ public class ImportPassPlanner {
                     .sorted()
                     .toList();
             if (!matchingPasses.isEmpty()) {
+                matchingPassesByItem.put(event.itemId(), matchingPasses);
                 String scope = event.watchedDate() == null ? "for this undated event"
                         : "on " + event.watchedDate();
                 issues.put(event.itemId(), "MATCH_REQUIRED: PASS_ASSIGNMENT_CONFLICT: Existing watch passes "
@@ -106,7 +108,7 @@ public class ImportPassPlanner {
             nextPassByContent.put(event.contentId(), nextPass + 1);
         }
 
-        return new Plan(watchNumbers, issues, linkedExistingPasses);
+        return new Plan(watchNumbers, issues, linkedExistingPasses, matchingPassesByItem);
     }
 
     private List<DateCandidate> findExistingCandidates(UUID ownerId, UUID contentId, LocalDate watchedDate,
@@ -159,11 +161,19 @@ public class ImportPassPlanner {
                              LocalDate watchedDate, Integer assignedPass, boolean linkExistingOnly) { }
 
     public record Plan(Map<UUID, Integer> watchNumbers, Map<UUID, String> issues,
-                       Set<UUID> linkedExistingPasses) {
+                       Set<UUID> linkedExistingPasses, Map<UUID, List<Integer>> matchingPasses) {
+        public Plan(Map<UUID, Integer> watchNumbers, Map<UUID, String> issues,
+                    Set<UUID> linkedExistingPasses) {
+            this(watchNumbers, issues, linkedExistingPasses, Map.of());
+        }
+
         public Plan {
             watchNumbers = Map.copyOf(watchNumbers);
             issues = Map.copyOf(issues);
             linkedExistingPasses = Set.copyOf(linkedExistingPasses);
+            Map<UUID, List<Integer>> frozenCandidates = new LinkedHashMap<>();
+            matchingPasses.forEach((itemId, candidates) -> frozenCandidates.put(itemId, List.copyOf(candidates)));
+            matchingPasses = Map.copyOf(frozenCandidates);
         }
     }
 

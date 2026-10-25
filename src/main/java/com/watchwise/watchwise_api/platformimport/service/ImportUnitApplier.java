@@ -8,4 +8,8 @@ public interface ImportUnitApplier {
     boolean supports(ImportRecordKind kind);
 
     void apply(ImportExecutionContext context, UUID unitId);
+
+    default boolean isComplete(ImportExecutionContext context, UUID unitId) {
+        return true;
+    }
 }

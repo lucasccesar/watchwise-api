@@ -149,6 +149,65 @@ class WatchEventImportIntegrationTest {
     }
 
     @Test
+    void shouldSetTheaterFlagFromWholeLetterboxdCinemaTagOnlyForMovies() throws Exception {
+        User owner = createUser();
+        Content movie = createMovie();
+        ImportJob movieJob = createJob(owner.getId(), "letterboxd:account-1", ImportSourceFormat.LETTERBOXD_ZIP);
+        ImportItem movieEvent = createEvent(movieJob, movie, 0, "cinema-movie", "2025-02-03", null, null);
+        var moviePayload = objectMapper.readTree(movieEvent.getPayloadJson()).deepCopy();
+        ((tools.jackson.databind.node.ObjectNode) moviePayload).putArray("tags").add("🍿/assisti no cinema");
+        movieEvent.setPayloadJson(objectMapper.writeValueAsString(moviePayload));
+        itemRepository.saveAndFlush(movieEvent);
+
+        apply(movieJob, movieEvent);
+
+        assertThat(jdbc.queryForObject("SELECT watched_in_theater FROM diary_entries WHERE user_id=? AND content_id=?",
+                Boolean.class, owner.getId(), movie.getId())).isTrue();
+        completeJob(movieJob.getId());
+
+        Content episode = createEpisode("875001", 1, 1);
+        ImportJob episodeJob = createJob(owner.getId(), "letterboxd:account-1", ImportSourceFormat.LETTERBOXD_ZIP);
+        ImportItem episodeEvent = createEpisodeEvent(episodeJob, episode, 0, "cinema-episode", "2025-02-03", "theater");
+
+        apply(episodeJob, episodeEvent);
+
+        assertThat(jdbc.queryForObject("SELECT watched_in_theater FROM diary_entries WHERE user_id=? AND content_id=?",
+                Boolean.class, owner.getId(), episode.getId())).isNull();
+        completeJob(episodeJob.getId());
+    }
+
+    @Test
+    void shouldNotEraseExistingTrueTheaterFlagWhenLinkingAnExistingPass() {
+        User owner = createUser();
+        Content movie = createMovie();
+        LocalDate watchedOn = LocalDate.of(2025, 2, 3);
+        WatchMutationResult existing = diaryWatchCommandService.recordPrepared(owner.getId(),
+                new WatchEventCommand(MediaReference.movie(movie.getTmdbId()), watchedOn, null,
+                        null, null, true, List.of(), null));
+        ImportJob job = createJob(owner.getId(), "letterboxd:account-1", ImportSourceFormat.LETTERBOXD_ZIP);
+        ImportItem event = createEvent(job, movie, 0, "cinema-preserved", "2025-02-03", null, null);
+        event.setDecision(com.watchwise.watchwise_api.platformimport.model.ImportDecision.ASSIGN_PASS);
+        var source = objectMapper.createObjectNode();
+        source.put("watchedDate", "2025-02-03");
+        var resolution = objectMapper.createObjectNode();
+        var assignPass = objectMapper.createObjectNode();
+        assignPass.put("passNumber", 1);
+        resolution.set("assignPass", assignPass);
+        resolution.put("linkExistingOnly", true);
+        var payload = objectMapper.createObjectNode();
+        payload.put("_watchwiseResolution", 1);
+        payload.set("source", source);
+        payload.set("resolution", resolution);
+        event.setPayloadJson(writeJson(payload));
+        itemRepository.saveAndFlush(event);
+
+        apply(job, event);
+
+        assertThat(jdbc.queryForObject("SELECT watched_in_theater FROM diary_entries WHERE id=?",
+                Boolean.class, existing.diaryEntryId())).isTrue();
+    }
+
+    @Test
     void shouldApplyCurrentRatingOnlyToNewestWatchWhileKeepingOlderEventScores() throws Exception {
         User owner = createUser();
         Content movie = createMovie();
@@ -392,6 +451,12 @@ class WatchEventImportIntegrationTest {
                 .build());
     }
 
+    private Content createEpisode(String seriesId, int season, int episodeNumber) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        return contentRepository.saveAndFlush(Content.builder().type(ContentType.EPISODE).seriesTmdbId(seriesId)
+                .seasonNumber(season).episodeNumber(episodeNumber).createdAt(now).updatedAt(now).build());
+    }
+
     private ImportJob createJob(UUID ownerId, String namespace, ImportSourceFormat format) {
         LocalDateTime now = LocalDateTime.now(clock);
         ImportPlatform platform = format == ImportSourceFormat.LETTERBOXD_ZIP
@@ -448,6 +513,22 @@ class WatchEventImportIntegrationTest {
                 .outcome("MATCHED")
                 .ordinal(ordinal)
                 .build());
+    }
+
+    private ImportItem createEpisodeEvent(ImportJob job, Content episode, int ordinal, String sourceId,
+                                         String watchedOn, String tag) {
+        var payload = objectMapper.createObjectNode();
+        payload.put("watchedDate", watchedOn);
+        payload.putArray("tags").add(tag);
+        return itemRepository.saveAndFlush(ImportItem.builder().jobId(job.getId()).planGeneration(1)
+                .normalizedKind(ImportRecordKind.DIARY_EVENT).sourceNamespace(job.getSourceNamespace())
+                .objectKind("diary_event").sourceId(sourceId).sourceEventKey(sourceId)
+                .parserVersion("letterboxd-history-v1")
+                .resolvedContentKey("CONTENT|EPISODE|" + episode.getSeriesTmdbId() + "|"
+                        + episode.getSeasonNumber() + "|" + episode.getEpisodeNumber())
+                .resolvedTargetJson(writeJson(new ImportTarget.ContentTarget(MediaReference.episode(
+                        episode.getSeriesTmdbId(), episode.getSeasonNumber(), episode.getEpisodeNumber()))))
+                .payloadJson(writeJson(payload)).outcome("MATCHED").ordinal(ordinal).build());
     }
 
     private ImportItem createCurrentRating(ImportJob job, Content movie, int ordinal, String sourceId, int score) {

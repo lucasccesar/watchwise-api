@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.ImportUnitApplier;
+import com.watchwise.watchwise_api.platformimport.service.ImportUnitTerminalListener;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -43,19 +44,23 @@ public class ImportUnitTransaction {
     private final ImportLedger ledger;
     private final ImportEventDeduplicator eventDeduplicator;
     private final List<ImportUnitApplier> appliers;
+    private final List<ImportUnitTerminalListener> terminalListeners;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
     public ImportUnitTransaction(ImportJobRepository jobRepository, ImportItemRepository itemRepository,
                                  UserRepository userRepository, ImportLedger ledger,
                                  ImportEventDeduplicator eventDeduplicator,
-                                 List<ImportUnitApplier> appliers, ObjectMapper objectMapper, Clock clock) {
+                                 List<ImportUnitApplier> appliers,
+                                 List<ImportUnitTerminalListener> terminalListeners,
+                                 ObjectMapper objectMapper, Clock clock) {
         this.jobRepository = jobRepository;
         this.itemRepository = itemRepository;
         this.userRepository = userRepository;
         this.ledger = ledger;
         this.eventDeduplicator = eventDeduplicator;
         this.appliers = List.copyOf(appliers);
+        this.terminalListeners = List.copyOf(terminalListeners);
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -76,8 +81,8 @@ public class ImportUnitTransaction {
             item.setOutcome("SKIPPED");
             item.setIssue("SOURCE_ALREADY_CONSUMED");
             itemRepository.save(item);
-            job.setCheckpoint(Long.toString(item.getOrdinal()));
-            renew(job);
+            notifyTerminal(context, item);
+            checkpointAfterUnit(job, item);
             return true;
         }
         if (sourceDecision == SourceApplicationDecision.WAIT_OTHER_JOB) throw new WaitForOtherJobException();
@@ -96,6 +101,16 @@ public class ImportUnitTransaction {
             } catch (WatchEventImportApplier.PassAssignmentRequiredException exception) {
                 pauseForPassAssignment(job, item, exception.getMessage(), exception.decision());
                 return true;
+            } catch (LetterboxdSeriesExpansionPlanner.SeriesExpansionIssueException exception) {
+                pauseForExpansionIssue(job, item, exception.getMessage());
+                return true;
+            }
+            if (!applier.isComplete(context, item.getId())) {
+                if (!"EXPANDING".equals(item.getOutcome())) item.setOutcome("MATCHED");
+                itemRepository.save(item);
+                job.setCheckpoint(Long.toString(item.getOrdinal()));
+                renew(job);
+                return true;
             }
             if (!ledger.isConsumed(context.ownerId(), sourceKey)) {
                 throw new IllegalStateException("Import unit did not commit its source ledger transition");
@@ -105,8 +120,8 @@ public class ImportUnitTransaction {
         }
 
         itemRepository.save(item);
-        job.setCheckpoint(Long.toString(item.getOrdinal()));
-        renew(job);
+        notifyTerminal(context, item);
+        checkpointAfterUnit(job, item);
         return true;
     }
 
@@ -352,6 +367,16 @@ public class ImportUnitTransaction {
         return matches.getFirst();
     }
 
+    private void notifyTerminal(ImportExecutionContext context, ImportItem item) {
+        for (ImportUnitTerminalListener listener : terminalListeners) listener.onTerminal(context, item);
+    }
+
+    private void checkpointAfterUnit(ImportJob job, ImportItem item) {
+        job.setCheckpoint(Long.toString(item.getOrdinal()));
+        if (job.getState() == ImportJobState.IMPORTING && job.isWorkPending()) renew(job);
+        else releaseLease(job);
+    }
+
     private ImportSourceKey sourceKey(ImportItem item) {
         return new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
     }
@@ -362,6 +387,17 @@ public class ImportUnitTransaction {
             throw new IllegalArgumentException("Only a match-required decision can pause event application");
         }
         item.setOutcome("MATCHED");
+        item.setIssue(issue);
+        itemRepository.save(item);
+        job.setState(ImportJobState.READY);
+        job.setWorkPhase("APPLY");
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        releaseLease(job);
+    }
+
+    private void pauseForExpansionIssue(ImportJob job, ImportItem item, String issue) {
+        item.setOutcome("NORMALIZATION_ISSUE");
         item.setIssue(issue);
         itemRepository.save(item);
         job.setState(ImportJobState.READY);

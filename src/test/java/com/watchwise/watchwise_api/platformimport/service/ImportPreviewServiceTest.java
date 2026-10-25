@@ -234,6 +234,86 @@ class ImportPreviewServiceTest {
     }
 
     @Test
+    @DisplayName("[resolve] Should Reject A Series Target Change - After Episode Expansion Was Prepared")
+    void shouldRejectChangingASeriesTargetAfterEpisodeExpansionWasPrepared() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.RESOLVING);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.SERIES_EXPANSION,
+                "{\"_watchwiseResolution\":1,\"source\":{\"sourceQuery\":{"
+                        + "\"kind\":\"CONTENT\",\"title\":\"Original Series\",\"year\":2020,"
+                        + "\"contentType\":\"SERIES\"},\"_watchwiseExpansion\":{"
+                        + "\"schemaVersion\":1,\"childCount\":12}},\"resolution\":{\"fields\":{}}}", 1);
+        item.setOutcome("NORMALIZATION_ISSUE");
+        item.setResolvedTargetJson(objectMapper.writeValueAsString(
+                new ImportTarget.ContentTarget(MediaReference.series("111"))));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ResolveTarget(itemId,
+                        new ImportTarget.ContentTarget(MediaReference.series("222")))), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("cancel and create a new import");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(item.getResolvedTargetJson()).contains("111").doesNotContain("222");
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+        verifyNoInteractions(externalContentAliasService);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Watched Date Change - After Episode Expansion Was Prepared")
+    void shouldRejectChangingTheWatchedDateAfterEpisodeExpansionWasPrepared() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.RESOLVING);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.SERIES_EXPANSION,
+                "{\"_watchwiseExpansion\":{\"schemaVersion\":1,\"childCount\":12}}", 1);
+        item.setOutcome("NORMALIZATION_ISSUE");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.EditField(itemId,
+                        ImportResolutionOperation.EditableField.WATCHED_DATE, "2021-01-01")), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("cancel and create a new import");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Require Pass Assignment On Expanded Episodes - Not On The Series Parent")
+    void shouldRejectAssigningAPassToTheSeriesParent() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.RESOLVING);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.SERIES_EXPANSION, "{}", 1);
+        item.setOutcome("EXPANSION_PREPARED");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.AssignPass(itemId, 2)), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("expanded episode");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("[resolve] Should Remember A Confirmed Alias In Owner Scope - When A User Selects A Target")
     void shouldRememberAConfirmedAliasInOwnerScopeWhenAUserSelectsATarget() {
         UUID ownerId = UUID.randomUUID();
@@ -517,7 +597,7 @@ class ImportPreviewServiceTest {
 
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
-                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null));
+                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null, null, null, null));
         assertThat(result.getTotalElements()).isEqualTo(1);
     }
 

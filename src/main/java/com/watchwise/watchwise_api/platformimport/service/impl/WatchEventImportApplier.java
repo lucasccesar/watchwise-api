@@ -39,16 +39,20 @@ public class WatchEventImportApplier implements ImportUnitApplier {
     private final DiaryWatchCommandService diaryWatchCommandService;
     private final ImportLedger ledger;
     private final ImportPassPlanner passPlanner;
+    private final TheaterTagMatcher theaterTagMatcher;
     private final ObjectMapper objectMapper;
 
     public WatchEventImportApplier(ImportItemRepository itemRepository, ContentRepository contentRepository,
                                    DiaryWatchCommandService diaryWatchCommandService, ImportLedger ledger,
-                                   ImportPassPlanner passPlanner, ObjectMapper objectMapper) {
+                                   ImportPassPlanner passPlanner,
+                                   TheaterTagMatcher theaterTagMatcher,
+                                   ObjectMapper objectMapper) {
         this.itemRepository = itemRepository;
         this.contentRepository = contentRepository;
         this.diaryWatchCommandService = diaryWatchCommandService;
         this.ledger = ledger;
         this.passPlanner = passPlanner;
+        this.theaterTagMatcher = theaterTagMatcher;
         this.objectMapper = objectMapper;
     }
 
@@ -80,7 +84,7 @@ public class WatchEventImportApplier implements ImportUnitApplier {
             throw new IllegalStateException("Diary event pass plan did not assign a watch number");
         }
         WatchEventCommand command = new WatchEventCommand(event.media(), event.watchedDate(), watchNumber,
-                event.review(), event.score(), null, List.of(), event.watchedAt());
+                event.review(), event.score(), event.watchedInTheater(), List.of(), event.watchedAt());
         java.util.Optional<WatchMutationResult> result = diaryWatchCommandService.recordPreparedImport(
                 context.ownerId(), command, passPlan.linkedExistingPasses().contains(item.getId()));
         if (result.isEmpty()) {
@@ -112,12 +116,17 @@ public class WatchEventImportApplier implements ImportUnitApplier {
             }
 
             LocalDate watchedDate = parseDate(firstText(resolution.path("fields"), "watchedOn", "watchedDate"),
-                    firstText(source, "watchedOn", "watchedDate", "date"));
+                    firstText(source, "watchedOn", "watchedDate"));
             Instant watchedAt = parseInstant(firstText(resolution.path("fields"), "sourceWatchedAt"),
                     text(source.path("sourceWatchedAt")));
             Integer score = parseInteger(firstText(resolution.path("fields"), "score"), source.path("score"));
             String review = firstText(resolution.path("fields"), "review", "comment");
             if (review == null) review = text(source.path("review"));
+            Boolean explicitTheaterFlag = resolution.path("fields").path("watchedInTheater").isBoolean()
+                    && resolution.path("fields").path("watchedInTheater").asBoolean() ? Boolean.TRUE : null;
+            Boolean watchedInTheater = media.type() == ContentType.MOVIE
+                    && (Boolean.TRUE.equals(explicitTheaterFlag) || theaterTagMatcher.matches(tags(source)))
+                    ? Boolean.TRUE : null;
 
             Integer assignedPass = null;
             if (item.getDecision() == ImportDecision.ASSIGN_PASS) {
@@ -129,7 +138,8 @@ public class WatchEventImportApplier implements ImportUnitApplier {
             }
             boolean linkExistingOnly = resolution.path("linkExistingOnly").asBoolean(false)
                     || item.getIssue() != null && item.getIssue().contains("MATCH_REQUIRED");
-            return new ParsedEvent(media, watchedDate, watchedAt, score, review, assignedPass, linkExistingOnly);
+            return new ParsedEvent(media, watchedDate, watchedAt, score, review, watchedInTheater,
+                    assignedPass, linkExistingOnly);
         } catch (JacksonException | DateTimeParseException exception) {
             throw new IllegalStateException("Staged diary event payload is invalid", exception);
         }
@@ -186,8 +196,17 @@ public class WatchEventImportApplier implements ImportUnitApplier {
         return node != null && node.isTextual() ? node.asString() : null;
     }
 
+    private List<String> tags(JsonNode source) {
+        JsonNode value = source.path("tags");
+        if (!value.isArray()) return List.of();
+        List<String> tags = new java.util.ArrayList<>();
+        for (JsonNode tag : value) if (tag.isTextual()) tags.add(tag.asString());
+        return List.copyOf(tags);
+    }
+
     private record ParsedEvent(MediaReference media, LocalDate watchedDate, Instant watchedAt,
-                               Integer score, String review, Integer assignedPass, boolean linkExistingOnly) { }
+                               Integer score, String review, Boolean watchedInTheater,
+                               Integer assignedPass, boolean linkExistingOnly) { }
 
     public static final class PassAssignmentRequiredException extends RuntimeException {
         public PassAssignmentRequiredException(String message) {

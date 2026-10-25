@@ -17,11 +17,18 @@ import java.util.UUID;
 public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     long countByJobId(UUID jobId);
     long countByJobIdAndPlanGeneration(UUID jobId, long planGeneration);
+
+    @Query("SELECT COALESCE(MAX(item.ordinal), -1) FROM ImportItem item WHERE item.jobId = :jobId AND item.planGeneration = :generation")
+    long findMaxOrdinal(@Param("jobId") UUID jobId, @Param("generation") long generation);
     List<ImportItem> findAllByJobIdAndPlanGenerationAndIdIn(
             UUID jobId, long planGeneration, Collection<UUID> ids);
 
     List<ImportItem> findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind);
+
+    long countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKindAndObjectKindAndOutcome(
+            UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind,
+            String objectKind, String outcome);
 
     List<ImportItem> findAllByJobIdAndPlanGenerationAndSourceIdAndNormalizedKind(
             UUID jobId, long planGeneration, String sourceId, ImportRecordKind normalizedKind);
@@ -216,7 +223,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     @Query("""
             SELECT item FROM ImportItem item
             WHERE item.jobId = :jobId AND item.planGeneration = :generation
-              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED'))
+              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED', 'EXPANSION_PREPARED'))
             ORDER BY item.ordinal ASC, item.id ASC
             """)
     List<ImportItem> findApplyPending(@Param("jobId") UUID jobId,
@@ -225,7 +232,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     @Query("""
             SELECT CASE WHEN COUNT(item) > 0 THEN true ELSE false END FROM ImportItem item
             WHERE item.jobId = :jobId AND item.planGeneration = :generation
-              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED'))
+              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED', 'EXPANSION_PREPARED'))
             """)
     boolean existsApplyPending(@Param("jobId") UUID jobId, @Param("generation") long generation);
 

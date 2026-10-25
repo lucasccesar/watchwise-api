@@ -234,7 +234,7 @@ public class ImportWorker {
         } else if (hasWaitingForUser(context)) {
             state = ImportUnitTransaction.ResolutionState.WAITING_FOR_USER;
         } else {
-            NormalizedHistoryPlan plan = normalizeHistory(job, context);
+            NormalizedHistoryPlan plan = normalizeHistory(job, context, selection(job.selectionJson()));
             state = plan.issueCount() > 0
                     ? ImportUnitTransaction.ResolutionState.WAITING_FOR_USER
                     : ImportUnitTransaction.ResolutionState.READY;
@@ -242,10 +242,12 @@ public class ImportWorker {
         unitTransaction.settleResolution(context, state);
     }
 
-    private NormalizedHistoryPlan normalizeHistory(ClaimedJob job, ImportExecutionContext context) {
+    private NormalizedHistoryPlan normalizeHistory(ClaimedJob job, ImportExecutionContext context,
+                                                   ImportSelection selection) {
         return switch (job.sourceFormat()) {
             case TRAKT_ZIP, TRAKT_JSON -> traktHistoryNormalizer.normalize(context);
-            case LETTERBOXD_ZIP, LETTERBOXD_CSV -> letterboxdHistoryNormalizer.normalize(context);
+            case LETTERBOXD_ZIP, LETTERBOXD_CSV ->
+                    letterboxdHistoryNormalizer.normalize(context, selection.history());
             case WATCHWISE_TEMPLATE_JSON -> NormalizedHistoryPlan.empty(job.id());
         };
     }

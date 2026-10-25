@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
+import com.watchwise.watchwise_api.platformimport.model.ImportDatePrecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.AliasQuery;
@@ -43,6 +44,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
@@ -355,12 +357,23 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items) {
         ImportItem item = requireItem(operation.itemId(), items);
         if (operation instanceof ImportResolutionOperation.ResolveTarget resolveTarget) {
+            if (isPreparedSeriesExpansion(item)) {
+                throw new BadRequestException(
+                        "Series target is frozen after episode expansion; cancel and create a new import");
+            }
             return prepareTargetResolution(item, resolveTarget);
         } else if (operation instanceof ImportResolutionOperation.EditField editField) {
+            if (isPreparedSeriesExpansion(item)
+                    && editField.field() == ImportResolutionOperation.EditableField.WATCHED_DATE) {
+                throw new BadRequestException(
+                        "Series watch date is frozen after episode expansion; cancel and create a new import");
+            }
             validateEditedField(item, editField);
         } else if (operation instanceof ImportResolutionOperation.AssignPass assignPass) {
-            if (assignPass.passNumber() < 1 || item.getNormalizedKind() != ImportRecordKind.DIARY_EVENT
-                    && item.getNormalizedKind() != ImportRecordKind.SERIES_EXPANSION) {
+            if (item.getNormalizedKind() == ImportRecordKind.SERIES_EXPANSION) {
+                throw new BadRequestException("Assign pass to the expanded episode items, not the series parent");
+            }
+            if (assignPass.passNumber() < 1 || item.getNormalizedKind() != ImportRecordKind.DIARY_EVENT) {
                 throw new BadRequestException("Pass assignment is not valid for this import item");
             }
         } else if (operation instanceof ImportResolutionOperation.ConfirmWatchScope confirmScope) {
@@ -368,6 +381,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                     && item.getNormalizedKind() != ImportRecordKind.WATCHED_MARKER
                     && item.getNormalizedKind() != ImportRecordKind.SERIES_EXPANSION) {
                 throw new BadRequestException("Watch scope is not valid for this import item");
+            }
+            if (item.getNormalizedKind() == ImportRecordKind.SERIES_EXPANSION) {
+                throw new BadRequestException("Series expansion uses the complete released episode set");
             }
             if (confirmScope.scope() == ImportResolutionOperation.WatchScope.SPECIFIC_EPISODES) {
                 String seriesId = confirmScope.episodeReferences().getFirst().seriesTmdbId();
@@ -751,6 +767,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         item.setPayloadJson(appendDecisionOverlay(item, operation, metadata.overlayKey()));
         if (operation instanceof ImportResolutionOperation.ResolveTarget) {
             item.setOutcome("MATCHED");
+        } else if (operation instanceof ImportResolutionOperation.AssignPass) {
+            item.setOutcome("RESOLVED");
+            item.setIssue(null);
         } else if (operation instanceof ImportResolutionOperation.SkipItem
                 || operation instanceof ImportResolutionOperation.RemoveNominee
                 || operation instanceof ImportResolutionOperation.RemoveCategory) {
@@ -878,6 +897,17 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         if (item.getNormalizedKind() != expected) throw new BadRequestException(message);
     }
 
+    private boolean isPreparedSeriesExpansion(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.SERIES_EXPANSION) return false;
+        if ("EXPANSION_PREPARED".equals(item.getOutcome())) return true;
+        JsonNode payload = readPayload(item.getPayloadJson());
+        JsonNode metadata = payload.get(LetterboxdSeriesExpansionApplier.EXPANSION_FIELD);
+        if (metadata == null && payload.path("source").isObject()) {
+            metadata = payload.path("source").get(LetterboxdSeriesExpansionApplier.EXPANSION_FIELD);
+        }
+        return metadata != null && metadata.isObject() && metadata.path("schemaVersion").asInt(-1) == 1;
+    }
+
     private List<ImportItem> changedItems(List<ImportResolutionOperation> decisions, Map<UUID, ImportItem> items) {
         LinkedHashSet<UUID> ids = new LinkedHashSet<>();
         for (ImportResolutionOperation decision : decisions) {
@@ -888,10 +918,52 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
+        PreviewWatchDate watchDate = previewWatchDate(item);
         return new ImportPreviewItemDTO(
                 item.getId(), item.getOrdinal(), item.getNormalizedKind(),
                 item.getDecision(), item.getOutcome(), item.getIssue(),
+                watchDate.date(), watchDate.timestamp(), watchDate.precision(),
                 optionalJson(item.getResolvedTargetJson()));
+    }
+
+    private PreviewWatchDate previewWatchDate(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.DIARY_EVENT
+                && item.getNormalizedKind() != ImportRecordKind.SERIES_EXPANSION) {
+            return new PreviewWatchDate(null, null, null);
+        }
+        JsonNode payload = readPayload(item.getPayloadJson());
+        JsonNode source = payload.path("source").isObject() ? payload.path("source") : payload;
+        JsonNode fields = payload.path("resolution").path("fields");
+        String editedWatchedDate = textual(fields.get("WATCHED_DATE"));
+        if (editedWatchedDate != null) {
+            try {
+                return new PreviewWatchDate(LocalDate.parse(editedWatchedDate), null, ImportDatePrecision.DAY);
+            } catch (DateTimeParseException ignored) {
+                return new PreviewWatchDate(null, null, ImportDatePrecision.UNKNOWN);
+            }
+        }
+        String watchedAt = textual(source.get("watchedAt"));
+        if (watchedAt != null) {
+            try {
+                return new PreviewWatchDate(null, Instant.parse(watchedAt), ImportDatePrecision.TIMESTAMP);
+            } catch (DateTimeParseException ignored) {
+                return new PreviewWatchDate(null, null, ImportDatePrecision.UNKNOWN);
+            }
+        }
+        String watchedDate = textual(source.get("watchedDate"));
+        if (watchedDate == null) watchedDate = textual(source.get("watchedOn"));
+        if (watchedDate != null) {
+            try {
+                return new PreviewWatchDate(LocalDate.parse(watchedDate), null, ImportDatePrecision.DAY);
+            } catch (DateTimeParseException ignored) {
+                return new PreviewWatchDate(null, null, ImportDatePrecision.UNKNOWN);
+            }
+        }
+        return new PreviewWatchDate(null, null, ImportDatePrecision.UNKNOWN);
+    }
+
+    private String textual(JsonNode value) {
+        return value != null && value.isTextual() && !value.asString().isBlank() ? value.asString() : null;
     }
 
     private JsonNode optionalJson(String value) {
@@ -940,5 +1012,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private record ResolutionMetadata(ImportDecision decision, String overlayKey) {
+    }
+
+    private record PreviewWatchDate(LocalDate date, Instant timestamp, ImportDatePrecision precision) {
     }
 }
