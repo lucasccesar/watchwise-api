@@ -79,13 +79,19 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.sourceEventKey IN :eventKeys
               AND item.normalizedKind IN :kinds AND item.outcome IN :outcomes
+              AND (item.sourceEventKey > :afterEventKey
+                   OR (item.sourceEventKey = :afterEventKey AND
+                       (item.ordinal > :afterOrdinal OR (item.ordinal = :afterOrdinal AND item.id > :afterId))))
             ORDER BY item.sourceEventKey, item.ordinal, item.id
             """)
-    List<ImportItem> findHistoryEventGroups(@Param("jobId") UUID jobId, @Param("ownerId") UUID ownerId,
-                                            @Param("generation") long generation,
-                                            @Param("eventKeys") Collection<String> eventKeys,
-                                            @Param("kinds") Collection<ImportRecordKind> kinds,
-                                            @Param("outcomes") Collection<String> outcomes);
+    List<ImportItem> findHistoryEventFragmentsAfter(@Param("jobId") UUID jobId, @Param("ownerId") UUID ownerId,
+                                                   @Param("generation") long generation,
+                                                   @Param("eventKeys") Collection<String> eventKeys,
+                                                   @Param("kinds") Collection<ImportRecordKind> kinds,
+                                                   @Param("outcomes") Collection<String> outcomes,
+                                                   @Param("afterEventKey") String afterEventKey,
+                                                   @Param("afterOrdinal") long afterOrdinal,
+                                                   @Param("afterId") UUID afterId, Pageable pageable);
 
     @Query("""
             SELECT DISTINCT item.resolvedContentKey FROM ImportItem item, ImportJob job
@@ -196,9 +202,13 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
             WHERE item.jobId = :jobId AND item.planGeneration = :generation
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.outcome = 'NORMALIZATION_ISSUE'
+              AND (item.decision IS NULL OR item.decision <> :skipDecision)
+              AND (item.decision IS NULL OR item.decision <> :resolvedDecision)
             """)
     long countHistoryIssues(@Param("jobId") UUID jobId, @Param("ownerId") UUID ownerId,
-                            @Param("generation") long generation);
+                            @Param("generation") long generation,
+                            @Param("skipDecision") ImportDecision skipDecision,
+                            @Param("resolvedDecision") ImportDecision resolvedDecision);
 
     List<ImportItem> findByJobIdAndPlanGenerationAndOutcomeInOrderByOrdinalAscIdAsc(
             UUID jobId, long planGeneration, Collection<String> outcomes, Pageable pageable);

@@ -78,7 +78,8 @@ public class HistoryNormalizationSupport {
                 count(context, ImportRecordKind.WATCHED_MARKER),
                 count(context, ImportRecordKind.CURRENT_RATING),
                 count(context, ImportRecordKind.REVIEW),
-                itemRepository.countHistoryIssues(context.jobId(), context.ownerId(), context.planGeneration()));
+                itemRepository.countHistoryIssues(context.jobId(), context.ownerId(), context.planGeneration(),
+                        ImportDecision.SKIP_ITEM, ImportDecision.RESOLVE_TARGET));
     }
 
     private void validateContext(ImportExecutionContext context) {
@@ -181,85 +182,128 @@ public class HistoryNormalizationSupport {
             List<String> keys = itemRepository.findSourceEventKeysAfter(context.jobId(), context.ownerId(),
                     context.planGeneration(), afterKey, EVENT_KINDS, ACTIVE_OUTCOMES, PageRequest.of(0, BATCH_SIZE));
             if (keys.isEmpty()) return;
-            Map<String, List<ImportItem>> recordsByEvent = new LinkedHashMap<>();
-            for (ImportItem item : itemRepository.findHistoryEventGroups(context.jobId(), context.ownerId(),
-                    context.planGeneration(), keys, EVENT_KINDS, ACTIVE_OUTCOMES)) {
-                recordsByEvent.computeIfAbsent(item.getSourceEventKey(), ignored -> new ArrayList<>()).add(item);
+            Map<String, EventGroupSummary> groups = new LinkedHashMap<>();
+            String afterEventKey = "";
+            long afterOrdinal = -1;
+            UUID afterId = new UUID(0, 0);
+            while (true) {
+                List<ImportItem> page = itemRepository.findHistoryEventFragmentsAfter(context.jobId(),
+                        context.ownerId(), context.planGeneration(), keys, EVENT_KINDS, ACTIVE_OUTCOMES,
+                        afterEventKey, afterOrdinal, afterId, PageRequest.of(0, BATCH_SIZE));
+                if (page.isEmpty()) break;
+                List<UUID> eventIds = page.stream()
+                        .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                        .filter(item -> item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
+                        .map(ImportItem::getId).toList();
+                Set<UUID> consumedEventIds = eventIds.isEmpty() ? Set.of()
+                        : Set.copyOf(itemRepository.findConsumedHistoryItemIds(context.ownerId(), context.jobId(),
+                        context.planGeneration(), eventIds));
+                for (ImportItem item : page) {
+                    EventGroupSummary group = groups.computeIfAbsent(item.getSourceEventKey(),
+                            ignored -> new EventGroupSummary());
+                    addEventFragment(group, item, context, consumedEventIds);
+                }
+                ImportItem last = page.getLast();
+                afterEventKey = last.getSourceEventKey();
+                afterOrdinal = last.getOrdinal();
+                afterId = last.getId();
+                renewLease(context);
+                if (page.size() < BATCH_SIZE) break;
             }
-            List<UUID> eventIds = recordsByEvent.values().stream().flatMap(Collection::stream)
-                    .filter(item -> item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
-                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
-                    .map(ImportItem::getId).toList();
-            Set<UUID> consumedEventIds = eventIds.isEmpty() ? Set.of()
-                    : Set.copyOf(itemRepository.findConsumedHistoryItemIds(context.ownerId(), context.jobId(),
-                    context.planGeneration(), eventIds));
             for (String key : keys) {
-                afterKey = key;
-                List<ImportItem> group = recordsByEvent.getOrDefault(key, List.of()).stream()
-                        .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM).toList();
-                normalizeEventGroup(context, group, consumedEventIds, trakt);
+                normalizeEventGroup(context, key, groups.get(key), trakt);
             }
+            afterKey = keys.getLast();
             renewLease(context);
             if (keys.size() < BATCH_SIZE) return;
         }
     }
 
-    private void normalizeEventGroup(ImportExecutionContext context, List<ImportItem> group,
-                                    Set<UUID> consumedEventIds, boolean trakt) {
-        if (group.isEmpty()) return;
-        String problem = groupProblem(context, group);
-        List<ImportItem> events = group.stream()
-                .filter(item -> item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT).toList();
-        List<ImportItem> reviews = group.stream()
-                .filter(item -> item.getNormalizedKind() == ImportRecordKind.REVIEW).toList();
-        if (problem == null && events.size() > 1) problem = "One source event key identifies multiple diary events.";
-        if (problem == null && reviews.size() > 1) problem = "One source event key identifies multiple review fragments.";
-        if (problem == null && !events.isEmpty() && !reviews.isEmpty()
-                && !sameContent(events.getFirst(), reviews.getFirst())) {
+    private void addEventFragment(EventGroupSummary group, ImportItem item, ImportExecutionContext context,
+                                 Set<UUID> consumedEventIds) {
+        if (item.getDecision() == ImportDecision.SKIP_ITEM) return;
+        if (group.parserVersion == null) {
+            group.parserVersion = item.getParserVersion();
+            if (group.parserVersion == null || group.parserVersion.isBlank()) {
+                group.metadataProblem = "History fragment has no parser version.";
+            }
+        } else if (!group.parserVersion.equals(item.getParserVersion())) {
+            group.metadataProblem = "History fragments from different parser versions cannot be merged.";
+        }
+        if (!context.sourceNamespace().equals(item.getSourceNamespace())) {
+            group.metadataProblem = "History fragment belongs to a different source namespace.";
+        }
+        if (itemProblem(item, context) != null) {
+            group.metadataProblem = "History fragment has an unresolved or invalid content identity.";
+        }
+        if (group.identityProblem == null && !addSourceIdentity(group, item)) {
+            group.identityProblem = "History fragments with the same source event key have incompatible identity payloads.";
+        }
+        if (item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT) {
+            group.eventCount++;
+            if (group.event == null) group.event = item;
+            if (consumedEventIds.contains(item.getId())) group.consumedEvent = true;
+        } else if (item.getNormalizedKind() == ImportRecordKind.REVIEW) {
+            group.reviewCount++;
+            if (group.review == null) group.review = item;
+        }
+    }
+
+    private void normalizeEventGroup(ImportExecutionContext context, String eventKey,
+                                     EventGroupSummary group, boolean trakt) {
+        if (group == null || (group.eventCount == 0 && group.reviewCount == 0)) return;
+        String problem = group.metadataProblem != null ? group.metadataProblem : group.identityProblem;
+        if (problem == null && group.eventCount > 1) problem = "One source event key identifies multiple diary events.";
+        if (problem == null && group.reviewCount > 1) problem = "One source event key identifies multiple review fragments.";
+        if (problem == null && group.event != null && group.review != null
+                && !sameContent(group.event, group.review)) {
             problem = "Diary and review fragments resolve to different content identities.";
         }
         if (problem != null) {
             String message = problem;
-            save(context, group.stream().map(item -> issue(item, message)).toList());
+            walkEventFragments(context, eventKey, page -> save(context, page.stream()
+                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                    .map(item -> issue(item, message)).toList()));
             return;
         }
-        if (events.isEmpty()) {
-            for (ImportItem item : group) {
-                if ("NORMALIZATION_ISSUE".equals(item.getOutcome()) || item.getIssue() != null) {
-                    save(context, List.of(update(item, item.getNormalizedKind(), item.getPayloadJson(),
-                            item.getResolvedTargetJson(), item.getResolvedContentKey(), "MATCHED", null)));
-                }
-            }
+        if (group.event == null) {
+            walkEventFragments(context, eventKey, page -> save(context, page.stream()
+                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                    .filter(item -> "NORMALIZATION_ISSUE".equals(item.getOutcome()) || item.getIssue() != null)
+                    .map(item -> update(item, item.getNormalizedKind(), item.getPayloadJson(),
+                            item.getResolvedTargetJson(), item.getResolvedContentKey(), "MATCHED", null)).toList()));
             return;
         }
 
-        ImportItem event = events.getFirst();
+        ImportItem event = group.event;
         ImportTarget target = readTarget(event.getResolvedTargetJson());
         ContentType type = contentType(target);
         if (type == ContentType.SERIES) {
             if (trakt) {
-                save(context, group.stream().map(item -> issue(item,
-                        "Trakt series rows cannot be normalized as diary events.")).toList());
+                walkEventFragments(context, eventKey, page -> save(context, page.stream()
+                        .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                        .map(item -> issue(item, "Trakt series rows cannot be normalized as diary events.")).toList()));
             } else {
-                normalizeLetterboxdSeriesEvent(context, event, reviews.isEmpty() ? null : reviews.getFirst(),
-                        consumedEventIds.contains(event.getId()));
+                normalizeLetterboxdSeriesEvent(context, event, group.review, group.consumedEvent);
             }
             return;
         }
         if (type == ContentType.SEASON) {
-            save(context, group.stream().filter(item -> item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
-                    .map(item -> issue(item, "SEASON content cannot be normalized as a diary watch event.")).toList());
+            walkEventFragments(context, eventKey, page -> save(context, page.stream()
+                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                    .filter(item -> item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
+                    .map(item -> issue(item, "SEASON content cannot be normalized as a diary watch event.")).toList()));
             return;
         }
-        if (reviews.isEmpty()) {
+        if (group.review == null) {
             if ("NORMALIZATION_ISSUE".equals(event.getOutcome()) || event.getIssue() != null) {
                 save(context, List.of(update(event, event.getNormalizedKind(), event.getPayloadJson(),
                         event.getResolvedTargetJson(), event.getResolvedContentKey(), "MATCHED", null)));
             }
             return;
         }
-        ImportItem review = reviews.getFirst();
-        if (consumedEventIds.contains(event.getId())) {
+        ImportItem review = group.review;
+        if (group.consumedEvent) {
             save(context, List.of(
                     update(event, event.getNormalizedKind(), event.getPayloadJson(), event.getResolvedTargetJson(),
                             event.getResolvedContentKey(), "MATCHED", null),
@@ -320,44 +364,35 @@ public class HistoryNormalizationSupport {
         }
     }
 
-    private String groupProblem(ImportExecutionContext context, List<ImportItem> group) {
-        String version = group.getFirst().getParserVersion();
-        if (version == null || version.isBlank()) return "History fragment has no parser version.";
-        for (ImportItem item : group) {
-            if (!context.sourceNamespace().equals(item.getSourceNamespace())) {
-                return "History fragment belongs to a different source namespace.";
-            }
-            if (!version.equals(item.getParserVersion())) {
-                return "History fragments from different parser versions cannot be merged.";
-            }
-            if (item.getResolvedContentKey() == null || item.getResolvedTargetJson() == null
-                    || itemProblem(item, context) != null) {
-                return "History fragment has an unresolved or invalid content identity.";
+    private boolean addSourceIdentity(EventGroupSummary group, ImportItem item) {
+        String contentKey = item.getResolvedContentKey();
+        if (contentKey != null) {
+            if (group.resolvedContentKey != null && !group.resolvedContentKey.equals(contentKey)) return false;
+            group.resolvedContentKey = contentKey;
+        }
+
+        JsonNode payload = readPayload(item.getPayloadJson());
+        String uri = textOrNull(payload.path("sourceContentUri"));
+        if (uri != null && !uri.isBlank()) {
+            if (group.sourceContentUri != null && !group.sourceContentUri.equals(uri)) return false;
+            group.sourceContentUri = uri;
+        }
+
+        AliasQuery query = queryForPayload(item.getPayloadJson());
+        if (query != null) {
+            String normalizedTitle = identityNormalizer.normalizeTitle(query.title());
+            if (group.normalizedTitle != null && !group.normalizedTitle.equals(normalizedTitle)) return false;
+            group.normalizedTitle = normalizedTitle;
+            if (query.year() != null) {
+                if (group.releaseYear != null && !group.releaseYear.equals(query.year())) return false;
+                group.releaseYear = query.year();
             }
         }
-        for (int left = 0; left < group.size(); left++) {
-            for (int right = left + 1; right < group.size(); right++) {
-                if (!sameSourceIdentity(group.get(left), group.get(right))) {
-                    return "History fragments with the same source event key have incompatible identity payloads.";
-                }
-            }
-        }
-        return null;
+        return true;
     }
 
-    private boolean sameSourceIdentity(ImportItem left, ImportItem right) {
-        if (!java.util.Objects.equals(left.getResolvedContentKey(), right.getResolvedContentKey())) return false;
-        AliasQuery leftQuery = queryForPayload(left.getPayloadJson());
-        AliasQuery rightQuery = queryForPayload(right.getPayloadJson());
-        if (leftQuery == null || rightQuery == null) return false;
-        JsonNode leftUriNode = readPayload(left.getPayloadJson()).path("sourceContentUri");
-        JsonNode rightUriNode = readPayload(right.getPayloadJson()).path("sourceContentUri");
-        String leftUri = leftUriNode.isTextual() ? leftUriNode.asString() : null;
-        String rightUri = rightUriNode.isTextual() ? rightUriNode.asString() : null;
-        if (leftUri != null && rightUri != null && !leftUri.equals(rightUri)) return false;
-        if (!identityNormalizer.normalizeTitle(leftQuery.title())
-                .equals(identityNormalizer.normalizeTitle(rightQuery.title()))) return false;
-        return leftQuery.year() == null || rightQuery.year() == null || leftQuery.year().equals(rightQuery.year());
+    private String textOrNull(JsonNode node) {
+        return node != null && node.isTextual() ? node.asString() : null;
     }
 
     private boolean sameContent(ImportItem left, ImportItem right) {
@@ -382,17 +417,14 @@ public class HistoryNormalizationSupport {
     }
 
     private void normalizeContentGroup(ImportExecutionContext context, String contentKey, boolean trakt) {
-        List<ImportItem> first = itemRepository.findHistoryTargetFragmentsAfter(context.jobId(), context.ownerId(),
-                context.planGeneration(), contentKey, LETTERBOXD_TARGET_KINDS, ACTIVE_OUTCOMES,
-                -1, new UUID(0, 0), PageRequest.of(0, BATCH_SIZE));
-        if (first.isEmpty()) return;
-        first = first.stream().filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM).toList();
-        if (first.isEmpty()) return;
-        ImportTarget target = first.stream().filter(item -> item.getResolvedTargetJson() != null)
-                .map(item -> readTarget(item.getResolvedTargetJson())).findFirst().orElse(null);
+        ImportItem first = firstApplicableTargetFragment(context, contentKey, LETTERBOXD_TARGET_KINDS);
+        if (first == null) return;
+        ImportTarget target = first.getResolvedTargetJson() == null ? null : readTarget(first.getResolvedTargetJson());
         if (target == null || !contentKey.equals(contentKey(target))) {
-            save(context, first.stream().map(item -> issue(item,
-                    "Content fragments do not share a valid resolved target identity.")).toList());
+            walkTargetFragments(context, contentKey, LETTERBOXD_TARGET_KINDS, page -> save(context, page.stream()
+                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                    .map(item -> issue(item, "Content fragments do not share a valid resolved target identity."))
+                    .toList()));
             return;
         }
         ContentType targetType = contentType(target);
@@ -470,26 +502,45 @@ public class HistoryNormalizationSupport {
             List<String> eventKeys = page.stream().filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
                     .map(ImportItem::getSourceEventKey).filter(java.util.Objects::nonNull).distinct().toList();
             if (eventKeys.isEmpty()) return;
-            Map<String, List<ImportItem>> parentsByEvent = new LinkedHashMap<>();
-            for (ImportItem parent : itemRepository.findHistoryEventGroups(context.jobId(), context.ownerId(),
-                    context.planGeneration(), eventKeys, List.of(ImportRecordKind.SERIES_EXPANSION), ACTIVE_OUTCOMES)) {
-                parentsByEvent.computeIfAbsent(parent.getSourceEventKey(), ignored -> new ArrayList<>()).add(parent);
+            Map<String, EventParentSummary> parentsByEvent = new LinkedHashMap<>();
+            String afterEventKey = "";
+            long afterOrdinal = -1;
+            UUID afterId = new UUID(0, 0);
+            while (true) {
+                List<ImportItem> parents = itemRepository.findHistoryEventFragmentsAfter(context.jobId(),
+                        context.ownerId(), context.planGeneration(), eventKeys,
+                        List.of(ImportRecordKind.SERIES_EXPANSION), ACTIVE_OUTCOMES,
+                        afterEventKey, afterOrdinal, afterId, PageRequest.of(0, BATCH_SIZE));
+                if (parents.isEmpty()) break;
+                for (ImportItem parent : parents) {
+                    if (parent.getDecision() == ImportDecision.SKIP_ITEM) continue;
+                    EventParentSummary summary = parentsByEvent.computeIfAbsent(parent.getSourceEventKey(),
+                            ignored -> new EventParentSummary());
+                    summary.count++;
+                    if (summary.parent == null) summary.parent = parent;
+                }
+                ImportItem last = parents.getLast();
+                afterEventKey = last.getSourceEventKey();
+                afterOrdinal = last.getOrdinal();
+                afterId = last.getId();
+                renewLease(context);
+                if (parents.size() < BATCH_SIZE) break;
             }
-            List<UUID> parentIds = parentsByEvent.values().stream().flatMap(Collection::stream)
-                    .map(ImportItem::getId).distinct().toList();
+            List<UUID> parentIds = parentsByEvent.values().stream().filter(summary -> summary.count == 1)
+                    .map(summary -> summary.parent.getId()).toList();
             Set<UUID> consumedParentIds = parentIds.isEmpty() ? Set.of()
                     : Set.copyOf(itemRepository.findConsumedHistoryItemIds(context.ownerId(), context.jobId(),
                     context.planGeneration(), parentIds));
             List<ImportUnitTransaction.HistoryNormalizationUpdate> updates = new ArrayList<>();
             for (ImportItem review : page) {
                 if (review.getDecision() == ImportDecision.SKIP_ITEM) continue;
-                List<ImportItem> parents = parentsByEvent.getOrDefault(review.getSourceEventKey(), List.of());
-                if (parents.isEmpty()) continue;
-                if (parents.size() != 1) {
+                EventParentSummary parentSummary = parentsByEvent.get(review.getSourceEventKey());
+                if (parentSummary == null || parentSummary.count == 0) continue;
+                if (parentSummary.count != 1) {
                     updates.add(issue(review, "One series review event matches multiple expansion parents."));
                     continue;
                 }
-                ImportItem parent = parents.getFirst();
+                ImportItem parent = parentSummary.parent;
                 if (consumedParentIds.contains(parent.getId())) {
                     updates.add(update(review, review.getNormalizedKind(), review.getPayloadJson(),
                             review.getResolvedTargetJson(), review.getResolvedContentKey(), "ABSORBED", null));
@@ -520,6 +571,11 @@ public class HistoryNormalizationSupport {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
                 if (item.getDecision() == ImportDecision.SKIP_ITEM) continue;
+                if ("NORMALIZATION_ISSUE".equals(item.getOutcome())
+                        && item.getDecision() != ImportDecision.RESOLVE_TARGET) {
+                    return item.getIssue() == null
+                            ? "History fragment has an unresolved normalization issue." : item.getIssue();
+                }
                 String problem = itemProblem(item, context);
                 if (problem != null) return problem;
                 if (parserVersion == null) parserVersion = item.getParserVersion();
@@ -773,6 +829,44 @@ public class HistoryNormalizationSupport {
         }
     }
 
+    private void walkEventFragments(ImportExecutionContext context, String eventKey,
+                                    java.util.function.Consumer<List<ImportItem>> consumer) {
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> page = itemRepository.findHistoryEventFragmentsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), List.of(eventKey), EVENT_KINDS, ACTIVE_OUTCOMES,
+                    eventKey, afterOrdinal, afterId, PageRequest.of(0, BATCH_SIZE));
+            if (page.isEmpty()) return;
+            ImportItem last = page.getLast();
+            consumer.accept(page);
+            renewLease(context);
+            afterOrdinal = last.getOrdinal();
+            afterId = last.getId();
+            if (page.size() < BATCH_SIZE) return;
+        }
+    }
+
+    private ImportItem firstApplicableTargetFragment(ImportExecutionContext context, String contentKey,
+                                                    Collection<ImportRecordKind> kinds) {
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> page = itemRepository.findHistoryTargetFragmentsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), contentKey, kinds, ACTIVE_OUTCOMES, afterOrdinal, afterId,
+                    PageRequest.of(0, BATCH_SIZE));
+            if (page.isEmpty()) return null;
+            ImportItem applicable = page.stream().filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
+                    .findFirst().orElse(null);
+            if (applicable != null) return applicable;
+            ImportItem last = page.getLast();
+            afterOrdinal = last.getOrdinal();
+            afterId = last.getId();
+            renewLease(context);
+            if (page.size() < BATCH_SIZE) return null;
+        }
+    }
+
     private String itemProblem(ImportItem item, ImportExecutionContext context) {
         if (!context.jobId().equals(item.getJobId()) || item.getPlanGeneration() != context.planGeneration()
                 || !context.sourceNamespace().equals(item.getSourceNamespace())) {
@@ -923,6 +1017,26 @@ public class HistoryNormalizationSupport {
         } catch (JacksonException exception) {
             throw new IllegalStateException("History payload could not be serialized", exception);
         }
+    }
+
+    private static final class EventGroupSummary {
+        private String parserVersion;
+        private String metadataProblem;
+        private String identityProblem;
+        private String resolvedContentKey;
+        private String sourceContentUri;
+        private String normalizedTitle;
+        private Integer releaseYear;
+        private ImportItem event;
+        private ImportItem review;
+        private int eventCount;
+        private int reviewCount;
+        private boolean consumedEvent;
+    }
+
+    private static final class EventParentSummary {
+        private ImportItem parent;
+        private int count;
     }
 
     private record EpisodeCoordinates(Integer seasonNumber, Integer episodeNumber) { }

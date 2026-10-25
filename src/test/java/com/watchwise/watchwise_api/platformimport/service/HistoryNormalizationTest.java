@@ -6,17 +6,21 @@ import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.AliasQuery;
 import com.watchwise.watchwise_api.platformimport.model.AliasResolution;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
+import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportReadContext;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
 import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
+import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
 import com.watchwise.watchwise_api.platformimport.parser.CsvRecordReader;
 import com.watchwise.watchwise_api.platformimport.parser.impl.LetterboxdHistoryCsvParser;
+import com.watchwise.watchwise_api.platformimport.parser.impl.TraktItemParserImpl;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import com.watchwise.watchwise_api.platformimport.service.ImportIdentityNormalizer;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.service.impl.PlatformContentResolver;
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
@@ -34,6 +38,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -43,13 +48,20 @@ import tools.jackson.databind.node.ObjectNode;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atMost;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(properties = {
         "spring.docker.compose.enabled=false",
@@ -84,6 +96,7 @@ class HistoryNormalizationTest {
     @Autowired private Clock clock;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private TestAliasService aliasService;
+    @MockitoSpyBean private ImportIdentityNormalizer identityNormalizer;
 
     @BeforeEach
     void setUp() {
@@ -121,6 +134,215 @@ class HistoryNormalizationTest {
                     assertThat(payload.path("review").asString()).isEqualTo("A thoughtful review.");
                 });
         assertThat(rows).filteredOn(row -> "ABSORBED".equals(row.getOutcome())).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Bound Event Group Reads - When One Source Event Has Hundreds Of Fragments")
+    void shouldBoundEventGroupReadsWhenOneSourceEventHasHundredsOfFragments() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP, "letterboxd:hot-key");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        List<ImportItem> hotGroup = new ArrayList<>();
+        for (int index = 0; index < 401; index++) {
+            hotGroup.add(stagedItem(job, 1, ImportRecordKind.REVIEW, "review-" + index, "one-hot-event",
+                    movie, payload("Arrival", 2016, null, 8, "Review."), index));
+        }
+        itemRepository.saveAllAndFlush(hotGroup);
+
+        List<ImportItem> fetched = new ArrayList<>();
+        String afterEventKey = "";
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        int largestPage = 0;
+        while (true) {
+            List<ImportItem> page = itemRepository.findHistoryEventFragmentsAfter(job.getId(), owner.getId(), 1,
+                    List.of("one-hot-event"), List.of(ImportRecordKind.REVIEW), List.of("MATCHED"),
+                    afterEventKey, afterOrdinal, afterId, org.springframework.data.domain.PageRequest.of(0, 200));
+            largestPage = Math.max(largestPage, page.size());
+            if (page.isEmpty()) break;
+            fetched.addAll(page);
+            ImportItem last = page.getLast();
+            afterEventKey = last.getSourceEventKey();
+            afterOrdinal = last.getOrdinal();
+            afterId = last.getId();
+            if (page.size() < 200) break;
+        }
+
+        assertThat(largestPage).isLessThanOrEqualTo(200);
+        assertThat(fetched).hasSize(401).extracting(ImportItem::getSourceId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Keep Event Fragments Across Pages - When A Source Event Spans The Batch Boundary")
+    void shouldKeepEventFragmentsAcrossPagesWhenASourceEventSpansTheBatchBoundary() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP, "letterboxd:page-boundary");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        List<ImportItem> eventRows = new ArrayList<>();
+        eventRows.add(stagedItem(job, 1, ImportRecordKind.DIARY_EVENT, "diary-1", "one-hot-event",
+                movie, payload("Arrival", 2016, "2025-01-01", 5, null), 1));
+        for (int index = 0; index < 199; index++) {
+            ImportItem skipped = stagedItem(job, 1, ImportRecordKind.REVIEW, "skipped-review-" + index,
+                    "one-hot-event", movie, payload("Arrival", 2016, null, null, null), index + 2);
+            skipped.setDecision(ImportDecision.SKIP_ITEM);
+            eventRows.add(skipped);
+        }
+        ImportItem review = stagedItem(job, 1, ImportRecordKind.REVIEW, "review-last", "one-hot-event",
+                movie, payload("Arrival", 2016, null, 9, "Review on the next page."), 201);
+        eventRows.add(review);
+        itemRepository.saveAllAndFlush(eventRows);
+
+        run(job);
+
+        ImportItem normalizedDiary = itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 205)).getContent().stream()
+                .filter(row -> "diary-1".equals(row.getSourceId())).findFirst().orElseThrow();
+        assertThat(read(normalizedDiary.getPayloadJson()).path("score").asInt()).isEqualTo(9);
+        assertThat(read(normalizedDiary.getPayloadJson()).path("review").asString())
+                .isEqualTo("Review on the next page.");
+        assertThat(itemRepository.findById(review.getId()).orElseThrow().getOutcome()).isEqualTo("ABSORBED");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Compare Hot Event Identities Linearly - When Many Fragments Share One Key")
+    void shouldCompareHotEventIdentitiesLinearlyWhenManyFragmentsShareOneKey() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP, "letterboxd:linear-key");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        List<ImportItem> hotGroup = new ArrayList<>();
+        for (int index = 0; index < 301; index++) {
+            hotGroup.add(stagedItem(job, 1, ImportRecordKind.REVIEW, "review-" + index, "one-hot-event",
+                    movie, payload("Arrival", 2016, null, 8, "Review."), index));
+        }
+        itemRepository.saveAllAndFlush(hotGroup);
+        clearInvocations(identityNormalizer);
+
+        ImportJob waiting = runWorker(job);
+
+        assertThat(waiting.getState()).isEqualTo(ImportJobState.RESOLVING);
+        verify(identityNormalizer, atMost(600)).normalizeTitle(anyString());
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Detect Conflicting Known Identity Fields - When The First Fragment Omits A Year")
+    void shouldDetectConflictingKnownIdentityFieldsWhenTheFirstFragmentOmitsAYear() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP,
+                "letterboxd:partial-identity");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        item(job, ImportRecordKind.DIARY_EVENT, "diary-1", "one-event", movie,
+                payload("Arrival", null, "2025-01-01", 5, null), 1);
+        item(job, ImportRecordKind.REVIEW, "review-1", "one-event", movie,
+                payload("Arrival", 2016, null, 8, "Review one."), 2);
+        ImportItem conflictingReview = item(job, ImportRecordKind.REVIEW, "review-2", "one-event", movie,
+                payload("Arrival", 2017, null, 9, "Review two."), 3);
+
+        runWorker(job);
+
+        assertThat(itemRepository.findById(conflictingReview.getId()).orElseThrow().getIssue())
+                .contains("incompatible identity payloads");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Ignore Resolved And Skipped Issues - When No Actionable Issue Remains")
+    void shouldIgnoreResolvedAndSkippedIssuesWhenNoActionableIssueRemains() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP, "letterboxd:skipped-issue");
+        ImportItem skippedIssue = item(job, ImportRecordKind.REVIEW, "skipped-review", "skipped-review", null,
+                payload("Arrival", 2016, null, 8, "Review."), 1);
+        skippedIssue.setOutcome("NORMALIZATION_ISSUE");
+        skippedIssue.setIssue("Previously reported identity conflict.");
+        skippedIssue.setDecision(ImportDecision.SKIP_ITEM);
+        itemRepository.saveAndFlush(skippedIssue);
+        ImportItem resolvedIssue = item(job, ImportRecordKind.REVIEW, "resolved-review", "resolved-review", null,
+                payload("Arrival", 2016, null, 8, "Review."), 2);
+        resolvedIssue.setOutcome("NORMALIZATION_ISSUE");
+        resolvedIssue.setIssue("Previously resolved identity conflict.");
+        resolvedIssue.setDecision(ImportDecision.RESOLVE_TARGET);
+        itemRepository.saveAndFlush(resolvedIssue);
+
+        ImportJob completed = runWorker(job);
+
+        assertThat(completed.getState()).isEqualTo(ImportJobState.READY);
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Merge Direct Trakt References Without Queries - When Event Keys Match")
+    void shouldMergeDirectTraktReferencesWithoutQueriesWhenEventKeysMatch() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.TRAKT_ZIP, "trakt:direct-reference");
+        TraktItemParserImpl parser = new TraktItemParserImpl(objectMapper);
+        ImportReadContext readContext = new ImportReadContext(owner.getId(), job.getId(), job.getStorageKey(),
+                job.getSourceNamespace(), ZoneId.of("UTC"));
+        NormalizedImportRecord diary = parseTraktRecord(parser, readContext, ImportRecordKind.DIARY_EVENT,
+                "[{\"id\":\"17\",\"type\":\"movie\",\"movie\":{\"title\":\"Arrival\",\"year\":2016,\"ids\":{\"tmdb\":603}},\"watched_at\":\"2025-01-01T12:00:00Z\",\"rating\":5}]");
+        NormalizedImportRecord review = parseTraktRecord(parser, readContext, ImportRecordKind.REVIEW,
+                "[{\"id\":\"17\",\"type\":\"movie\",\"movie\":{\"title\":\"Arrival Redux\",\"year\":2018,\"ids\":{\"tmdb\":603}},\"watched_at\":\"2025-01-01T12:00:00Z\",\"rating\":9,\"review\":\"Direct reference review.\"}]");
+        assertThat(diary.target()).isEqualTo(contentTarget(MediaReference.movie("603")));
+        assertThat(diary.payload().path("sourceQuery").isMissingNode()).isTrue();
+        assertThat(review.target()).isEqualTo(contentTarget(MediaReference.movie("603")));
+        assertThat(review.payload().path("sourceQuery").isMissingNode()).isTrue();
+        itemRepository.saveAllAndFlush(List.of(
+                stagedItem(job, 1, diary, "17", 1),
+                stagedItem(job, 1, review, "17", 2)));
+
+        ImportJob completed = runWorker(job);
+
+        assertThat(completed.getState()).isEqualTo(ImportJobState.READY);
+        ImportItem normalizedDiary = itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 5)).getContent().stream()
+                .filter(row -> row.getNormalizedKind() == ImportRecordKind.DIARY_EVENT).findFirst().orElseThrow();
+        assertThat(read(normalizedDiary.getPayloadJson()).path("score").asInt()).isEqualTo(9);
+        assertThat(read(normalizedDiary.getPayloadJson()).path("review").asString())
+                .isEqualTo("Direct reference review.");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Preserve A Series Identity Conflict - When The Resolved Target Is Shared")
+    void shouldPreserveASeriesIdentityConflictWhenTheResolvedTargetIsShared() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP,
+                "letterboxd:series-identity-conflict");
+        ImportTarget series = contentTarget(MediaReference.series("123"));
+        ObjectNode eventPayload = payload("Example Series", 2020, null, null, null);
+        ((ObjectNode) eventPayload.get("sourceQuery")).put("contentType", "SERIES");
+        ObjectNode reviewPayload = payload("Different Series", 2020, null, 8, "Conflicting identity.");
+        ((ObjectNode) reviewPayload.get("sourceQuery")).put("contentType", "SERIES");
+        ImportItem diary = item(job, ImportRecordKind.DIARY_EVENT, "series-event", "series-event", series,
+                eventPayload, 1);
+        ImportItem review = item(job, ImportRecordKind.REVIEW, "series-review", "series-event", series,
+                reviewPayload, 2);
+
+        ImportJob waiting = runWorker(job);
+
+        assertThat(waiting.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(itemRepository.findById(diary.getId()).orElseThrow().getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(itemRepository.findById(review.getId()).orElseThrow().getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Continue Past A Skipped Prefix - When Later Target Fragments Are Applicable")
+    void shouldContinuePastASkippedPrefixWhenLaterTargetFragmentsAreApplicable() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.TRAKT_ZIP, "trakt:skip-prefix");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        List<ImportItem> skippedPrefix = new ArrayList<>();
+        for (int index = 0; index < 200; index++) {
+            ImportItem skipped = stagedItem(job, 1, ImportRecordKind.WATCHED_MARKER,
+                    "skipped-marker-" + index, "skip-marker-" + index, movie,
+                    payload("Arrival", 2016, null, null, null), index + 1);
+            skipped.setDecision(ImportDecision.SKIP_ITEM);
+            skippedPrefix.add(skipped);
+        }
+        itemRepository.saveAllAndFlush(skippedPrefix);
+        item(job, ImportRecordKind.DIARY_EVENT, "diary-1", "diary-1", movie,
+                payload("Arrival", 2016, "2025-01-01", 5, null), 201);
+        ImportItem applicableMarker = item(job, ImportRecordKind.WATCHED_MARKER, "marker-201", "marker-201", movie,
+                payload("Arrival", 2016, null, null, null), 202);
+
+        run(job);
+
+        assertThat(itemRepository.findById(applicableMarker.getId()).orElseThrow().getOutcome()).isEqualTo("ABSORBED");
     }
 
     @Test
@@ -535,9 +757,14 @@ class HistoryNormalizationTest {
 
     private ImportItem item(ImportJob job, long generation, ImportRecordKind kind, String id, String eventKey,
                             ImportTarget target, ObjectNode payload, long ordinal) throws Exception {
+        return itemRepository.saveAndFlush(stagedItem(job, generation, kind, id, eventKey, target, payload, ordinal));
+    }
+
+    private ImportItem stagedItem(ImportJob job, long generation, ImportRecordKind kind, String id, String eventKey,
+                                  ImportTarget target, ObjectNode payload, long ordinal) throws Exception {
         String targetJson = target == null ? null : objectMapper.writeValueAsString(target);
         String contentKey = target == null ? null : contentKey(target);
-        return itemRepository.saveAndFlush(ImportItem.builder()
+        return ImportItem.builder()
                 .id(UUID.randomUUID())
                 .jobId(job.getId())
                 .planGeneration(generation)
@@ -557,7 +784,40 @@ class HistoryNormalizationTest {
                 .payloadJson(objectMapper.writeValueAsString(payload))
                 .outcome(target == null ? null : "MATCHED")
                 .ordinal(ordinal)
-                .build());
+                .build();
+    }
+
+    private ImportItem stagedItem(ImportJob job, long generation, NormalizedImportRecord record,
+                                  String sourceEventKey, long ordinal) throws Exception {
+        String targetJson = record.target() == null ? null : objectMapper.writeValueAsString(record.target());
+        String contentKey = record.target() == null ? null : contentKey(record.target());
+        return ImportItem.builder()
+                .id(UUID.randomUUID())
+                .jobId(job.getId())
+                .planGeneration(generation)
+                .sourcePath(record.sourceKey().objectKind() + ".json")
+                .recordLocator(Long.toString(ordinal))
+                .normalizedKind(record.kind())
+                .sourceNamespace(record.sourceKey().namespace())
+                .objectKind(record.sourceKey().objectKind())
+                .sourceId(record.sourceKey().sourceId())
+                .sourceEventKey(sourceEventKey)
+                .normalizedContentKey("CONTENT|arrival|2016|MOVIE")
+                .resolvedContentKey(contentKey)
+                .parserVersion("trakt-history-v1")
+                .resolvedTargetJson(targetJson)
+                .payloadJson(objectMapper.writeValueAsString(record.payload()))
+                .outcome(targetJson == null ? null : "MATCHED")
+                .ordinal(ordinal)
+                .build();
+    }
+
+    private NormalizedImportRecord parseTraktRecord(TraktItemParserImpl parser, ImportReadContext context,
+                                                     ImportRecordKind kind, String json) {
+        List<NormalizedImportRecord> records = new ArrayList<>();
+        parser.parse(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)), context,
+                "history/direct.json", kind, records::add);
+        return records.getFirst();
     }
 
     private ObjectNode payload(String title, Integer year, String watchedOn, Integer score, String review) {

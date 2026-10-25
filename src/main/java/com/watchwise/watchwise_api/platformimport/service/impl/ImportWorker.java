@@ -268,7 +268,8 @@ public class ImportWorker {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
                 if ("NORMALIZATION_ISSUE".equals(item.getOutcome())
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
+                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM
+                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.RESOLVE_TARGET) {
                     return true;
                 }
                 if (isCandidateEnvelope(item.getResolvedTargetJson())
