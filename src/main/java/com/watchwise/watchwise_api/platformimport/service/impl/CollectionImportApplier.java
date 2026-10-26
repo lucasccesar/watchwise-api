@@ -27,15 +27,17 @@ public class CollectionImportApplier implements ImportUnitApplier {
     private final ImportItemRepository itemRepository;
     private final ImportListWriter listWriter;
     private final ImportWatchlistWriter watchlistWriter;
+    private final StandaloneCollectionImportApplier standalone;
     private final ObjectMapper objectMapper;
 
     public CollectionImportApplier(ImportItemRepository itemRepository, ImportListWriter listWriter,
                                    ImportWatchlistWriter watchlistWriter,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper, StandaloneCollectionImportApplier standalone) {
         this.itemRepository = itemRepository;
         this.listWriter = listWriter;
         this.watchlistWriter = watchlistWriter;
         this.objectMapper = objectMapper;
+        this.standalone = standalone;
     }
 
     @Override
@@ -47,7 +49,8 @@ public class CollectionImportApplier implements ImportUnitApplier {
     @Override
     public ImportSourceKey sourceKey(ImportExecutionContext context, ImportItem item) {
         return switch (item.getNormalizedKind()) {
-            case LIST_METADATA -> listWriter.operationKey(context, item);
+            case LIST_METADATA -> standalone.isStandaloneList(context)
+                    ? standalone.operationKey(context, item) : listWriter.operationKey(context, item);
             case LIST_ITEM -> listWriter.memberKey(context, item);
             default -> ImportUnitApplier.super.sourceKey(context, item);
         };
@@ -73,7 +76,8 @@ public class CollectionImportApplier implements ImportUnitApplier {
         String description = text(payload, "description");
         UUID linkedListId = linkedListId(item);
         ImportSourceKey identityKey = listIdentity(item);
-        ImportSourceKey operationKey = listWriter.operationKey(context, item);
+        ImportSourceKey operationKey = standalone.isStandaloneList(context)
+                ? standalone.operationKey(context, item) : listWriter.operationKey(context, item);
         long itemCount = itemRepository.countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
                 context.jobId(), context.planGeneration(), item.getSourceId(), ImportRecordKind.LIST_ITEM);
         JsonNode declaredCount = payload.get("sourceItemCount");
@@ -89,7 +93,8 @@ public class CollectionImportApplier implements ImportUnitApplier {
         if (plan.declaredItemCount() != null && plan.declaredItemCount() != plan.itemCount()) {
             throw new ListItemCountMismatchException(plan.declaredItemCount(), plan.itemCount());
         }
-        listWriter.apply(context, plan);
+        if (standalone.isStandaloneList(context)) standalone.apply(context, plan);
+        else listWriter.apply(context, plan);
     }
 
     private void applyWatchlistBatch(ImportExecutionContext context) {
