@@ -442,7 +442,13 @@ public class ImportUnitTransaction {
                 .payloadJson(writeJson(record.payload()))
                 .resolvedTargetJson(record.target() == null ? null : writeJson(record.target()))
                 .outcome(record.kind() == ImportRecordKind.LIST_METADATA && record.target() == null
-                        ? "RESOLVED" : null)
+                        ? record.payload().path("issueCode").isTextual() ? "NORMALIZATION_ISSUE" : "RESOLVED" : null)
+                .issue(record.kind() == ImportRecordKind.LIST_METADATA
+                        && record.payload().path("issueCode").isTextual()
+                        ? record.payload().path("issueExplanation").isTextual()
+                            ? record.payload().path("issueExplanation").asString()
+                            : record.payload().path("issueCode").asString()
+                        : null)
                 .ordinal(record.ordinal())
                 .build();
         return item;

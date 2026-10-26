@@ -94,8 +94,9 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (namespace.length() > 255) throw new IllegalArgumentException("Import source namespace is too long");
         ZoneId zone = parseZone(timeZone);
         LocalDateTime now = LocalDateTime.now(clock);
-        ImportJobState initialState = inputKind == ImportInputKind.PLATFORM_ARCHIVE
-                ? ImportJobState.ANALYZING : ImportJobState.RESOLVING;
+        boolean requiresNormalization = inputKind == ImportInputKind.PLATFORM_ARCHIVE
+                || inputKind == ImportInputKind.SINGLE_LIST || inputKind == ImportInputKind.SINGLE_WATCHLIST;
+        ImportJobState initialState = requiresNormalization ? ImportJobState.ANALYZING : ImportJobState.RESOLVING;
         return importJobRepository.save(ImportJob.builder()
                 .userId(ownerId)
                 .inputKind(inputKind)
@@ -109,7 +110,8 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
                 .timezone(zone.getId())
                 .storageKey(storageKey)
                 .uploadSizeBytes(uploadBytes)
-                .workPhase(inputKind == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT" : "RESOLVE")
+                .workPhase(inputKind == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT"
+                        : requiresNormalization ? "NORMALIZE" : "RESOLVE")
                 .workPending(false)
                 .createdAt(now)
                 .updatedAt(now)

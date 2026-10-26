@@ -145,9 +145,11 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         job.setPreviewVersion(nextVersion);
         job.setSelectionJson(storedSelection);
         job.setCheckpoint(null);
-        job.setState(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
-                ? ImportJobState.ANALYZING : ImportJobState.RESOLVING);
-        job.setWorkPhase(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "NORMALIZE" : "RESOLVE");
+        boolean normalizeSelection = job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
+                || job.getInputKind() == ImportInputKind.SINGLE_LIST
+                || job.getInputKind() == ImportInputKind.SINGLE_WATCHLIST;
+        job.setState(normalizeSelection ? ImportJobState.ANALYZING : ImportJobState.RESOLVING);
+        job.setWorkPhase(normalizeSelection ? "NORMALIZE" : "RESOLVE");
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
@@ -312,8 +314,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 || account.chars().anyMatch(Character::isISOControl)) {
             throw new BadRequestException("Source account identifier is invalid");
         }
-        if (job.getPlatform() == null || job.getInputKind() != ImportInputKind.PLATFORM_ARCHIVE) {
-            throw new BadRequestException("Source account identifier is only valid for platform archives");
+        if (job.getPlatform() == null || (job.getInputKind() != ImportInputKind.PLATFORM_ARCHIVE
+                && job.getInputKind() != ImportInputKind.SINGLE_LIST)) {
+            throw new BadRequestException("Source account identifier is only valid for platform lists or archives");
         }
         if (job.getSourceAccountId() != null) {
             if (!job.getSourceAccountId().equals(account)) {
@@ -321,8 +324,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             }
             return;
         }
-        if (job.getState() != ImportJobState.AWAITING_SELECTION
-                || importItemRepository.countByJobId(job.getId()) != 0) {
+        if (job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
+                && (job.getState() != ImportJobState.AWAITING_SELECTION
+                || importItemRepository.countByJobId(job.getId()) != 0)) {
             throw new ConflictException("Source account can only be bound before normalization");
         }
         job.setSourceAccountId(account);

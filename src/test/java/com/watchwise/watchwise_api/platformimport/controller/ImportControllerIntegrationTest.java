@@ -6,24 +6,15 @@ import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.platformimport.entity.ImportFileCleanupTask;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
-import com.watchwise.watchwise_api.platformimport.model.ImportCategoryInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
-import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
-import com.watchwise.watchwise_api.platformimport.model.ImportListInventory;
-import com.watchwise.watchwise_api.platformimport.model.ImportModeKey;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
-import com.watchwise.watchwise_api.platformimport.model.ImportReadContext;
-import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
-import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
-import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
 import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTaskRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
-import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -34,9 +25,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
 import org.springframework.mock.web.MockMultipartFile;
@@ -89,7 +77,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @AutoConfigureMockMvc
 @Testcontainers
-@Import(ImportControllerIntegrationTest.TestImportModeConfiguration.class)
 class ImportControllerIntegrationTest {
 
     @Container
@@ -161,7 +148,7 @@ class ImportControllerIntegrationTest {
         MvcResult result = mockMvc.perform(upload(owner, "list.json", "application/json", new byte[]{'[', ']'}))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.id").isNotEmpty())
-                .andExpect(jsonPath("$.state").value("RESOLVING"))
+                .andExpect(jsonPath("$.state").value("ANALYZING"))
                 .andExpect(jsonPath("$.storageKey").doesNotExist())
                 .andExpect(jsonPath("$.sourceNamespace").doesNotExist())
                 .andReturn();
@@ -172,7 +159,7 @@ class ImportControllerIntegrationTest {
         assertThat(job.getInputKind()).isEqualTo(ImportInputKind.SINGLE_LIST);
         assertThat(job.getSourceFormat()).isEqualTo(ImportSourceFormat.TRAKT_JSON);
         assertThat(job.getPlatform()).isEqualTo(ImportPlatform.TRAKT);
-        assertThat(job.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(job.getState()).isEqualTo(ImportJobState.ANALYZING);
         assertThat(job.getUploadSizeBytes()).isEqualTo(2);
         assertThat(job.getZipDigest()).matches("[a-f0-9]{64}");
         assertThat(job.isWorkPending()).isTrue();
@@ -475,7 +462,7 @@ class ImportControllerIntegrationTest {
                         .cookie(owner.accessToken(), owner.csrfToken())
                         .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.state").value("RESOLVING"));
+                .andExpect(jsonPath("$.state").value("ANALYZING"));
         assertThat(importJobRepository.findById(jobId).orElseThrow().isWorkPending()).isTrue();
     }
 
@@ -522,10 +509,10 @@ class ImportControllerIntegrationTest {
                         .cookie(owner.accessToken(), owner.csrfToken())
                         .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.state").value("RESOLVING"));
+                .andExpect(jsonPath("$.state").value("ANALYZING"));
 
         ImportJob persistedFailedJob = importJobRepository.findById(failedJobId).orElseThrow();
-        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.ANALYZING);
         assertThat(persistedFailedJob.isWorkPending()).isTrue();
     }
 
@@ -549,10 +536,10 @@ class ImportControllerIntegrationTest {
                         .cookie(failedOwner.accessToken(), failedOwner.csrfToken())
                         .header("X-XSRF-TOKEN", failedOwner.csrfToken().getValue()))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.state").value("RESOLVING"));
+                .andExpect(jsonPath("$.state").value("ANALYZING"));
 
         assertThat(importJobRepository.findById(failedJobId).orElseThrow().getState())
-                .isEqualTo(ImportJobState.RESOLVING);
+                .isEqualTo(ImportJobState.ANALYZING);
     }
 
     @Test
@@ -722,7 +709,7 @@ class ImportControllerIntegrationTest {
                         .header("X-XSRF-TOKEN", other.csrfToken().getValue()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
-        assertThat(importJobRepository.findById(jobId).orElseThrow().getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(importJobRepository.findById(jobId).orElseThrow().getState()).isEqualTo(ImportJobState.ANALYZING);
     }
 
     private int uploadAfterBarrier(RegisteredUser owner, CyclicBarrier start, byte[] content) throws Exception {
@@ -780,27 +767,4 @@ class ImportControllerIntegrationTest {
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
     }
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class TestImportModeConfiguration {
-        @Bean
-        ImportModeHandler testTraktListHandler() {
-            return new ImportModeHandler() {
-                @Override
-                public ImportModeKey mode() {
-                    return new ImportModeKey(ImportInputKind.SINGLE_LIST, ImportSourceFormat.TRAKT_JSON);
-                }
-
-                @Override
-                public ImportInventory inspect(ImportReadContext context) {
-                    return new ImportInventory(List.of(new ImportCategoryInventory(ImportRecordKind.LIST_ITEM, 0, true)),
-                            List.of(new ImportListInventory("list-1", "List", null, 0, "COMPLETE")));
-                }
-
-                @Override
-                public void normalize(ImportReadContext context, ImportSelection selection,
-                                      java.util.function.Consumer<NormalizedImportRecord> sink) {
-                }
-            };
-        }
-    }
 }

@@ -72,8 +72,7 @@ public class CollectionImportApplier implements ImportUnitApplier {
         String name = text(payload, "title");
         String description = text(payload, "description");
         UUID linkedListId = linkedListId(item);
-        ImportSourceKey identityKey = new ImportSourceKey(item.getSourceNamespace(),
-                item.getObjectKind(), item.getSourceId());
+        ImportSourceKey identityKey = listIdentity(item);
         ImportSourceKey operationKey = listWriter.operationKey(context, item);
         long itemCount = itemRepository.countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
                 context.jobId(), context.planGeneration(), item.getSourceId(), ImportRecordKind.LIST_ITEM);
@@ -207,6 +206,19 @@ public class CollectionImportApplier implements ImportUnitApplier {
             return value.isTextual() ? UUID.fromString(value.asString()) : null;
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Imported list target is invalid", exception);
+        }
+    }
+
+    private ImportSourceKey listIdentity(ImportItem item) {
+        try {
+            JsonNode identity = objectMapper.readTree(item.getPayloadJson()).path("resolution").path("listIdentity");
+            if (identity.isObject()) {
+                return new ImportSourceKey(identity.path("namespace").asString(),
+                        identity.path("objectKind").asString(), identity.path("sourceId").asString());
+            }
+            return new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Resolved list identity is invalid", exception);
         }
     }
 

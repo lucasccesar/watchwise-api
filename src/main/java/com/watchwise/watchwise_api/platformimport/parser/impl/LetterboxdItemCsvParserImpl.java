@@ -138,6 +138,29 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
         return List.copyOf(found);
     }
 
+    @Override
+    public void parseListItems(Reader input, ImportReadContext context, String sourcePath,
+                               Consumer<NormalizedImportRecord> sink) {
+        boolean[] headerSeen = {false};
+        long[] rowNumber = {0};
+        csv.read(input, row -> {
+            if (row.isEmpty() || row.stream().allMatch(String::isEmpty)) return;
+            rowNumber[0]++;
+            if (!headerSeen[0]) {
+                if (!WATCHLIST_HEADER.equals(row)) {
+                    throw failure(sourcePath, rowNumber[0], "header", "Unexpected CSV header");
+                }
+                headerSeen[0] = true;
+                return;
+            }
+            NormalizedImportRecord item = normalize(row, WATCHLIST_HEADER, context, sourcePath,
+                    ImportRecordKind.LIST_ITEM, Math.toIntExact(rowNumber[0] - 2), sourcePath);
+            sink.accept(new NormalizedImportRecord(item.itemId(), item.kind(), item.sourceKey(),
+                    null, item.target(), item.payload(), item.ordinal()));
+        });
+        if (!headerSeen[0]) throw failure(sourcePath, 1, "header", "CSV header is missing");
+    }
+
     private NormalizedImportRecord normalize(List<String> row, List<String> header, ImportReadContext context,
                                              String path, ImportRecordKind kind, int ordinal, String parentSourceId) {
         requireSize(row, header, path, ordinal + 2L);

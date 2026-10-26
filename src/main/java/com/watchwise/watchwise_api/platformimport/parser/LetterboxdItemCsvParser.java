@@ -15,4 +15,7 @@ public interface LetterboxdItemCsvParser {
 
     List<ParsedListMetadata> parseList(Reader input, ImportReadContext context, String sourcePath,
                                        Consumer<NormalizedImportRecord> sink);
+
+    void parseListItems(Reader input, ImportReadContext context, String sourcePath,
+                        Consumer<NormalizedImportRecord> sink);
 }

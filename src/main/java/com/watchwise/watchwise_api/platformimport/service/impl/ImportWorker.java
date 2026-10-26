@@ -80,6 +80,7 @@ public class ImportWorker {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final ImportLimits importLimits;
+    private final StandaloneListIdentityResolver standaloneListIdentityResolver;
     private final boolean enabled;
 
     public ImportWorker(JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
@@ -90,7 +91,7 @@ public class ImportWorker {
                         DeferredOpinionReplayStager deferredOpinionReplayStager,
                         WatchScopeSnapshotPreparer watchScopeSnapshotPreparer,
                         ObjectMapper objectMapper, Clock clock,
-                        ImportLimits importLimits,
+                        ImportLimits importLimits, StandaloneListIdentityResolver standaloneListIdentityResolver,
                         @Value("${app.import.worker.enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -105,6 +106,7 @@ public class ImportWorker {
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.importLimits = importLimits;
+        this.standaloneListIdentityResolver = standaloneListIdentityResolver;
         this.enabled = enabled;
     }
 
@@ -205,7 +207,9 @@ public class ImportWorker {
                 throw new RecordLimitExceededException();
             }
             if (globalOrdinal <= lastOrdinal.get()) return;
-            if (!context.sourceNamespace().equals(record.sourceKey().namespace())) {
+            if (!context.sourceNamespace().equals(record.sourceKey().namespace())
+                    && !(job.inputKind() == ImportInputKind.SINGLE_LIST
+                    && localStandaloneNamespace(job, context).equals(record.sourceKey().namespace()))) {
                 throw new IllegalStateException("Normalized import source namespace does not match its job");
             }
             if (acceptedCount.get() >= importLimits.maxRecords()) {
@@ -229,6 +233,15 @@ public class ImportWorker {
         unitTransaction.finishNormalization(context);
     }
 
+    private String localStandaloneNamespace(ClaimedJob job, ImportExecutionContext context) {
+        String platform = switch (job.sourceFormat()) {
+            case TRAKT_JSON -> "TRAKT";
+            case LETTERBOXD_CSV -> "LETTERBOXD";
+            default -> throw new IllegalStateException("Standalone source format is invalid");
+        };
+        return platform + ":OWNER:" + context.ownerId();
+    }
+
     private void persistNormalized(ImportExecutionContext context, List<NormalizedImportRecord> batch,
                                    AtomicLong lastOrdinal, String parserVersion) {
         List<NormalizedImportRecord> immutable = List.copyOf(batch);
@@ -250,9 +263,13 @@ public class ImportWorker {
             if (unavailable) break;
         }
 
-        if (!unavailable) markCollectionLengthIssues(context);
-
         ImportSelection selection = selection(job.selectionJson());
+        if (!unavailable) {
+            markCollectionLengthIssues(context);
+            if (job.inputKind() == ImportInputKind.SINGLE_LIST) {
+                resolveStandaloneListIdentities(job, context, selection);
+            }
+        }
         ImportUnitTransaction.ResolutionState state;
         if (unavailable) {
             state = ImportUnitTransaction.ResolutionState.RETRY;
@@ -274,6 +291,53 @@ public class ImportWorker {
             }
         }
         unitTransaction.settleResolution(context, state);
+    }
+
+    private void resolveStandaloneListIdentities(ClaimedJob job, ImportExecutionContext context,
+                                                  ImportSelection selection) {
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> page = itemRepository.findItemsOfKindAfter(context.jobId(),
+                    context.planGeneration(), "LIST_METADATA", afterOrdinal, afterId.toString(), MAX_BATCH_SIZE);
+            if (page.isEmpty()) break;
+            afterOrdinal = page.getLast().getOrdinal();
+            afterId = page.getLast().getId();
+            for (ImportItem item : page) {
+                JsonNode root;
+                try {
+                    root = objectMapper.readTree(item.getPayloadJson());
+                } catch (JacksonException exception) {
+                    throw new IllegalStateException("Staged list metadata is invalid", exception);
+                }
+                if (root.path("issueCode").asString().equals("LIST_ITEM_EXPORT_REQUIRED")) continue;
+                var result = standaloneListIdentityResolver.resolve(context.ownerId(), job.id(),
+                        job.sourceFormat(), selection.metadata(), item.getId());
+                if (result.issueCode() != null) {
+                    item.setOutcome("NORMALIZATION_ISSUE");
+                    item.setIssue(result.issueCode());
+                } else {
+                    ObjectNode payload = (ObjectNode) root;
+                    ObjectNode resolution = payload.path("resolution").isObject()
+                            ? (ObjectNode) payload.path("resolution") : payload.putObject("resolution");
+                    ObjectNode identity = resolution.putObject("listIdentity");
+                    identity.put("namespace", result.key().namespace());
+                    identity.put("objectKind", result.key().objectKind());
+                    identity.put("sourceId", result.key().sourceId());
+                    try {
+                        item.setPayloadJson(objectMapper.writeValueAsString(payload));
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException("Resolved list identity could not be stored", exception);
+                    }
+                    if ("NEEDS_LIST_NAME".equals(item.getIssue())
+                            || "NEEDS_SOURCE_ACCOUNT".equals(item.getIssue())) {
+                        item.setOutcome("RESOLVED");
+                        item.setIssue(null);
+                    }
+                }
+            }
+            itemRepository.saveAll(page);
+        }
     }
 
     private void stageDeferredOpinionReplays(ImportExecutionContext context) {
@@ -396,19 +460,37 @@ public class ImportWorker {
                         continue;
                     }
                     String issue = collectionLengthIssue(item);
+                    boolean missingListName = item.getNormalizedKind() == ImportRecordKind.LIST_METADATA
+                            && item.getIssue() != null && item.getIssue().equals("NEEDS_LIST_NAME");
                     boolean collectionIssue = item.getIssue() != null
                             && (item.getIssue().startsWith("LIST_ITEM_DESCRIPTION_TOO_LONG")
                             || item.getIssue().startsWith("LIST_METADATA_FIELDS_TOO_LONG"));
                     if (issue != null) {
                         item.setOutcome("NORMALIZATION_ISSUE");
                         item.setIssue(issue);
-                    } else if (collectionIssue && "NORMALIZATION_ISSUE".equals(item.getOutcome())) {
+                    } else if (missingListName && !hasListName(item)) {
+                        item.setOutcome("NORMALIZATION_ISSUE");
+                        item.setIssue("NEEDS_LIST_NAME");
+                    } else if ((collectionIssue || missingListName)
+                            && "NORMALIZATION_ISSUE".equals(item.getOutcome())) {
                         item.setOutcome("RESOLVED");
                         item.setIssue(null);
                     }
                 }
                 itemRepository.saveAll(page);
             }
+        }
+    }
+
+    private boolean hasListName(ImportItem item) {
+        try {
+            JsonNode root = objectMapper.readTree(item.getPayloadJson());
+            JsonNode edited = root.path("resolution").path("fields").path("TITLE");
+            JsonNode source = root.path("source").isObject() ? root.path("source") : root;
+            JsonNode value = edited.isTextual() ? edited : source.path("title");
+            return value.isTextual() && !value.asString().isBlank();
+        } catch (tools.jackson.core.JacksonException exception) {
+            return false;
         }
     }
 
