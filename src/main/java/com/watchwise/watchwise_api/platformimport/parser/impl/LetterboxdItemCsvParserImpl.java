@@ -23,8 +23,8 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
     private static final List<String> WATCHED_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI");
     private static final List<String> RATING_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI", "Rating");
     private static final List<String> WATCHLIST_HEADER = WATCHED_HEADER;
-    private static final List<String> LIST_METADATA_HEADER = List.of("Name", "Description", "Tags", "URL");
-    private static final List<String> LIST_ITEM_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI", "Rating", "Watched Date");
+    private static final List<String> LIST_METADATA_HEADER = List.of("Date", "Name", "Tags", "URL", "Description");
+    private static final List<String> LIST_ITEM_HEADER = List.of("Position", "Name", "Year", "URL", "Description");
     private final CsvRecordReader csv;
     private final ObjectMapper mapper;
 
@@ -98,6 +98,10 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
             if (row.isEmpty() || row.stream().allMatch(String::isEmpty)) return;
             switch (state[0]) {
                 case VERSION -> {
+                    if (LIST_METADATA_HEADER.equals(row)) {
+                        state[0] = ListState.METADATA_ROW;
+                        return;
+                    }
                     if (row.size() != 1 || !"7".equals(row.getFirst()))
                         throw failure(sourcePath, recordNo[0], "version", "Expected Letterboxd list version 7");
                     state[0] = ListState.METADATA_HEADER;
@@ -108,11 +112,13 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
                 }
                 case METADATA_ROW -> {
                     requireSize(row, LIST_METADATA_HEADER, sourcePath, recordNo[0]);
-                    ParsedListMetadata parsed = new ParsedListMetadata(row.get(0), blankToNull(row.get(1)), splitTags(row.get(2)), blankToNull(row.get(3)));
+                    ParsedListMetadata parsed = new ParsedListMetadata(row.get(1), blankToNull(row.get(4)), splitTags(row.get(2)), blankToNull(row.get(3)));
                     found.add(parsed);
                     listSourceId[0] = parsed.sourceUri() == null ? sourcePath : parsed.sourceUri();
                     var payload = mapper.createObjectNode();
                     payload.put("title", parsed.name());
+                    String sourceDate = date(row.get(0), sourcePath, recordNo[0], "Date");
+                    if (sourceDate != null) payload.put("sourceDate", sourceDate);
                     if (parsed.description() != null) payload.put("description", parsed.description());
                     payload.set("tags", mapper.valueToTree(parsed.tags()));
                     if (parsed.sourceUri() != null) payload.put("sourceUri", parsed.sourceUri());
@@ -168,8 +174,9 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
         for (int i = 0; i < header.size(); i++) values.put(header.get(i), row.get(i));
         String title = values.get("Name");
         if (title == null || title.isBlank()) throw failure(path, ordinal + 2L, "Name", "Title is required");
-        String uri = values.get("Letterboxd URI");
-        if (uri == null || uri.isBlank()) throw failure(path, ordinal + 2L, "Letterboxd URI", "URI is required");
+        String uriField = kind == ImportRecordKind.LIST_ITEM && header.equals(LIST_ITEM_HEADER) ? "URL" : "Letterboxd URI";
+        String uri = values.get(uriField);
+        if (uri == null || uri.isBlank()) throw failure(path, ordinal + 2L, uriField, "URI is required");
         Integer year = parseYear(values.get("Year"), path, ordinal + 2L);
         String date = date(values.get("Date"), path, ordinal + 2L, "Date");
         String watched = values.containsKey("Watched Date") ? date(values.get("Watched Date"), path, ordinal + 2L, "Watched Date") : null;
@@ -183,6 +190,18 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
         if (date != null) payload.put("sourceRecordedOn", date);
         if (watched != null) payload.put("watchedOn", watched);
         if (score != null) payload.put("score", score);
+        if (header.equals(LIST_ITEM_HEADER)) {
+            int position;
+            try {
+                position = Integer.parseInt(values.get("Position"));
+                if (position < 1) throw new NumberFormatException();
+            } catch (NumberFormatException ex) {
+                throw failure(path, ordinal + 2L, "Position", "Invalid position");
+            }
+            payload.put("rank", position);
+            payload.put("position", position);
+            if (!values.get("Description").isBlank()) payload.put("description", values.get("Description"));
+        }
         if (values.containsKey("Review") && !values.get("Review").isEmpty()) payload.put("review", values.get("Review"));
         if (values.containsKey("Rewatch") && !values.get("Rewatch").isEmpty()) payload.put("sourceRewatch", Boolean.parseBoolean(values.get("Rewatch")));
         if (values.containsKey("Tags")) payload.set("tags", mapper.valueToTree(splitTags(values.get("Tags"))));

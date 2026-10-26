@@ -45,7 +45,7 @@ class SingleFileItemHandlerTest {
     private static final ImportReadContext CONTEXT = new ImportReadContext(OWNER, JOB, "synthetic", "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC);
     private static final ImportSelection SELECTION = new ImportSelection(false, false, Set.of(), null);
     private static final String TRAKT = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Example\",\"year\":2001,\"ids\":{\"tmdb\":11,\"trakt\":22}}}]";
-    private static final String LIST = "7\nName,Description,Tags,URL\nFavorites,Notes,,https://letterboxd.com/alice/list/favorites/\nDate,Name,Year,Letterboxd URI,Rating,Watched Date\n2026-01-01,Example,2001,https://boxd.it/AbC,,\n";
+    private static final String LIST = "7\nDate,Name,Tags,URL,Description\n2026-01-01,Favorites,curated,https://letterboxd.com/alice/list/favorites/,Notes\nPosition,Name,Year,URL,Description\n1,Example,2001,https://boxd.it/AbC,Item note\n";
     private static final String WATCHLIST = "Date,Name,Year,Letterboxd URI\n2026-01-01,Example,2001,https://boxd.it/AbC\n";
 
     @Test
@@ -91,7 +91,27 @@ class SingleFileItemHandlerTest {
         assertThat(records).extracting(NormalizedImportRecord::kind)
                 .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM);
         assertThat(records.getFirst().payload().path("title").asString()).isEqualTo("Favorites");
+        assertThat(records.getFirst().payload().path("sourceDate").asString()).isEqualTo("2026-01-01");
+        assertThat(records.getFirst().payload().path("tags").get(0).asString()).isEqualTo("curated");
         assertThat(records.getLast().parentSourceId()).isEqualTo(records.getFirst().sourceKey().sourceId());
+        assertThat(records.getLast().payload().path("sourceContentUri").asString()).isEqualTo("https://boxd.it/AbC");
+        assertThat(records.getLast().payload().path("sourceQuery").path("title").asString()).isEqualTo("Example");
+        assertThat(records.getLast().payload().path("rank").asInt()).isEqualTo(1);
+        assertThat(records.getLast().payload().path("position").asInt()).isEqualTo(1);
+        assertThat(records.getLast().payload().path("description").asString()).isEqualTo("Item note");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Detect Versionless Native List With BOM - When Single List Mode Is Selected")
+    void shouldDetectVersionlessNativeListWithBomWhenSingleListModeIsSelected() throws Exception {
+        String versionless = "\uFEFF" + LIST.substring(LIST.indexOf("Date,Name"));
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        listHandler(ImportSourceFormat.LETTERBOXD_CSV, versionless)
+                .normalize(CONTEXT, SELECTION, records::add);
+
+        assertThat(records).extracting(NormalizedImportRecord::kind)
+                .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM);
     }
 
     @Test
@@ -123,6 +143,45 @@ class SingleFileItemHandlerTest {
         assertThat(records).extracting(NormalizedImportRecord::kind)
                 .containsExactly(ImportRecordKind.WATCHLIST_ITEM);
         assertThat(records.getFirst().parentSourceId()).isNull();
+        assertThat(records.getFirst().payload().path("rank").asInt()).isEqualTo(1);
+        assertThat(records.getFirst().payload().path("description").asString()).isEqualTo("Item note");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Detect Letterboxd List With BOM - When Single Watchlist Mode Is Selected")
+    void shouldDetectLetterboxdListWithBomWhenSingleWatchlistModeIsSelected() throws Exception {
+        List<NormalizedImportRecord> records = new ArrayList<>();
+        watchlistHandler(ImportSourceFormat.LETTERBOXD_CSV, "\uFEFF" + LIST)
+                .normalize(CONTEXT, SELECTION, records::add);
+
+        assertThat(records).extracting(NormalizedImportRecord::kind)
+                .containsExactly(ImportRecordKind.WATCHLIST_ITEM);
+        assertThat(records.getFirst().payload().path("sourceContentUri").asString()).isEqualTo("https://boxd.it/AbC");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Parse BOM Prefixed Watchlist - When Single Watchlist Mode Is Selected")
+    void shouldParseBomPrefixedWatchlistWhenSingleWatchlistModeIsSelected() throws Exception {
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        watchlistHandler(ImportSourceFormat.LETTERBOXD_CSV, "\uFEFF" + WATCHLIST)
+                .normalize(CONTEXT, SELECTION, records::add);
+
+        assertThat(records).extracting(NormalizedImportRecord::kind)
+                .containsExactly(ImportRecordKind.WATCHLIST_ITEM);
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Reject Unsupported List Version - When Either Standalone Mode Reads It")
+    void shouldRejectUnsupportedListVersionWhenEitherStandaloneModeReadsIt() throws Exception {
+        String unsupported = LIST.replaceFirst("^7", "8");
+
+        assertThatThrownBy(() -> listHandler(ImportSourceFormat.LETTERBOXD_CSV, unsupported)
+                .normalize(CONTEXT, SELECTION, ignored -> {}))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("version 7");
+        assertThatThrownBy(() -> watchlistHandler(ImportSourceFormat.LETTERBOXD_CSV, unsupported)
+                .normalize(CONTEXT, SELECTION, ignored -> {}))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("version 7");
     }
 
     @Test

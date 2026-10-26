@@ -194,11 +194,11 @@ class PlatformArchiveImportIntegrationTest {
                 new ImportTarget.ContentTarget(MediaReference.movie(movieId)), AliasTrust.USER_CONFIRMED);
 
         String listCsv = "7\n"
-                + "Name,Description,Tags,URL\n"
-                + "Sci-fi discoveries,Personal selection,science fiction,"
-                + "https://letterboxd.com/lucas/list/sci-fi-discoveries/\n"
-                + "Date,Name,Year,Letterboxd URI,Rating,Watched Date\n"
-                + ",Primer,2004,https://letterboxd.com/film/primer/,4.5,\n";
+                + "Date,Name,Tags,URL,Description\n"
+                + "2026-10-20,Sci-fi discoveries,science fiction,"
+                + "https://letterboxd.com/lucas/list/sci-fi-discoveries/,Personal selection\n"
+                + "Position,Name,Year,URL,Description\n"
+                + "1,Primer,2004,https://letterboxd.com/film/primer/,Personal item note\n";
         ImportJobDTO job = createAndInspect(owner, zip(Map.of("data/list-v7.csv", listCsv)),
                 ImportSourceFormat.LETTERBOXD_ZIP, ImportPlatform.LETTERBOXD, null);
 
@@ -226,6 +226,10 @@ class PlatformArchiveImportIntegrationTest {
             assertThat(list.getName()).isEqualTo("Sci-fi discoveries");
             assertThat(list.getDescription()).isEqualTo("Personal selection");
             assertThat(list.getVisibility()).isEqualTo(UserListVisibility.PUBLIC);
+            assertThat(jdbc.queryForObject("select description from user_list_items item "
+                            + "join contents content on content.id = item.content_id "
+                            + "where item.user_list_id = ? and content.type = 'MOVIE' and content.tmdb_id = ?",
+                    String.class, list.getId(), movieId)).isEqualTo("Personal item note");
             assertThat(jdbc.queryForObject("select count(*) from user_list_items item "
                             + "join contents content on content.id = item.content_id "
                             + "where item.user_list_id = ? and content.type = 'MOVIE' and content.tmdb_id = ?",

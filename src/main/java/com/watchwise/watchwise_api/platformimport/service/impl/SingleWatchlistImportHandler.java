@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser;
+import com.watchwise.watchwise_api.platformimport.parser.LetterboxdListHeader;
 import com.watchwise.watchwise_api.platformimport.parser.TraktItemParser;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
@@ -49,10 +50,7 @@ public class SingleWatchlistImportHandler implements ImportModeHandler {
                 traktParser.parse(input, context, "watchlist.json", ImportRecordKind.WATCHLIST_ITEM, sink);
             } else {
                 BufferedInputStream buffered = new BufferedInputStream(input);
-                buffered.mark(4);
-                int first = buffered.read();
-                buffered.reset();
-                if (first == '7') {
+                if (LetterboxdListHeader.identifiesList(buffered)) {
                     letterboxdParser.parseList(new InputStreamReader(buffered, StandardCharsets.UTF_8), context,
                             "list-v7.csv", record -> {
                                 if (record.kind() != ImportRecordKind.LIST_ITEM) return;

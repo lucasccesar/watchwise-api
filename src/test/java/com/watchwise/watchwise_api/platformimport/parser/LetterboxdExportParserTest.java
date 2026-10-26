@@ -125,7 +125,7 @@ class LetterboxdExportParserTest {
                         ImportRecordKind.DIARY_EVENT, 2L, true)));
         assertThat(inventory.lists()).singleElement().satisfies(list -> {
             assertThat(list.name()).isEqualTo("Synthetic List");
-            assertThat(list.itemCount()).isEqualTo(1);
+            assertThat(list.itemCount()).isEqualTo(2);
         });
     }
 
@@ -143,7 +143,7 @@ class LetterboxdExportParserTest {
     }
 
     @Test
-    @DisplayName("[parseList] Should Parse Metadata And Items As Csv Records - When Version Seven Sections Are Present")
+    @DisplayName("[parseList] Should Parse Native Metadata And Items - When Version Seven Sections Are Present")
     void shouldParseMetadataAndItemsAsCsvRecordsWhenVersionSevenSectionsArePresent() throws Exception {
         List<NormalizedImportRecord> records = new ArrayList<>();
         var parser = new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits()));
@@ -156,8 +156,54 @@ class LetterboxdExportParserTest {
                 assertThat(list.description()).isEqualTo("A list, with commas");
             });
         assertThat(records).extracting(NormalizedImportRecord::kind)
+                .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM, ImportRecordKind.LIST_ITEM);
+        if (records.size() == 3) {
+            assertThat(records.get(0).payload().path("sourceDate").asString()).isEqualTo("2026-10-20");
+            assertThat(records.get(0).payload().path("sourceUri").asString())
+                    .isEqualTo("https://letterboxd.com/user/list/synthetic/");
+            assertThat(records.get(0).payload().path("tags").toString()).isEqualTo("[\"sample\",\"archive\"]");
+            assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(0, 0, 1);
+            assertThat(records.get(1).payload().path("title").asString()).isEqualTo("Listed Film");
+            assertThat(records.get(1).payload().path("sourceContentUri").asString())
+                    .isEqualTo("https://letterboxd.com/film/listed/");
+            assertThat(records.get(1).payload().path("sourceQuery").path("title").asString()).isEqualTo("Listed Film");
+            assertThat(records.get(1).payload().path("rank").asInt()).isEqualTo(1);
+            assertThat(records.get(1).payload().path("position").asInt()).isEqualTo(1);
+            assertThat(records.get(1).payload().path("description").asString()).isEqualTo("Item note, with comma");
+            assertThat(records.get(2).payload().path("rank").asInt()).isEqualTo(2);
+            assertThat(records.get(2).payload().path("description").asString()).isEqualTo("Second note");
+        }
+    }
+
+    @Test
+    @DisplayName("[parseList] Should Accept Native Metadata Header Without Version - When Exact Header Identifies Format")
+    void shouldAcceptNativeMetadataHeaderWithoutVersionWhenExactHeaderIdentifiesFormat() {
+        String input = "Date,Name,Tags,URL,Description\n"
+                + "2026-10-20,Versionless List,curated,https://letterboxd.com/user/list/versionless/,Notes\n"
+                + "Position,Name,Year,URL,Description\n"
+                + "1,Film,2020,https://letterboxd.com/film/film/,Item note\n";
+        List<NormalizedImportRecord> records = new ArrayList<>();
+        var parser = new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits()));
+
+        parser.parseList(new java.io.StringReader(input), CONTEXT, "list-v7.csv", records::add);
+
+        assertThat(records).extracting(NormalizedImportRecord::kind)
                 .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM);
-        if (records.size() == 2) assertThat(records.get(1).payload().path("title").asString()).isEqualTo("Listed Film");
+        assertThat(records.getFirst().payload().path("title").asString()).isEqualTo("Versionless List");
+        assertThat(records.getLast().payload().path("rank").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[parseList] Should Require Version For Legacy Metadata Header - When Version Row Is Missing")
+    void shouldRequireVersionForLegacyMetadataHeaderWhenVersionRowIsMissing() {
+        String input = "Name,Description,Tags,URL\nFavorites,Notes,,https://letterboxd.com/user/list/favorites/\n"
+                + "Date,Name,Year,Letterboxd URI,Rating,Watched Date\n";
+        var parser = new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits()));
+
+        assertThatThrownBy(() -> parser.parseList(new java.io.StringReader(input), CONTEXT,
+                "list-v7.csv", ignored -> {}))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class)
+                .hasMessageContaining("version 7");
     }
 
     @Test

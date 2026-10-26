@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser;
+import com.watchwise.watchwise_api.platformimport.parser.LetterboxdListHeader;
 import com.watchwise.watchwise_api.platformimport.parser.TraktItemParser;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
@@ -64,7 +65,7 @@ public class SingleListImportHandler implements ImportModeHandler {
     private void parseLetterboxd(ImportReadContext context, ImportSelection selection,
                                  Consumer<NormalizedImportRecord> sink) {
         try (var input = store.open(context.storageKey()); var buffered = new BufferedInputStream(input)) {
-            if (isVersionSevenList(buffered)) {
+            if (LetterboxdListHeader.identifiesList(buffered)) {
                 if (context.sourceNamespace().contains(":ACCOUNT:")) {
                     letterboxdParser.parseList(new InputStreamReader(buffered, StandardCharsets.UTF_8), context,
                             "list-v7.csv", sink);
@@ -77,18 +78,6 @@ public class SingleListImportHandler implements ImportModeHandler {
         } catch (IOException exception) {
             throw new BadRequestException("Standalone list file could not be read");
         }
-    }
-
-    private boolean isVersionSevenList(BufferedInputStream input) throws IOException {
-        input.mark(4);
-        int first = input.read();
-        if (first == 0xEF) {
-            int second = input.read();
-            int third = input.read();
-            if (second == 0xBB && third == 0xBF) first = input.read();
-        }
-        input.reset();
-        return first == '7';
     }
 
     private void parseLocalLetterboxdList(ImportReadContext context, Consumer<NormalizedImportRecord> sink) {
