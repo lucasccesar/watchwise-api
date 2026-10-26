@@ -3,13 +3,19 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportWatchScopePreviewDTO;
+import com.watchwise.watchwise_api.platformimport.entity.ImportDeferredRecord;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
 import com.watchwise.watchwise_api.platformimport.model.ImportDatePrecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
@@ -21,7 +27,10 @@ import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportResolutionOperation;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
+import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
+import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
+import com.watchwise.watchwise_api.platformimport.repository.ImportDeferredRecordRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.ExternalContentAliasService;
@@ -29,6 +38,7 @@ import com.watchwise.watchwise_api.platformimport.service.ImportModeRegistry;
 import com.watchwise.watchwise_api.platformimport.service.ImportPreviewService;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -54,6 +64,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -71,9 +82,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private final ImportJobRepository importJobRepository;
     private final ImportItemRepository importItemRepository;
+    private final ImportDeferredRecordRepository deferredRecordRepository;
+    private final DeferredOpinionReplayStager deferredOpinionReplayStager;
+    private final CalendarScheduleCompletenessRepository scheduleCompletenessRepository;
     private final ImportModeRegistry importModeRegistry;
     private final ExternalContentAliasService externalContentAliasService;
     private final UserListRepository userListRepository;
+    private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final ImportedReviewTextNormalizer reviewTextNormalizer;
     private final ImportLimits importLimits;
@@ -83,9 +98,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     public ImportPreviewServiceImpl(
             ImportJobRepository importJobRepository,
             ImportItemRepository importItemRepository,
+            ImportDeferredRecordRepository deferredRecordRepository,
+            DeferredOpinionReplayStager deferredOpinionReplayStager,
+            CalendarScheduleCompletenessRepository scheduleCompletenessRepository,
             ImportModeRegistry importModeRegistry,
             ExternalContentAliasService externalContentAliasService,
             UserListRepository userListRepository,
+            UserRepository userRepository,
             ObjectMapper objectMapper,
             ImportedReviewTextNormalizer reviewTextNormalizer,
             ImportLimits importLimits,
@@ -93,9 +112,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             PageRequestFactory pageRequestFactory) {
         this.importJobRepository = importJobRepository;
         this.importItemRepository = importItemRepository;
+        this.deferredRecordRepository = deferredRecordRepository;
+        this.deferredOpinionReplayStager = deferredOpinionReplayStager;
+        this.scheduleCompletenessRepository = scheduleCompletenessRepository;
         this.importModeRegistry = importModeRegistry;
         this.externalContentAliasService = externalContentAliasService;
         this.userListRepository = userListRepository;
+        this.userRepository = userRepository;
         this.objectMapper = objectMapper;
         this.reviewTextNormalizer = reviewTextNormalizer;
         this.importLimits = importLimits;
@@ -112,6 +135,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         requireMutable(job);
         validateSelection(job, selection);
         importModeRegistry.require(new ImportModeKey(job.getInputKind(), job.getSourceFormat()));
+        bindSourceAccount(job, selection);
 
         long nextVersion = nextVersion(job.getPreviewVersion());
         long nextGeneration = nextVersion(readPlanGeneration(job.getSelectionJson()));
@@ -155,17 +179,20 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         Map<UUID, ImportItem> itemsById = loadAndValidateItems(jobId, generation, requestedIds);
         Set<UUID> changedItemIds = new LinkedHashSet<>();
         Map<UUID, PreparedTargetResolution> preparedTargets = new LinkedHashMap<>();
+        Map<UUID, ConfirmedWatchScopeSnapshot> confirmedWatchScopes = new LinkedHashMap<>();
         for (ImportResolutionOperation decision : decisions) {
             if (!changedItemIds.add(decision.itemId())) {
                 throw new BadRequestException("Only one resolution per item is allowed in a request");
             }
-            PreparedTargetResolution preparedTarget = validateOperation(ownerId, decision, itemsById);
+            PreparedTargetResolution preparedTarget = validateOperation(
+                    ownerId, decision, itemsById, confirmedWatchScopes);
             if (preparedTarget != null) preparedTargets.put(decision.itemId(), preparedTarget);
         }
         validateFixedCategoryConstraints(jobId, generation, decisions, itemsById);
 
         for (ImportResolutionOperation decision : decisions) {
-            applyDecision(ownerId, decision, itemsById, preparedTargets.get(decision.itemId()));
+            applyDecision(ownerId, job, decision, itemsById, preparedTargets.get(decision.itemId()),
+                    confirmedWatchScopes.get(decision.itemId()));
         }
         importItemRepository.saveAll(changedItems(decisions, itemsById));
 
@@ -192,7 +219,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         PageRequest pageable = pageRequestFactory.build(page, size);
         return importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
                         jobId, generation, pageable)
-                .map(this::toPreviewItem);
+                .map(item -> toPreviewItem(job, item));
     }
 
     @Override
@@ -263,6 +290,43 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 }
             }
         }
+    }
+
+    private void bindSourceAccount(ImportJob job, ImportSelection selection) {
+        JsonNode metadata = selection.metadata();
+        boolean suppliedInSelection = metadata != null && metadata.isObject() && metadata.has("sourceAccount");
+        boolean ownerFallback = job.getPlatform() != null
+                && (job.getPlatform().name() + ":OWNER:" + job.getUserId()).equals(job.getSourceNamespace());
+        if (!suppliedInSelection) {
+            if (job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
+                    && job.getSourceAccountId() == null && ownerFallback) {
+                throw new BadRequestException(
+                        "Source account identifier is required before archive normalization");
+            }
+            return;
+        }
+        JsonNode value = metadata.get("sourceAccount");
+        if (!value.isTextual()) throw new BadRequestException("Source account identifier must be text");
+        String account = value.asString().trim();
+        if (account.isEmpty() || account.length() > 220
+                || account.chars().anyMatch(Character::isISOControl)) {
+            throw new BadRequestException("Source account identifier is invalid");
+        }
+        if (job.getPlatform() == null || job.getInputKind() != ImportInputKind.PLATFORM_ARCHIVE) {
+            throw new BadRequestException("Source account identifier is only valid for platform archives");
+        }
+        if (job.getSourceAccountId() != null) {
+            if (!job.getSourceAccountId().equals(account)) {
+                throw new BadRequestException("Source account does not match the uploaded account");
+            }
+            return;
+        }
+        if (job.getState() != ImportJobState.AWAITING_SELECTION
+                || importItemRepository.countByJobId(job.getId()) != 0) {
+            throw new ConflictException("Source account can only be bound before normalization");
+        }
+        job.setSourceAccountId(account);
+        job.setSourceNamespace(job.getPlatform().name() + ":ACCOUNT:" + account);
     }
 
     private int jsonDepth(JsonNode node) {
@@ -357,7 +421,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private PreparedTargetResolution validateOperation(
-            UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items) {
+            UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items,
+            Map<UUID, ConfirmedWatchScopeSnapshot> confirmedWatchScopes) {
         ImportItem item = requireItem(operation.itemId(), items);
         if (operation instanceof ImportResolutionOperation.ResolveTarget resolveTarget) {
             if (isPreparedSeriesExpansion(item)) {
@@ -382,19 +447,27 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         } else if (operation instanceof ImportResolutionOperation.ConfirmWatchScope confirmScope) {
             if (item.getNormalizedKind() != ImportRecordKind.WATCHED_SUMMARY
                     && item.getNormalizedKind() != ImportRecordKind.WATCHED_MARKER
+                    && !"deferred_opinion_replay".equals(item.getObjectKind())
                     && item.getNormalizedKind() != ImportRecordKind.SERIES_EXPANSION) {
                 throw new BadRequestException("Watch scope is not valid for this import item");
             }
             if (item.getNormalizedKind() == ImportRecordKind.SERIES_EXPANSION) {
                 throw new BadRequestException("Series expansion uses the complete released episode set");
             }
+            MediaReference scopeTarget = confirmedWatchScopeTarget(item);
             if (confirmScope.scope() == ImportResolutionOperation.WatchScope.SPECIFIC_EPISODES) {
-                String seriesId = confirmScope.episodeReferences().getFirst().seriesTmdbId();
+                String targetSeriesId = scopeTarget.type() == ContentType.SERIES
+                        ? scopeTarget.tmdbId() : scopeTarget.seriesTmdbId();
                 if (confirmScope.episodeReferences().stream()
-                        .anyMatch(reference -> !seriesId.equals(reference.seriesTmdbId()))) {
-                    throw new BadRequestException("A watch scope can contain episodes from only one series");
+                        .anyMatch(reference -> !targetSeriesId.equals(reference.seriesTmdbId())
+                                || (scopeTarget.type() == ContentType.SEASON
+                                && !scopeTarget.seasonNumber().equals(reference.seasonNumber())))) {
+                    throw new BadRequestException(
+                            "Watch scope episodes must belong to the resolved series or season");
                 }
             }
+            confirmedWatchScopes.put(item.getId(),
+                    validateWatchScopeSnapshot(ownerId, item, scopeTarget, confirmScope));
         } else if (operation instanceof ImportResolutionOperation.LinkImportedList linkList) {
             if (item.getNormalizedKind() != ImportRecordKind.LIST_METADATA) {
                 throw new BadRequestException("Only an imported list can be linked to an existing list");
@@ -418,6 +491,79 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             throw new BadRequestException("A fixed template category must be removed explicitly");
         }
         return null;
+    }
+
+    private MediaReference confirmedWatchScopeTarget(ImportItem item) {
+        if (item.getResolvedTargetJson() == null || item.getResolvedTargetJson().isBlank()) {
+            throw new BadRequestException("Resolve the series or season before confirming its watch scope");
+        }
+        try {
+            ImportTarget target = objectMapper.treeToValue(
+                    objectMapper.readTree(item.getResolvedTargetJson()), ImportTarget.class);
+            if (!(target instanceof ImportTarget.ContentTarget contentTarget)
+                    || (contentTarget.content().type() != ContentType.SERIES
+                    && contentTarget.content().type() != ContentType.SEASON)) {
+                throw new BadRequestException("Watch scope requires a resolved series or season");
+            }
+            return contentTarget.content();
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw new BadRequestException("Watch scope target is invalid");
+        }
+    }
+
+    private ConfirmedWatchScopeSnapshot validateWatchScopeSnapshot(
+            UUID ownerId, ImportItem item, MediaReference target,
+            ImportResolutionOperation.ConfirmWatchScope confirmation) {
+        var owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        Instant now = clock.instant();
+        ConfirmedWatchScopeSnapshot current = watchScopeSnapshot(item);
+        if (current == null || !target.equals(current.target())) {
+            throw new ConflictException("Episode scope preview is unavailable; refresh the import preview and try again");
+        }
+        if (!confirmation.scheduleVersion().equals(current.scheduleVersion())) {
+            throw new ConflictException("Episode schedule changed; refresh the import preview and confirm again");
+        }
+        if (!current.validUntil().isAfter(now)) {
+            throw new ConflictException("Episode schedule expired; refresh the import preview and confirm again");
+        }
+        var marker = localScheduleMarker(target, owner.getPreferredRegion(), owner.getPreferredLanguage());
+        if (marker.isPresent() != current.localCalendarMarkerPresent()
+                || marker.map(CalendarScheduleCompleteness::getScopeVersion)
+                .orElse(0L) != current.localCalendarScopeVersion()) {
+            throw new ConflictException("Episode schedule changed; refresh the import preview and confirm again");
+        }
+        Set<com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate> selected = new LinkedHashSet<>();
+        for (MediaReference episode : confirmation.episodeReferences()) {
+            selected.add(new com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate(
+                    episode.seasonNumber(), episode.episodeNumber()));
+        }
+        if (confirmation.scope() == ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES) {
+            if (!selected.equals(Set.copyOf(current.episodes()))) {
+                throw new ConflictException("Previewed episode set changed; refresh the import preview and confirm again");
+            }
+        } else if (!Set.copyOf(current.episodes()).containsAll(selected)) {
+            throw new BadRequestException("Confirmed episodes are outside the current released schedule");
+        }
+        return current;
+    }
+
+    private ConfirmedWatchScopeSnapshot watchScopeSnapshot(ImportItem item) {
+        JsonNode value = readPayload(item.getPayloadJson()).path("resolution").path("watchScopeSnapshot");
+        if (!value.isObject()) return null;
+        try {
+            return objectMapper.treeToValue(value, ConfirmedWatchScopeSnapshot.class);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw new BadRequestException("Prepared watch scope snapshot is invalid");
+        }
+    }
+
+    private Optional<CalendarScheduleCompleteness> localScheduleMarker(
+            MediaReference target, String region, String language) {
+        return target.type() == ContentType.SERIES
+                ? scheduleCompletenessRepository.findSeriesIdentity(target.tmdbId(), region, language)
+                : scheduleCompletenessRepository.findSeasonIdentity(
+                        target.seriesTmdbId(), target.seasonNumber(), region, language);
     }
 
     private void validateEditedField(ImportItem item, ImportResolutionOperation.EditField editField) {
@@ -794,8 +940,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
     }
 
-    private void applyDecision(UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items,
-                               PreparedTargetResolution preparedTarget) {
+    private void applyDecision(UUID ownerId, ImportJob job, ImportResolutionOperation operation,
+                               Map<UUID, ImportItem> items, PreparedTargetResolution preparedTarget,
+                               ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot) {
         ImportItem item = items.get(operation.itemId());
         ResolutionMetadata metadata = resolutionMetadata(operation);
         if (operation instanceof ImportResolutionOperation.ResolveTarget) {
@@ -804,9 +951,20 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
         item.setDecision(metadata.decision());
         item.setPayloadJson(appendDecisionOverlay(item, operation, metadata.overlayKey()));
+        if (confirmedWatchScopeSnapshot != null) {
+            item.setPayloadJson(appendConfirmedWatchScopeSnapshot(item.getPayloadJson(), confirmedWatchScopeSnapshot));
+        }
         if (operation instanceof ImportResolutionOperation.ResolveTarget) {
             item.setOutcome("MATCHED");
         } else if (operation instanceof ImportResolutionOperation.AssignPass) {
+            item.setOutcome("RESOLVED");
+            item.setIssue(null);
+        } else if (operation instanceof ImportResolutionOperation.ConfirmWatchScope
+                && "NORMALIZATION_ISSUE".equals(item.getOutcome())
+                && item.getIssue() != null
+                && (item.getIssue().startsWith("WATCH_SCOPE_")
+                || ("deferred_opinion_replay".equals(item.getObjectKind())
+                && item.getIssue().startsWith("OPINION_EVIDENCE_PENDING")))) {
             item.setOutcome("RESOLVED");
             item.setIssue(null);
         } else if (operation instanceof ImportResolutionOperation.EditField editField
@@ -842,6 +1000,68 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             item.setResolvedTargetJson(null);
             item.setResolvedContentKey(null);
         }
+        if ((operation instanceof ImportResolutionOperation.SkipItem
+                || operation instanceof ImportResolutionOperation.ConfirmWatchScope)
+                && (item.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
+                || item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER)) {
+            stageDeferredReplayForSourceDecision(ownerId, job, item, operation, confirmedWatchScopeSnapshot);
+        }
+    }
+
+    private void stageDeferredReplayForSourceDecision(UUID ownerId, ImportJob job, ImportItem sourceItem,
+                                                      ImportResolutionOperation operation,
+                                                      ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot) {
+        ImportDeferredRecord deferred = deferredRecordRepository.findPendingBySourceIdentityForUpdate(ownerId,
+                sourceItem.getSourceNamespace(), sourceItem.getObjectKind(), sourceItem.getSourceId()).orElse(null);
+        if (deferred == null) return;
+
+        long generation = readPlanGeneration(job.getSelectionJson());
+        NormalizedImportRecord replayRecord = deferredOpinionReplayStager.toRecord(deferred, job.getSourceNamespace());
+        UUID replayId = DeferredOpinionReplayStager.stableItemId(job.getId(), generation, replayRecord.itemId());
+        ImportItem replay = importItemRepository.findById(replayId).orElse(null);
+        if (replay == null) {
+            if (importItemRepository.countByJobIdAndPlanGeneration(job.getId(), generation)
+                    >= importLimits.maxRecords()) {
+                throw new BadRequestException("Import contains too many records to stage the deferred opinion");
+            }
+            replay = deferredOpinionReplayStager.toImportItem(job.getId(), generation, replayRecord,
+                    importItemRepository.findMaxOrdinal(job.getId(), generation) + 1);
+        } else if (!job.getId().equals(replay.getJobId()) || replay.getPlanGeneration() != generation
+                || !"deferred_opinion_replay".equals(replay.getObjectKind())
+                || !deferred.getId().toString().equals(replay.getSourceId())) {
+            throw new IllegalStateException("Deferred replay item identity does not match its source record");
+        }
+
+        ImportResolutionOperation replayOperation;
+        String overlayKey;
+        if (operation instanceof ImportResolutionOperation.ConfirmWatchScope confirmation) {
+            replayOperation = new ImportResolutionOperation.ConfirmWatchScope(replayId, confirmation.scope(),
+                    confirmation.scheduleVersion(), confirmation.episodeReferences());
+            overlayKey = "confirmWatchScope";
+        } else {
+            replayOperation = new ImportResolutionOperation.SkipItem(replayId);
+            overlayKey = "skipItem";
+        }
+        replay.setDecision(resolutionMetadata(replayOperation).decision());
+        replay.setPayloadJson(appendDecisionOverlay(replay, replayOperation, overlayKey));
+        if (confirmedWatchScopeSnapshot != null) {
+            replay.setPayloadJson(appendConfirmedWatchScopeSnapshot(
+                    replay.getPayloadJson(), confirmedWatchScopeSnapshot));
+        }
+        replay.setOutcome("RESOLVED");
+        replay.setIssue(null);
+        importItemRepository.save(replay);
+    }
+
+    private String appendConfirmedWatchScopeSnapshot(String payload,
+                                                     ConfirmedWatchScopeSnapshot snapshot) {
+        JsonNode parsed = readPayload(payload);
+        if (!parsed.isObject() || !parsed.path("resolution").isObject()) {
+            throw new IllegalStateException("Confirmed watch scope resolution overlay is missing");
+        }
+        ObjectNode root = (ObjectNode) parsed.deepCopy();
+        ((ObjectNode) root.get("resolution")).set("confirmedWatchScopeSnapshot", objectMapper.valueToTree(snapshot));
+        return writeJson(root);
     }
 
     private JsonNode queryNodeFrom(String payload) {
@@ -973,7 +1193,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         return ids.stream().map(items::get).toList();
     }
 
-    private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
+    private ImportPreviewItemDTO toPreviewItem(ImportJob job, ImportItem item) {
         PreviewWatchDate watchDate = previewWatchDate(item);
         PreviewItemTitle itemTitle = previewItemTitle(item);
         PreviewItemDescription itemDescription = previewItemDescription(item);
@@ -985,7 +1205,20 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 optionalJson(item.getResolvedTargetJson()), itemTitle.text(), itemTitle.length(),
                 itemTitle.truncated(), itemDescription.text(), itemDescription.length(),
                 itemDescription.truncated(), reviewText.text(), reviewText.length(),
-                reviewText.truncated());
+                reviewText.truncated(), watchScopePreview(job, item));
+    }
+
+    private ImportWatchScopePreviewDTO watchScopePreview(ImportJob job, ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.WATCHED_SUMMARY
+                && item.getNormalizedKind() != ImportRecordKind.WATCHED_MARKER
+                && !"deferred_opinion_replay".equals(item.getObjectKind())) return null;
+        try {
+            JsonNode value = readPayload(item.getPayloadJson()).path("resolution").path("watchScopePreview");
+            if (!value.isObject()) return ImportWatchScopePreviewDTO.unavailable("WATCH_SCOPE_SNAPSHOT_PENDING");
+            return objectMapper.treeToValue(value, ImportWatchScopePreviewDTO.class);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            return ImportWatchScopePreviewDTO.unavailable("WATCH_SCOPE_TARGET_INVALID");
+        }
     }
 
     private PreviewItemTitle previewItemTitle(ImportItem item) {

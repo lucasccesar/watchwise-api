@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -56,6 +57,27 @@ class LetterboxdExportParserTest {
             assertThat(records.getFirst().payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
             assertThat(records.getFirst().payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
         }
+    }
+
+    @Test
+    @DisplayName("[parse] Should Preserve Full Review Export Fields - When Reviews Csv Has Diary Metadata Columns")
+    void shouldPreserveFullReviewExportFieldsWhenReviewsCsvHasDiaryMetadataColumns() throws Exception {
+        String input = "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n"
+                + "2025-06-01,Film,2020,https://letterboxd.com/user/film/one/,4.5,true,"
+                + "A review,cinema,2025-05-30\n";
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        parseReader("LetterboxdHistoryCsvParser", input, "reviews.csv", ImportRecordKind.REVIEW, records);
+
+        assertThat(records).singleElement().satisfies(record -> {
+            assertThat(record.payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
+            assertThat(record.payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
+            assertThat(record.payload().path("score").asInt()).isEqualTo(9);
+            assertThat(record.payload().path("sourceRewatch").asBoolean()).isTrue();
+            assertThat(record.payload().path("review").asString()).isEqualTo("A review");
+            assertThat(record.payload().path("tags").size()).isEqualTo(1);
+            assertThat(record.payload().path("tags").get(0).asString()).isEqualTo("cinema");
+        });
     }
 
     @Test
@@ -105,6 +127,19 @@ class LetterboxdExportParserTest {
             assertThat(list.name()).isEqualTo("Synthetic List");
             assertThat(list.itemCount()).isEqualTo(1);
         });
+    }
+
+    @Test
+    @DisplayName("[inspectFiles] Should Reject A Recognized CSV With An Unexpected Header")
+    void shouldRejectRecognizedCsvWithUnexpectedHeader() {
+        String malformed = "Date,Title,Year\n2025-06-01,Film,2020\n";
+        var inspector = new LetterboxdArchiveInspector(new CsvRecordReader(new ImportLimits()));
+
+        assertThatThrownBy(() -> inspector.inspectFiles(Map.of("reviews.csv",
+                new ByteArrayInputStream(malformed.getBytes(StandardCharsets.UTF_8)))))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class)
+                .hasMessageContaining("reviews.csv")
+                .hasMessageContaining("Unexpected CSV header");
     }
 
     @Test

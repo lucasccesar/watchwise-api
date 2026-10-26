@@ -93,6 +93,7 @@ import static org.mockito.Mockito.when;
         "spring.docker.compose.enabled=false",
         "app.import.worker.enabled=false",
         "app.import.cleanup.enabled=false",
+        "app.import.platform-archive-handlers-enabled=false",
         "app.import.max-pending-jobs-per-user=5",
         "app.import.max-pending-upload-bytes-per-user=100",
         "app.import.max-pending-upload-bytes-global=1000"

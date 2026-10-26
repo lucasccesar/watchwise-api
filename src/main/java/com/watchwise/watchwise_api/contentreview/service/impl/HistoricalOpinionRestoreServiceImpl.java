@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.contentreview.service.HistoricalOpinionRestor
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidence;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidenceVerifier;
 import com.watchwise.watchwise_api.contentreview.service.ReviewPublicationOrder;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -49,6 +50,22 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
             UUID ownerId,
             HistoricalOpinion opinion,
             HistoricalViewingEvidence evidence) {
+        return restoreInternal(ownerId, opinion, evidence, null);
+    }
+
+    @Override
+    @Transactional
+    public Optional<UUID> restore(UUID ownerId, HistoricalOpinion opinion,
+                                  HistoricalViewingEvidence evidence,
+                                  ConfirmedWatchScopeSnapshot preparedScope) {
+        return restoreInternal(ownerId, opinion, evidence, preparedScope);
+    }
+
+    private Optional<UUID> restoreInternal(
+            UUID ownerId,
+            HistoricalOpinion opinion,
+            HistoricalViewingEvidence evidence,
+            ConfirmedWatchScopeSnapshot preparedScope) {
         if (opinion == null || opinion.comment() == null || opinion.comment().isBlank()) {
             return Optional.empty();
         }
@@ -64,8 +81,9 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
 
         Content content = resolveContent(opinion.content());
         Instant now = Instant.now();
-        HistoricalViewingEvidenceVerifier.Verification verification = evidenceVerifier.verify(
-                ownerId, content, evidence, false, now);
+        HistoricalViewingEvidenceVerifier.Verification verification = preparedScope == null
+                ? evidenceVerifier.verify(ownerId, content, evidence, false, now)
+                : evidenceVerifier.verifyPreparedScope(ownerId, content, evidence, preparedScope, false, now);
         userContentMutationLock.lock(ownerId);
         if (content.getType() == ContentType.SEASON
                 && reviewRepository.existsByUserIdAndContentIdAndWatchNumberAndPublicationKind(
@@ -100,7 +118,8 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         ContentRating currentRating = updateCurrentRating
                 ? findCurrentRating(ownerId, content.getId())
                 : null;
-        evidenceVerifier.revalidate(ownerId, content, evidence, verification);
+        if (preparedScope == null) evidenceVerifier.revalidate(ownerId, content, evidence, verification);
+        else evidenceVerifier.revalidatePreparedScope(ownerId, content, evidence, preparedScope, verification);
         try {
             review = reviewRepository.saveAndFlush(review);
             if (updateCurrentRating) {

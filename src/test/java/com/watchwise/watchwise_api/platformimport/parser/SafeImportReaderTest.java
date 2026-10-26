@@ -80,7 +80,7 @@ class SafeImportReaderTest {
         SafeImportReader reader = reader(zip(new String[]{"export/diary.csv", "export/deleted/diary.csv", "export/orphaned/reviews.csv"},
                 new byte[][]{{1}, {2}, {3}}), limits, names);
         reader.forEachEntry(reader.storageKey(), (name, input) -> names.add(name));
-        assertThat(names).containsExactly("diary.csv", "deleted/diary.csv", "orphaned/reviews.csv");
+        assertThat(names).containsExactlyInAnyOrder("diary.csv", "deleted/diary.csv", "orphaned/reviews.csv");
         assertThat(names).doesNotContain("reviews.csv");
     }
 

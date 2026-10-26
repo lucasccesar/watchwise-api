@@ -8,6 +8,6 @@ public class ImportDeferredRecord {
  @Column(name="object_kind", nullable=false, length=255) private String objectKind;
  @Column(name="source_id", nullable=false, length=1000) private String sourceId;
  @Column(name="normalized_payload", nullable=false, columnDefinition="TEXT") private String normalizedPayload;
- @Column(nullable=false, columnDefinition="TEXT") private String provenance;
+ @Setter @Column(nullable=false, columnDefinition="TEXT") private String provenance;
  @Column(name="created_at", nullable=false) private LocalDateTime createdAt;
 }

@@ -14,8 +14,8 @@ public class ImportJob {
  @Enumerated(EnumType.STRING) @Column(name="input_kind", nullable=false, length=30) private ImportInputKind inputKind;
  @Enumerated(EnumType.STRING) @Column(name="source_format", nullable=false, length=40) private ImportSourceFormat sourceFormat;
  @Enumerated(EnumType.STRING) @Column(length=20) private ImportPlatform platform;
- @Column(name="source_account_id", length=255) private String sourceAccountId;
- @Column(name="source_namespace", nullable=false, length=255) private String sourceNamespace;
+ @Setter @Column(name="source_account_id", length=255) private String sourceAccountId;
+ @Setter @Column(name="source_namespace", nullable=false, length=255) private String sourceNamespace;
  @Enumerated(EnumType.STRING) @Column(nullable=false, length=40) @Setter private ImportJobState state;
  @Version @Column(nullable=false) private long version;
  @Column(name="preview_version", nullable=false) @Setter private long previewVersion;

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -66,19 +67,28 @@ public sealed interface ImportResolutionOperation permits
     }
 
     record ConfirmWatchScope(@NotNull UUID itemId, @NotNull WatchScope scope,
-                             @NotNull List<MediaReference> episodeReferences) implements ImportResolutionOperation {
+                             @NotBlank @Size(max = 200) String scheduleVersion,
+                             @NotNull @Size(max = 2000) List<MediaReference> episodeReferences)
+            implements ImportResolutionOperation {
         public ConfirmWatchScope {
-            if (scope == null || episodeReferences == null) {
-                throw new IllegalArgumentException("Watch scope and episode references are required");
+            if (scope == null || scheduleVersion == null || scheduleVersion.isBlank()
+                    || episodeReferences == null) {
+                throw new IllegalArgumentException("Watch scope snapshot and episode references are required");
             }
             episodeReferences = List.copyOf(episodeReferences);
-            if (scope == WatchScope.ALL_RELEASED_EPISODES && !episodeReferences.isEmpty()) {
-                throw new IllegalArgumentException("All-released scope cannot include explicit episode references");
+            if (episodeReferences.size() > 2000) {
+                throw new IllegalArgumentException("Watch scope cannot contain more than 2000 episode references");
+            }
+            if (episodeReferences.stream().anyMatch(reference -> reference == null
+                    || reference.type() != ContentType.EPISODE)) {
+                throw new IllegalArgumentException("Watch scope episode references must be episodes");
+            }
+            if (episodeReferences.isEmpty()) {
+                throw new IllegalArgumentException("Confirmed watch scope requires the exact episode set from preview");
             }
             if (scope == WatchScope.SPECIFIC_EPISODES
-                    && (episodeReferences.isEmpty() || episodeReferences.stream()
-                    .anyMatch(reference -> reference == null || reference.type() != ContentType.EPISODE))) {
-                throw new IllegalArgumentException("Specific watch scope requires episode references");
+                    && episodeReferences.stream().distinct().count() != episodeReferences.size()) {
+                throw new IllegalArgumentException("Specific watch scope cannot repeat an episode");
             }
         }
     }

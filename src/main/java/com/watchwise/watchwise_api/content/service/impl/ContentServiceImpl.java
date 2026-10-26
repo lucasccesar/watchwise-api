@@ -84,6 +84,33 @@ public class ContentServiceImpl implements ContentService {
         }
     }
 
+    @Override
+    public ContentRefDTO getOrCreateReferenceFromVerifiedImport(ContentRefCreationDTO contentRefCreationDTO) {
+        ContentRefCreationDTO normalized = normalize(contentRefCreationDTO);
+        if (normalized.runtimeMinutes() != null || normalized.genres() != null || normalized.releaseYear() != null
+                || normalized.countries() != null) {
+            throw new BadRequestException("Verified import references cannot provide content metadata");
+        }
+        validate(normalized, false);
+        Optional<Content> existing = findExisting(normalized);
+        if (existing.isPresent()) return contentMapper.contentToContentRefDto(existing.get());
+
+        try {
+            Content saved = newTransactionExecutor.runInNewTransaction(() -> {
+                Optional<Content> concurrent = findExisting(normalized);
+                if (concurrent.isPresent()) return concurrent.get();
+                Content content = contentMapper.contentRefCreationDtoToContent(normalized);
+                LocalDateTime now = LocalDateTime.now();
+                content.setCreatedAt(now);
+                content.setUpdatedAt(now);
+                return contentRepository.saveAndFlush(content);
+            });
+            return contentMapper.contentToContentRefDto(saved);
+        } catch (DataIntegrityViolationException conflict) {
+            return findExisting(normalized).map(contentMapper::contentToContentRefDto).orElseThrow(() -> conflict);
+        }
+    }
+
     private ContentRefCreationDTO normalize(ContentRefCreationDTO dto) {
         return new ContentRefCreationDTO(
                 trimOrNull(dto.tmdbId()),

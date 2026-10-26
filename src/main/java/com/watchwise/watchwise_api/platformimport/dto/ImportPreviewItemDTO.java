@@ -28,10 +28,11 @@ public record ImportPreviewItemDTO(
         Boolean itemDescriptionTruncated,
         String reviewText,
         Integer reviewTextLength,
-        Boolean reviewTextTruncated
+        Boolean reviewTextTruncated,
+        ImportWatchScopePreviewDTO watchScopePreview
 ) {
     public ImportPreviewItemDTO(UUID itemId, ImportRecordKind kind, ImportDecision decision, String outcome) {
         this(itemId, 0, kind, decision, outcome, null, null, null, null, null,
-                null, null, false, null, null, false, null, null, false);
+                null, null, false, null, null, false, null, null, false, null);
     }
 }

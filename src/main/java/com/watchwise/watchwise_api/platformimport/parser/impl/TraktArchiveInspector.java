@@ -21,8 +21,7 @@ import java.util.regex.Pattern;
 
 @Component
 public class TraktArchiveInspector {
-    private static final Pattern LIST_PAGE = Pattern.compile("(?:^|/)lists-list-(\\d+)(?:-sample)?-(\\d+)\\.json$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern LIST_WHOLE = Pattern.compile("(?:^|/)lists-list-(\\d+)(?:-sample)?\\.json$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LIST_FILE = Pattern.compile("(?:^|/)lists-list-(\\d+)(?:-sample)?(.*)\\.json$", Pattern.CASE_INSENSITIVE);
     private final SafeImportReader reader;
     private final ObjectMapper mapper;
     private final ImportLimits limits;
@@ -42,21 +41,17 @@ public class TraktArchiveInspector {
         Map<String, Long> itemCounts = new HashMap<>();
         Map<String, Set<Integer>> pagesByList = new HashMap<>();
         Set<String> presentIds = new HashSet<>();
-        long[] history = {0}, ratings = {0}, watched = {0};
+        long[] history = {0}, ratings = {0}, watched = {0}, watchlist = {0};
+        Map<String, Integer> listPages = listPages(reader.entryNames(context.storageKey()), limits.maxEntries());
         reader.forEachEntry(context.storageKey(), (path, input) -> {
             String file = path.toLowerCase(Locale.ROOT);
             if (file.matches("(?:.*/)?watched-history(?:-\\d+)?\\.json")) history[0] += countArray(input, path);
             else if (file.matches("(?:.*/)?ratings-(?:movies|shows|episodes|seasons)(?:-\\d+)?\\.json")) ratings[0] += countArray(input, path);
             else if (file.matches("(?:.*/)?watched-(?:movies|shows|episodes|seasons)(?:-\\d+)?\\.json")) watched[0] += countArray(input, path);
+            else if (file.matches("(?:.*/)?lists-watchlist(?:-\\d+)?\\.json")) watchlist[0] += countArray(input, path);
             else if (file.matches("(?:.*/)?lists-lists(?:-\\d+)?\\.json")) readLists(input, path, lists);
-            else {
-                Matcher page = LIST_PAGE.matcher(path);
-                Matcher whole = LIST_WHOLE.matcher(path);
-                if (page.matches()) {
-                    recordListPage(id(page), pageNumber(page), input, path, presentIds, pagesByList, itemCounts);
-                } else if (whole.matches()) {
-                    recordListPage(canonical(whole.group(1)), 1, input, path, presentIds, pagesByList, itemCounts);
-                }
+            else if (listPages.containsKey(path)) {
+                recordListPage(listId(path), listPages.get(path), input, path, presentIds, pagesByList, itemCounts);
             }
         });
         List<ImportListInventory> withCoverage = lists.stream().map(list -> {
@@ -65,7 +60,8 @@ public class TraktArchiveInspector {
         }).toList();
         return new ImportInventory(List.of(new ImportCategoryInventory(ImportRecordKind.DIARY_EVENT, history[0], history[0] > 0),
                 new ImportCategoryInventory(ImportRecordKind.CURRENT_RATING, ratings[0], ratings[0] > 0),
-                new ImportCategoryInventory(ImportRecordKind.WATCHED_SUMMARY, watched[0], watched[0] > 0)), withCoverage);
+                new ImportCategoryInventory(ImportRecordKind.WATCHED_SUMMARY, watched[0], watched[0] > 0),
+                new ImportCategoryInventory(ImportRecordKind.WATCHLIST_ITEM, watchlist[0], watchlist[0] > 0)), withCoverage);
     }
 
     public ImportInventory inspectFiles(Map<String, InputStream> files) {
@@ -73,21 +69,17 @@ public class TraktArchiveInspector {
         Map<String, Long> itemCounts = new HashMap<>();
         Map<String, Set<Integer>> pagesByList = new HashMap<>();
         Set<String> presentIds = new HashSet<>();
-        long historyCount = 0, ratingCount = 0, watchedCount = 0;
+        long historyCount = 0, ratingCount = 0, watchedCount = 0, watchlistCount = 0;
+        Map<String, Integer> listPages = listPages(files.keySet(), limits.maxEntries());
         for (var entry : files.entrySet()) {
             String path = entry.getKey();
             String file = path.toLowerCase(Locale.ROOT);
             if (file.matches("(?:.*/)?watched-history(?:-\\d+)?\\.json")) historyCount += countArray(entry.getValue(), path);
             else if (file.matches("(?:.*/)?ratings-(?:movies|shows|episodes|seasons)(?:-\\d+)?\\.json")) ratingCount += countArray(entry.getValue(), path);
             else if (file.matches("(?:.*/)?watched-(?:movies|shows|episodes|seasons)(?:-\\d+)?\\.json")) watchedCount += countArray(entry.getValue(), path);
-            Matcher page = LIST_PAGE.matcher(path);
-            if (page.matches()) {
-                recordListPage(id(page), pageNumber(page), entry.getValue(), path, presentIds, pagesByList, itemCounts);
-                continue;
-            }
-            Matcher whole = LIST_WHOLE.matcher(path);
-            if (whole.matches()) {
-                recordListPage(canonical(whole.group(1)), 1, entry.getValue(), path, presentIds, pagesByList, itemCounts);
+            else if (file.matches("(?:.*/)?lists-watchlist(?:-\\d+)?\\.json")) watchlistCount += countArray(entry.getValue(), path);
+            if (listPages.containsKey(path)) {
+                recordListPage(listId(path), listPages.get(path), entry.getValue(), path, presentIds, pagesByList, itemCounts);
                 continue;
             }
             if (file.matches("(?:.*/)?lists-lists(?:-\\d+)?\\.json")) readLists(entry.getValue(), path, lists);
@@ -96,7 +88,32 @@ public class TraktArchiveInspector {
                 list.name(), list.description(), list.itemCount(), coverage(list, presentIds, pagesByList, itemCounts))).toList();
         return new ImportInventory(List.of(new ImportCategoryInventory(ImportRecordKind.DIARY_EVENT, historyCount, historyCount > 0),
                 new ImportCategoryInventory(ImportRecordKind.CURRENT_RATING, ratingCount, ratingCount > 0),
-                new ImportCategoryInventory(ImportRecordKind.WATCHED_SUMMARY, watchedCount, watchedCount > 0)), covered);
+                new ImportCategoryInventory(ImportRecordKind.WATCHED_SUMMARY, watchedCount, watchedCount > 0),
+                new ImportCategoryInventory(ImportRecordKind.WATCHLIST_ITEM, watchlistCount, watchlistCount > 0)), covered);
+    }
+
+    public void parseSelectedListMetadata(InputStream input, String sourcePath, ImportReadContext context,
+                                          Set<String> selectedListIds,
+                                          java.util.function.Consumer<NormalizedImportRecord> sink) {
+        forEachArray(input, sourcePath, (node, index) -> {
+            String sourceId = requiredId(node.path("ids").path("trakt"), sourcePath, index, "ids.trakt");
+            if (!selectedListIds.contains(sourceId)) return;
+            String name = requiredText(node.path("name"), sourcePath, index, "name");
+            JsonNode count = node.path("item_count");
+            if (!count.isIntegralNumber() || !count.canConvertToLong() || count.longValue() < 0) {
+                throw new BadRequestException(sourcePath + " record " + index
+                        + " field item_count: invalid list metadata");
+            }
+            var payload = mapper.createObjectNode();
+            payload.put("title", name);
+            if (node.path("description").isTextual()) payload.put("description", node.path("description").asString());
+            payload.put("sourceItemCount", count.longValue());
+            payload.put("sourceFile", sourcePath);
+            payload.put("sourceRecordNumber", index);
+            ImportSourceKey key = new ImportSourceKey(context.sourceNamespace(), "list_metadata", sourceId);
+            sink.accept(new NormalizedImportRecord("list_metadata:" + sourceId, ImportRecordKind.LIST_METADATA,
+                    key, null, null, payload, Math.toIntExact(index - 1)));
+        });
     }
 
     public static List<String> selectListFiles(Collection<String> paths, String listId) {
@@ -104,17 +121,11 @@ public class TraktArchiveInspector {
         try { id = canonical(listId); } catch (RuntimeException ex) { throw new BadRequestException("Invalid Trakt list id"); }
         record Page(int number, String path) {}
         List<Page> pages = new ArrayList<>();
+        Map<String, Integer> pageNumbers = listPages(paths, new ImportLimits().maxEntries());
         for (String path : paths) {
-            Matcher paged = LIST_PAGE.matcher(path);
-            Matcher whole = LIST_WHOLE.matcher(path);
-            if (paged.matches() && canonical(paged.group(1)).equals(id)) {
-                try {
-                    int page = Integer.parseInt(paged.group(2));
-                    if (page < 1) throw new NumberFormatException();
-                    pages.add(new Page(page, path));
-                }
-                catch (NumberFormatException ex) { throw new BadRequestException("Invalid Trakt list page number"); }
-            } else if (whole.matches() && canonical(whole.group(1)).equals(id)) pages.add(new Page(1, path));
+            if (pageNumbers.containsKey(path) && listId(path).equals(id)) {
+                pages.add(new Page(pageNumbers.get(path), path));
+            }
         }
         pages.sort(Comparator.comparingInt(Page::number).thenComparing(Page::path));
         return pages.stream().map(Page::path).toList();
@@ -159,16 +170,57 @@ public class TraktArchiveInspector {
         return !pages.isEmpty();
     }
 
-    private String id(Matcher page) { return canonical(page.group(1)); }
+    private static String listId(String path) {
+        Matcher matcher = LIST_FILE.matcher(path);
+        if (!matcher.matches()) throw new IllegalArgumentException("Path is not a Trakt list file");
+        return canonical(matcher.group(1));
+    }
 
-    private int pageNumber(Matcher page) {
-        try {
-            int number = Integer.parseInt(page.group(2));
-            if (number < 1) throw new NumberFormatException();
-            return number;
-        } catch (NumberFormatException ex) {
-            throw new BadRequestException("Invalid Trakt list page number");
+    private static Map<String, Integer> listPages(Collection<String> paths, int maxPageNumber) {
+        record Candidate(String path, int page) {}
+        Map<String, List<Candidate>> candidatesBySlug = new HashMap<>();
+        Map<String, Integer> pages = new HashMap<>();
+        for (String path : paths) {
+            Matcher matcher = LIST_FILE.matcher(path);
+            if (!matcher.matches()) continue;
+            String listId = canonical(matcher.group(1));
+            String suffix = matcher.group(2);
+            if (suffix.isEmpty()) {
+                pages.put(path, 1);
+                continue;
+            }
+            int lastHyphen = suffix.lastIndexOf('-');
+            if (lastHyphen < 0 || lastHyphen == suffix.length() - 1
+                    || !suffix.substring(lastHyphen + 1).matches("[0-9]+")) {
+                pages.put(path, 1);
+                continue;
+            }
+            int page;
+            try {
+                page = Integer.parseInt(suffix.substring(lastHyphen + 1));
+            } catch (NumberFormatException exception) {
+                pages.put(path, 1);
+                continue;
+            }
+            if (page == 0) throw new BadRequestException("Invalid Trakt list page number");
+            if (page > maxPageNumber) {
+                pages.put(path, 1);
+                continue;
+            }
+            String slug = suffix.substring(0, lastHyphen).toLowerCase(Locale.ROOT);
+            if (slug.isEmpty()) {
+                pages.put(path, page);
+                continue;
+            }
+            String key = listId + "|" + slug;
+            candidatesBySlug.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Candidate(path, page));
+            pages.put(path, 1);
         }
+        for (List<Candidate> group : candidatesBySlug.values()) {
+            if (group.stream().map(Candidate::page).distinct().count() < 2) continue;
+            for (Candidate candidate : group) pages.put(candidate.path(), candidate.page());
+        }
+        return pages;
     }
     private long countArray(InputStream input, String path) { long[] count = {0}; forEachArray(input, path, (n, i) -> count[0]++); return count[0]; }
     private void forEachArray(InputStream input, String path, java.util.function.BiConsumer<JsonNode, Long> consumer) {

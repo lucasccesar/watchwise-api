@@ -86,8 +86,8 @@ public class PlatformContentResolver {
                 }
                 ImportTarget target = targetFor(item.getResolvedTargetJson());
                 String contentKey = contentKey(target);
-                addUpdate(updates, results, item, new StageResult("MATCHED", item.getResolvedTargetJson(),
-                        item.getNormalizedContentKey(), contentKey, target, null));
+                addUpdate(updates, results, item, forItem(item, new StageResult("MATCHED", item.getResolvedTargetJson(),
+                        item.getNormalizedContentKey(), contentKey, target, null)));
                 continue;
             }
 
@@ -95,8 +95,8 @@ public class PlatformContentResolver {
             String normalizedKey = normalizedContentKey(query);
             if (item.getResolvedTargetJson() != null && !isCandidateEnvelope(item.getResolvedTargetJson())) {
                 ImportTarget target = targetFor(item.getResolvedTargetJson());
-                addUpdate(updates, results, item, new StageResult("MATCHED", item.getResolvedTargetJson(),
-                        normalizedKey, contentKey(target), target, null));
+                addUpdate(updates, results, item, forItem(item, new StageResult("MATCHED", item.getResolvedTargetJson(),
+                        normalizedKey, contentKey(target), target, null)));
             } else {
                 groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(item);
                 contentKeys.putIfAbsent(key, normalizedKey);
@@ -122,7 +122,7 @@ public class PlatformContentResolver {
             StageResult cached = new StageResult(stagedItem.getOutcome(), stagedItem.getResolvedTargetJson(),
                     stagedItem.getNormalizedContentKey(), stagedItem.getResolvedContentKey(),
                     targetForIfResolved(stagedItem), stagedItem.getIssue());
-            for (ImportItem item : entry.getValue()) addUpdate(updates, results, item, cached);
+            for (ImportItem item : entry.getValue()) addUpdate(updates, results, item, forItem(item, cached));
         }
 
         List<AliasQuery> queries = remote.stream().map(entry -> queryFor(entry.getValue().getFirst())).toList();
@@ -137,7 +137,7 @@ public class PlatformContentResolver {
             for (int index = 0; index < remote.size(); index++) {
                 Map.Entry<QueryKey, List<ImportItem>> entry = remote.get(index);
                 StageResult resolved = stage(queries.get(index), resolutions.get(index));
-                for (ImportItem item : entry.getValue()) addUpdate(updates, results, item, resolved);
+                for (ImportItem item : entry.getValue()) addUpdate(updates, results, item, forItem(item, resolved));
             }
         }
 
@@ -204,6 +204,28 @@ public class PlatformContentResolver {
                 staged.resolvedTargetJson(), staged.normalizedContentKey(), staged.resolvedContentKey(),
                 staged.issue()));
         results.put(item.getId(), new ResolutionResult(item.getId(), staged.outcome(), staged.target(), staged.issue()));
+    }
+
+    private StageResult forItem(ImportItem item, StageResult result) {
+        if (!isAuxiliaryWatchEvidence(item)) return result;
+        if ("MATCHED".equals(result.outcome())) {
+            return new StageResult("AUXILIARY_EVIDENCE", result.resolvedTargetJson(),
+                    result.normalizedContentKey(), result.resolvedContentKey(), result.target(), null);
+        }
+        if ("UNAVAILABLE".equals(result.outcome())) return result;
+        return new StageResult("AUXILIARY_UNRESOLVED", null, result.normalizedContentKey(), null, null, null);
+    }
+
+    private boolean isAuxiliaryWatchEvidence(ImportItem item) {
+        String payload = item.getPayloadJson();
+        if (payload == null || payload.isBlank()) return false;
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            JsonNode source = root.path("source").isObject() ? root.path("source") : root;
+            return source.path("auxiliaryWatchEvidence").asBoolean(false);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Staged auxiliary watch evidence is invalid", exception);
+        }
     }
 
     private StageResult stage(AliasQuery query, AliasResolution resolution) {

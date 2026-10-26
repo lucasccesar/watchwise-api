@@ -9,4 +9,6 @@ public interface ContentService {
 
     ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO, boolean trustedRuntimeMinutes);
 
+    ContentRefDTO getOrCreateReferenceFromVerifiedImport(ContentRefCreationDTO contentRefCreationDTO);
+
 }

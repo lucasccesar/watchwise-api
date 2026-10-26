@@ -42,6 +42,38 @@ public class SafeImportReader {
 
     public String storageKey() { return storageKey; }
 
+    public List<String> entryNames(String key) {
+        try {
+            Path path = store.pathForReading(key);
+            if (Files.size(path) > limits.maxUploadBytes()) throw new BadRequestException("Import archive exceeds compressed byte limit");
+            List<String> javaNames = new ArrayList<>();
+            try (java.util.zip.ZipFile javaZip = new java.util.zip.ZipFile(path.toFile())) {
+                if (javaZip.size() > limits.maxEntries()) throw new BadRequestException("Import archive has too many entries");
+                Enumeration<? extends java.util.zip.ZipEntry> entries = javaZip.entries();
+                while (entries.hasMoreElements()) javaNames.add(normalize(entries.nextElement().getName()));
+                try (ZipFile zip = ZipFile.builder().setPath(path).get()) {
+                    List<ZipArchiveEntry> checked = validate(zip, javaNames);
+                    String root = commonRoot(checked);
+                    Set<String> names = new HashSet<>();
+                    List<String> result = new ArrayList<>();
+                    for (ZipArchiveEntry entry : checked) {
+                        if (entry.isDirectory()) continue;
+                        String name = normalize(entry.getName());
+                        if (root != null) name = name.substring(root.length());
+                        if (name.isEmpty() || !names.add(name)) throw new BadRequestException("Duplicate import archive path");
+                        result.add(name);
+                    }
+                    result.sort(SafeImportReader::compareNatural);
+                    return List.copyOf(result);
+                }
+            }
+        } catch (BadRequestException ex) {
+            throw ex;
+        } catch (IOException | UncheckedIOException ex) {
+            throw new BadRequestException("Malformed or unsupported import archive");
+        }
+    }
+
     public void forEachEntry(String key, BiConsumer<String, InputStream> consumer) {
         try {
             Path path = store.pathForReading(key);
@@ -53,6 +85,8 @@ public class SafeImportReader {
                 while (entries.hasMoreElements()) javaNames.add(normalize(entries.nextElement().getName()));
                 try (ZipFile zip = ZipFile.builder().setPath(path).get()) {
                     List<ZipArchiveEntry> checked = validate(zip, javaNames);
+                    checked.sort(java.util.Comparator.comparing(
+                            entry -> normalize(entry.getName()), SafeImportReader::compareNatural));
                     String root = commonRoot(checked);
                     Set<String> strippedNames = new HashSet<>();
                     for (ZipArchiveEntry entry : checked) {
@@ -137,6 +171,52 @@ public class SafeImportReader {
         }
         if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) throw new BadRequestException("Nested ZIP archives are not supported");
         return name;
+    }
+
+    private static int compareNatural(String left, String right) {
+        int leftIndex = 0;
+        int rightIndex = 0;
+        while (leftIndex < left.length() && rightIndex < right.length()) {
+            char leftChar = left.charAt(leftIndex);
+            char rightChar = right.charAt(rightIndex);
+            if (Character.isDigit(leftChar) && Character.isDigit(rightChar)) {
+                int leftEnd = digitRunEnd(left, leftIndex);
+                int rightEnd = digitRunEnd(right, rightIndex);
+                int leftSignificant = significantDigitStart(left, leftIndex, leftEnd);
+                int rightSignificant = significantDigitStart(right, rightIndex, rightEnd);
+                int leftLength = leftEnd - leftSignificant;
+                int rightLength = rightEnd - rightSignificant;
+                int numericLength = Integer.compare(leftLength, rightLength);
+                if (numericLength != 0) return numericLength;
+                int numericValue = left.regionMatches(leftSignificant, right, rightSignificant, leftLength)
+                        ? 0 : left.substring(leftSignificant, leftEnd)
+                        .compareTo(right.substring(rightSignificant, rightEnd));
+                if (numericValue != 0) return numericValue;
+                int rawLength = Integer.compare(leftEnd - leftIndex, rightEnd - rightIndex);
+                if (rawLength != 0) return rawLength;
+                leftIndex = leftEnd;
+                rightIndex = rightEnd;
+                continue;
+            }
+            int characterOrder = Character.compare(Character.toLowerCase(leftChar), Character.toLowerCase(rightChar));
+            if (characterOrder != 0) return characterOrder;
+            leftIndex++;
+            rightIndex++;
+        }
+        int lengthOrder = Integer.compare(left.length() - leftIndex, right.length() - rightIndex);
+        return lengthOrder != 0 ? lengthOrder : left.compareTo(right);
+    }
+
+    private static int digitRunEnd(String value, int start) {
+        int end = start;
+        while (end < value.length() && Character.isDigit(value.charAt(end))) end++;
+        return end;
+    }
+
+    private static int significantDigitStart(String value, int start, int end) {
+        int significant = start;
+        while (significant < end - 1 && value.charAt(significant) == '0') significant++;
+        return significant;
     }
 
     private class CheckedEntryStream extends FilterInputStream {

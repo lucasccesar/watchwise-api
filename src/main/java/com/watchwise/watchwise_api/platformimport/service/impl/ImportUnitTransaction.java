@@ -45,6 +45,8 @@ public class ImportUnitTransaction {
     private final ImportEventDeduplicator eventDeduplicator;
     private final List<ImportUnitApplier> appliers;
     private final List<ImportUnitTerminalListener> terminalListeners;
+    private final DeferredOpinionReplayStager deferredOpinionReplayStager;
+    private final WatchedSummaryImportApplier watchedSummaryImportApplier;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -53,6 +55,8 @@ public class ImportUnitTransaction {
                                  ImportEventDeduplicator eventDeduplicator,
                                  List<ImportUnitApplier> appliers,
                                  List<ImportUnitTerminalListener> terminalListeners,
+                                 DeferredOpinionReplayStager deferredOpinionReplayStager,
+                                 WatchedSummaryImportApplier watchedSummaryImportApplier,
                                  ObjectMapper objectMapper, Clock clock) {
         this.jobRepository = jobRepository;
         this.itemRepository = itemRepository;
@@ -61,6 +65,8 @@ public class ImportUnitTransaction {
         this.eventDeduplicator = eventDeduplicator;
         this.appliers = List.copyOf(appliers);
         this.terminalListeners = List.copyOf(terminalListeners);
+        this.deferredOpinionReplayStager = deferredOpinionReplayStager;
+        this.watchedSummaryImportApplier = watchedSummaryImportApplier;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -91,7 +97,21 @@ public class ImportUnitTransaction {
             throw new IllegalStateException("Source deduplication cannot decide a content pass match");
         }
 
-        if (item.getDecision() == ImportDecision.SKIP_ITEM) {
+        if (item.getDecision() == ImportDecision.CONFIRM_WATCH_SCOPE
+                && (item.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
+                || item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
+                || "deferred_opinion_replay".equals(item.getObjectKind()))) {
+            try {
+                watchedSummaryImportApplier.applyConfirmedScope(context, item.getId());
+            } catch (WatchedSummaryImportApplier.WatchScopeConfirmationException exception) {
+                pauseForNormalizationIssue(job, item, exception.getMessage());
+                return true;
+            }
+        }
+
+        boolean deferredOpinionSkip = item.getDecision() == ImportDecision.SKIP_ITEM
+                && "deferred_opinion_replay".equals(item.getObjectKind());
+        if (item.getDecision() == ImportDecision.SKIP_ITEM && !deferredOpinionSkip) {
             ledger.markSkipped(context.ownerId(), sourceKey, null, null, "USER_SKIPPED");
             item.setOutcome("SKIPPED");
             item.setIssue(null);
@@ -107,6 +127,16 @@ public class ImportUnitTransaction {
             } catch (ListItemCountMismatchException exception) {
                 pauseForListIssue(job, item, exception.getMessage());
                 return true;
+            } catch (WatchedSummaryImportApplier.WatchScopeConfirmationException exception) {
+                pauseForNormalizationIssue(job, item, exception.getMessage());
+                return true;
+            } catch (OpinionImportApplier.DeferredOpinionPendingException exception) {
+                pauseForNormalizationIssue(job, item, exception.getMessage());
+                return true;
+            }
+            if (deferredOpinionSkip) {
+                item.setOutcome("SKIPPED");
+                item.setIssue(null);
             }
             if (!applier.isComplete(context, item.getId())) {
                 if (!"EXPANDING".equals(item.getOutcome())) item.setOutcome("MATCHED");
@@ -147,6 +177,34 @@ public class ImportUnitTransaction {
         job.setCheckpoint("NORMALIZE:" + records.getLast().ordinal());
         renew(job);
         return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int stageDeferredOpinionReplays(ImportExecutionContext context,
+                                           List<NormalizedImportRecord> records) {
+        if (records == null || records.isEmpty()) return 0;
+        if (records.size() > NORMALIZE_BATCH_SIZE) {
+            throw new IllegalArgumentException("Deferred replay batches are limited to 200 records");
+        }
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return -1;
+        List<UUID> ids = records.stream().map(record -> DeferredOpinionReplayStager.stableItemId(
+                context.jobId(), context.planGeneration(), record.itemId())).toList();
+        java.util.Set<UUID> existingIds = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                        context.jobId(), context.planGeneration(), ids).stream()
+                .map(ImportItem::getId).collect(java.util.stream.Collectors.toSet());
+        long ordinal = itemRepository.findMaxOrdinal(context.jobId(), context.planGeneration()) + 1;
+        List<ImportItem> additions = new java.util.ArrayList<>();
+        for (NormalizedImportRecord record : records) {
+            UUID id = DeferredOpinionReplayStager.stableItemId(
+                    context.jobId(), context.planGeneration(), record.itemId());
+            if (existingIds.contains(id)) continue;
+            additions.add(deferredOpinionReplayStager.toImportItem(
+                    context.jobId(), context.planGeneration(), record, ordinal++));
+        }
+        if (!additions.isEmpty()) itemRepository.saveAll(additions);
+        renew(job);
+        return additions.size();
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -200,6 +258,36 @@ public class ImportUnitTransaction {
             item.setIssue(update.issue());
         }
         itemRepository.saveAll(changedItems);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveWatchScopePreparations(ImportExecutionContext context,
+                                              List<WatchScopePreparation> preparations) {
+        if (preparations == null || preparations.isEmpty()) return true;
+        if (preparations.size() > NORMALIZE_BATCH_SIZE
+                || preparations.stream().map(WatchScopePreparation::itemId).distinct().count()
+                != preparations.size()) {
+            throw new IllegalArgumentException("Watch scope preparation batches require at most 200 unique items");
+        }
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        java.util.Map<UUID, WatchScopePreparation> byId = preparations.stream()
+                .collect(java.util.stream.Collectors.toMap(WatchScopePreparation::itemId,
+                        preparation -> preparation));
+        List<ImportItem> items = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), byId.keySet());
+        if (items.size() != preparations.size()) {
+            throw new IllegalArgumentException("Watch scope preparation item is outside this import plan");
+        }
+        for (ImportItem item : items) {
+            WatchScopePreparation preparation = byId.get(item.getId());
+            item.setPayloadJson(preparation.payloadJson());
+            item.setOutcome(preparation.outcome());
+            item.setIssue(preparation.issue());
+        }
+        itemRepository.saveAll(items);
         renew(job);
         return true;
     }
@@ -353,6 +441,8 @@ public class ImportUnitTransaction {
                 .parserVersion(parserVersion)
                 .payloadJson(writeJson(record.payload()))
                 .resolvedTargetJson(record.target() == null ? null : writeJson(record.target()))
+                .outcome(record.kind() == ImportRecordKind.LIST_METADATA && record.target() == null
+                        ? "RESOLVED" : null)
                 .ordinal(record.ordinal())
                 .build();
         return item;
@@ -409,6 +499,10 @@ public class ImportUnitTransaction {
     }
 
     private void pauseForListIssue(ImportJob job, ImportItem item, String issue) {
+        pauseForNormalizationIssue(job, item, issue);
+    }
+
+    private void pauseForNormalizationIssue(ImportJob job, ImportItem item, String issue) {
         item.setOutcome("NORMALIZATION_ISSUE");
         item.setIssue(issue);
         itemRepository.save(item);
@@ -474,6 +568,8 @@ public class ImportUnitTransaction {
     public record HistoryNormalizationUpdate(UUID itemId, ImportRecordKind normalizedKind, String payloadJson,
                                              String resolvedTargetJson, String resolvedContentKey,
                                              String outcome, String issue) { }
+
+    public record WatchScopePreparation(UUID itemId, String payloadJson, String outcome, String issue) { }
 
     public static final class WaitForOtherJobException extends RuntimeException { }
 }

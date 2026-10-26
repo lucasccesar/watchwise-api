@@ -15,7 +15,7 @@ public record NormalizedImportRecord(
         if (itemId == null || itemId.isBlank() || kind == null || sourceKey == null || payload == null) {
             throw new IllegalArgumentException("Normalized import record fields are required");
         }
-        if (target == null && !hasQuery(payload)) {
+        if (target == null && kind != ImportRecordKind.LIST_METADATA && !hasQuery(payload)) {
             throw new IllegalArgumentException("An unresolved import record requires an alias query");
         }
         if (ordinal < 0) throw new IllegalArgumentException("Ordinal must not be negative");

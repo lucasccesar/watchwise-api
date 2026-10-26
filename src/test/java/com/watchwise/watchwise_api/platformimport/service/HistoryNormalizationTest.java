@@ -549,12 +549,12 @@ class HistoryNormalizationTest {
         assertThat(rows).filteredOn(row -> row.getId().equals(review.getId())).singleElement()
                 .satisfies(row -> {
                     assertThat(row.getOutcome()).isEqualTo("MATCHED");
-                    assertThat(read(row.getPayloadJson()).path("score").asInt()).isEqualTo(7);
+                    assertThat(read(row.getPayloadJson()).path("source").path("score").asInt()).isEqualTo(7);
                 });
         assertThat(rows).filteredOn(row -> row.getId().equals(rating.getId())).singleElement()
                 .satisfies(row -> {
                     assertThat(row.getOutcome()).isEqualTo("MATCHED");
-                    assertThat(read(row.getPayloadJson()).path("score").asInt()).isEqualTo(9);
+                    assertThat(read(row.getPayloadJson()).path("source").path("score").asInt()).isEqualTo(9);
                 });
     }
 
@@ -632,7 +632,8 @@ class HistoryNormalizationTest {
         assertThat(waiting.isWorkPending()).isFalse();
         ImportItem issue = itemRepository.findById(rating.getId()).orElseThrow();
         assertThat(issue.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
-        assertThat(issue.getIssue()).contains("date is tied");
+        assertThat(issue.getIssue()).startsWith("LATEST_REVIEW_AMBIGUOUS:")
+                .contains("date is tied");
         assertThat(read(itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
                 job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 2)).getContent().getFirst()
                 .getPayloadJson()).path("score").asInt()).isEqualTo(6);

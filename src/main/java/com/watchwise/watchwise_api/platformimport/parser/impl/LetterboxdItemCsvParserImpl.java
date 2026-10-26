@@ -18,6 +18,8 @@ import java.util.function.Consumer;
 public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
     private static final List<String> DIARY_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI", "Rating", "Rewatch", "Tags", "Watched Date");
     private static final List<String> REVIEW_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI", "Rating", "Review");
+    private static final List<String> REVIEW_EXPORT_HEADER = List.of(
+            "Date", "Name", "Year", "Letterboxd URI", "Rating", "Rewatch", "Review", "Tags", "Watched Date");
     private static final List<String> WATCHED_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI");
     private static final List<String> RATING_HEADER = List.of("Date", "Name", "Year", "Letterboxd URI", "Rating");
     private static final List<String> WATCHLIST_HEADER = WATCHED_HEADER;
@@ -38,19 +40,49 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
             return;
         }
         List<String> expected = header(kind);
+        List<List<String>> activeHeader = new ArrayList<>(List.of(expected));
         boolean[] headerSeen = {false};
         long[] rowNumber = {0};
         csv.read(input, row -> {
             if (row.isEmpty() || row.stream().allMatch(String::isEmpty)) return;
             rowNumber[0]++;
             if (!headerSeen[0]) {
-                if (!expected.equals(row)) throw failure(sourcePath, rowNumber[0], "header", "Unexpected CSV header");
+                activeHeader.set(0, resolveHeader(row, kind, sourcePath, rowNumber[0]));
                 headerSeen[0] = true;
                 return;
             }
-            sink.accept(normalize(row, expected, context, sourcePath, kind, Math.toIntExact(rowNumber[0] - 2), null));
+            sink.accept(normalize(row, activeHeader.getFirst(), context, sourcePath, kind,
+                    Math.toIntExact(rowNumber[0] - 2), null));
         });
         if (!headerSeen[0]) throw failure(sourcePath, 1, "header", "CSV header is missing");
+    }
+
+    public long validateAndCountRows(Reader input, String sourcePath, ImportRecordKind kind) {
+        List<List<String>> activeHeader = new ArrayList<>(List.of(header(kind)));
+        boolean[] headerSeen = {false};
+        long[] rowNumber = {0};
+        long[] dataRows = {0};
+        csv.read(input, row -> {
+            if (row.isEmpty() || row.stream().allMatch(String::isEmpty)) return;
+            rowNumber[0]++;
+            if (!headerSeen[0]) {
+                activeHeader.set(0, resolveHeader(row, kind, sourcePath, rowNumber[0]));
+                headerSeen[0] = true;
+                return;
+            }
+            requireSize(row, activeHeader.getFirst(), sourcePath, rowNumber[0]);
+            dataRows[0]++;
+        });
+        if (!headerSeen[0]) throw failure(sourcePath, 1, "header", "CSV header is missing");
+        return dataRows[0];
+    }
+
+    private List<String> resolveHeader(List<String> row, ImportRecordKind kind, String sourcePath,
+                                       long rowNumber) {
+        List<String> expected = header(kind);
+        if (expected.equals(row)) return expected;
+        if (kind == ImportRecordKind.REVIEW && REVIEW_EXPORT_HEADER.equals(row)) return REVIEW_EXPORT_HEADER;
+        throw failure(sourcePath, rowNumber, "header", "Unexpected CSV header");
     }
 
     public List<ParsedListMetadata> parseList(Reader input, ImportReadContext context, String sourcePath,
@@ -87,7 +119,7 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
                     payload.put("sourceFile", sourcePath);
                     ImportSourceKey key = new ImportSourceKey(context.sourceNamespace(), "list_metadata", parsed.sourceUri() == null ? sourcePath : parsed.sourceUri());
                     sink.accept(new NormalizedImportRecord("list_metadata:" + key.sourceId(), ImportRecordKind.LIST_METADATA,
-                            key, null, null, withQuery(payload, parsed.name()), 0));
+                            key, null, null, payload, 0));
                     state[0] = ListState.ITEMS_HEADER;
                 }
                 case ITEMS_HEADER -> {
@@ -150,11 +182,6 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
         var query = mapper.createObjectNode().put("kind", "CONTENT").put("title", title);
         if (year != null) query.put("year", year);
         return query;
-    }
-
-    private tools.jackson.databind.node.ObjectNode withQuery(tools.jackson.databind.node.ObjectNode payload, String title) {
-        payload.set("sourceQuery", contentQuery(title, null));
-        return payload;
     }
 
     private List<String> header(ImportRecordKind kind) {

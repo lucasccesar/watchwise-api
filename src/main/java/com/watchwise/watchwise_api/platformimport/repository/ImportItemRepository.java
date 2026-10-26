@@ -214,6 +214,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.sourceEventKey IS NOT NULL AND item.sourceEventKey > :afterKey
               AND item.normalizedKind IN :kinds AND item.outcome IN :outcomes
+              AND item.objectKind <> 'deferred_opinion_replay'
             ORDER BY item.sourceEventKey
             """)
     List<String> findSourceEventKeysAfter(@Param("jobId") UUID jobId, @Param("ownerId") UUID ownerId,
@@ -227,6 +228,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.sourceEventKey IN :eventKeys
               AND item.normalizedKind IN :kinds AND item.outcome IN :outcomes
+              AND item.objectKind <> 'deferred_opinion_replay'
               AND (item.sourceEventKey > :afterEventKey
                    OR (item.sourceEventKey = :afterEventKey AND
                        (item.ordinal > :afterOrdinal OR (item.ordinal = :afterOrdinal AND item.id > :afterId))))
@@ -247,6 +249,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.resolvedContentKey IS NOT NULL AND item.resolvedContentKey > :afterKey
               AND item.normalizedKind IN :kinds AND item.outcome IN :outcomes
+              AND item.objectKind <> 'deferred_opinion_replay'
             ORDER BY item.resolvedContentKey
             """)
     List<String> findResolvedContentKeysAfter(@Param("jobId") UUID jobId, @Param("ownerId") UUID ownerId,
@@ -275,6 +278,7 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND job.id = item.jobId AND job.userId = :ownerId
               AND item.resolvedContentKey = :contentKey
               AND item.normalizedKind IN :kinds AND item.outcome IN :outcomes
+              AND item.objectKind <> 'deferred_opinion_replay'
               AND (item.ordinal > :afterOrdinal OR (item.ordinal = :afterOrdinal AND item.id > :afterId))
             ORDER BY item.ordinal, item.id
             """)
@@ -393,12 +397,23 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     List<ImportItem> findByJobIdAndPlanGenerationAndOutcomeInOrderByOrdinalAscIdAsc(
             UUID jobId, long planGeneration, Collection<String> outcomes, Pageable pageable);
 
-    @Query("""
-            SELECT item FROM ImportItem item
-            WHERE item.jobId = :jobId AND item.planGeneration = :generation
+    @Query(value = """
+            SELECT * FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
               AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED', 'EXPANSION_PREPARED'))
-            ORDER BY item.ordinal ASC, item.id ASC
-            """)
+            ORDER BY CASE item.normalized_kind
+                WHEN 'DIARY_EVENT' THEN 0
+                WHEN 'SERIES_EXPANSION' THEN 0
+                WHEN 'WATCHED_MARKER' THEN 0
+                WHEN 'WATCHED_SUMMARY' THEN 1
+                WHEN 'REVIEW' THEN 2
+                WHEN 'CURRENT_RATING' THEN 2
+                WHEN 'LIST_METADATA' THEN 3
+                WHEN 'LIST_ITEM' THEN 3
+                WHEN 'WATCHLIST_ITEM' THEN 4
+                ELSE 5
+            END ASC, item.ordinal ASC, item.id ASC
+            """, nativeQuery = true)
     List<ImportItem> findApplyPending(@Param("jobId") UUID jobId,
                                      @Param("generation") long generation, Pageable pageable);
 

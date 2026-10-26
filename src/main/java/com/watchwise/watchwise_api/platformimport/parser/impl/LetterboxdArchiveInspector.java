@@ -59,16 +59,9 @@ public class LetterboxdArchiveInspector {
         };
         try {
             if (kind != null) {
-                long[] rowCount = {0};
-                csv.read(new InputStreamReader(input, StandardCharsets.UTF_8), row -> {
-                    if (rowCount[0] == 0) {
-                        rowCount[0]++;
-                        return;
-                    }
-                    if (!row.isEmpty() && row.stream().anyMatch(cell -> !cell.isEmpty())) rowCount[0]++;
-                });
-                if (rowCount[0] == 0) throw new BadRequestException(path + " record 1 field header: CSV header is missing");
-                counts.merge(kind, rowCount[0] - 1, Long::sum);
+                long rowCount = items.validateAndCountRows(
+                        new InputStreamReader(input, StandardCharsets.UTF_8), path, kind);
+                counts.merge(kind, rowCount, Long::sum);
             } else if (filename.equals("list-v7.csv")) {
                 long[] itemCount = {0};
                 var metadata = items.parseList(new InputStreamReader(input, StandardCharsets.UTF_8),

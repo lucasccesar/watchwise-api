@@ -3,30 +3,28 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalOpinion;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalOpinionRestoreService;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidence;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
-import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
-import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.platformimport.entity.ImportDeferredRecord;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
+import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.ImportedOpinionUnit;
 import com.watchwise.watchwise_api.platformimport.repository.ImportDeferredRecordRepository;
+import com.watchwise.watchwise_api.platformimport.entity.ExternalImportLink;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.ImportUnitApplier;
-import com.watchwise.watchwise_api.user.entity.User;
-import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -52,10 +50,10 @@ public class OpinionImportApplier implements ImportUnitApplier {
     private final HistoricalOpinionRestoreService reviewRestoreService;
     private final ContentRatingService ratingService;
     private final ContentService contentService;
-    private final CompletionScopeLoader scopeLoader;
     private final DiaryEntryRepository diaryEntryRepository;
-    private final UserRepository userRepository;
     private final ImportDeferredRecordRepository deferredRepository;
+    private final com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository externalLinkRepository;
+    private final WatchedSummaryImportApplier watchedSummaryImportApplier;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -66,10 +64,10 @@ public class OpinionImportApplier implements ImportUnitApplier {
             HistoricalOpinionRestoreService reviewRestoreService,
             ContentRatingService ratingService,
             ContentService contentService,
-            CompletionScopeLoader scopeLoader,
             DiaryEntryRepository diaryEntryRepository,
-            UserRepository userRepository,
             ImportDeferredRecordRepository deferredRepository,
+            com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository externalLinkRepository,
+            WatchedSummaryImportApplier watchedSummaryImportApplier,
             ObjectMapper objectMapper,
             Clock clock) {
         this.planner = planner;
@@ -78,10 +76,10 @@ public class OpinionImportApplier implements ImportUnitApplier {
         this.reviewRestoreService = reviewRestoreService;
         this.ratingService = ratingService;
         this.contentService = contentService;
-        this.scopeLoader = scopeLoader;
         this.diaryEntryRepository = diaryEntryRepository;
-        this.userRepository = userRepository;
         this.deferredRepository = deferredRepository;
+        this.externalLinkRepository = externalLinkRepository;
+        this.watchedSummaryImportApplier = watchedSummaryImportApplier;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -93,19 +91,56 @@ public class OpinionImportApplier implements ImportUnitApplier {
 
     @Override
     public void apply(ImportExecutionContext context, UUID itemId) {
-        ImportedOpinionUnit unit = planner.unit(context, itemId);
         ImportItem item = itemRepository.findById(itemId).orElseThrow();
+        ImportDeferredRecord replayRecord = deferredRecordForUpdate(context, item);
+        if ("deferred_opinion_replay".equals(item.getObjectKind()) && replayRecord == null) {
+            ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, "DEFERRED_OPINION_ALREADY_RESOLVED");
+            item.setOutcome("SKIPPED");
+            item.setIssue("DEFERRED_OPINION_ALREADY_RESOLVED");
+            return;
+        }
+        if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
+            skipReplay(context, item, replayRecord);
+            return;
+        }
+        ImportedOpinionUnit unit = planner.unit(context, itemId);
         if (unit.review() == null && unit.initialScore() == null) {
             ledger.markSkipped(context.ownerId(), unit.sourceKey(), null, null, "EMPTY_OPINION");
             return;
         }
         if (unit.review() != null && unit.review().comment().length() > MAX_REVIEW_LENGTH) {
+            if (replayRecord != null) {
+                throw new DeferredOpinionPendingException(
+                        ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
+                                + ": Edit the review before restoring this deferred opinion.");
+            }
             defer(context, item, unit, "REVIEW_TEXT_TOO_LONG");
             return;
         }
 
-        Optional<HistoricalViewingEvidence> evidence = findCompletePass(context.ownerId(), unit.content());
+        ConfirmedWatchScopeSnapshot preparedScope = watchedSummaryImportApplier.preparedScopeSnapshot(item);
+        if (preparedScope == null) {
+            if (replayRecord != null) {
+                throw new DeferredOpinionPendingException(
+                        "WATCH_SCOPE_SNAPSHOT_PENDING: Refresh the schedule or explicitly skip this opinion.");
+            }
+            defer(context, item, unit, "WATCH_SCOPE_SNAPSHOT_UNAVAILABLE");
+            return;
+        }
+        var confirmedScope = replayRecord == null ? null : watchedSummaryImportApplier.confirmedScope(item);
+        if (confirmedScope != null) {
+            if (!preparedScope.scheduleVersion().equals(confirmedScope.scheduleVersion())) {
+                throw new DeferredOpinionPendingException(
+                        "WATCH_SCOPE_SNAPSHOT_MISSING: Refresh the preview and confirm the watch scope again.");
+            }
+        }
+        Optional<HistoricalViewingEvidence> evidence = findCompletePass(
+                context.ownerId(), unit.content(), preparedScope);
         if (evidence.isEmpty()) {
+            if (replayRecord != null) {
+                throw new DeferredOpinionPendingException(
+                        "DEFERRED_OPINION_EVIDENCE_PENDING: Complete a full pass or explicitly skip this opinion.");
+            }
             defer(context, item, unit, "VIEWING_EVIDENCE_NOT_PROVEN");
             return;
         }
@@ -114,12 +149,17 @@ public class OpinionImportApplier implements ImportUnitApplier {
         String targetType = null;
         UUID targetId = null;
         if (unit.initialScore() != null) {
-            Optional<UUID> restoredRating = ratingService.restoreInitial(
-                    context.ownerId(), unit.content(), unit.initialScore(), evidence.get());
+            Optional<UUID> restoredRating = ratingService.restoreInitial(context.ownerId(), unit.content(),
+                    unit.initialScore(), evidence.get(), preparedScope);
             if (restoredRating.isPresent()) {
                 targetType = "CONTENT_RATING";
                 targetId = restoredRating.get();
             } else if (unit.review() == null) {
+                if (replayRecord != null) {
+                    completeDeferred(context, replayRecord, unit.sourceKey(), null, null,
+                            true, "EXISTING_RATING_PRESERVED");
+                    return;
+                }
                 ledger.markSkipped(context.ownerId(), unit.sourceKey(), null, null, "EXISTING_RATING_PRESERVED");
                 return;
             }
@@ -131,7 +171,7 @@ public class OpinionImportApplier implements ImportUnitApplier {
                     source.comment(), source.scoreAtPublication(), source.sourcePublishedAt(),
                     source.sourcePublishedOn(), source.contextJson());
             Optional<UUID> restoredReview = reviewRestoreService.restore(
-                    context.ownerId(), verifiedPassReview, evidence.get());
+                    context.ownerId(), verifiedPassReview, evidence.get(), preparedScope);
             if (restoredReview.isPresent()) {
                 targetType = "CONTENT_REVIEW";
                 targetId = restoredReview.get();
@@ -139,25 +179,37 @@ public class OpinionImportApplier implements ImportUnitApplier {
         }
 
         if (targetId == null) {
+            if (replayRecord != null) {
+                completeDeferred(context, replayRecord, unit.sourceKey(), null, null, true, "NO_OPINION_CREATED");
+                return;
+            }
             ledger.markSkipped(context.ownerId(), unit.sourceKey(), null, null, "NO_OPINION_CREATED");
         } else {
+            if (replayRecord != null) {
+                completeDeferred(context, replayRecord, unit.sourceKey(), targetType, targetId, false, null);
+                return;
+            }
             ledger.markApplied(context.ownerId(), unit.sourceKey(), targetType, targetId);
         }
     }
 
-    private Optional<HistoricalViewingEvidence> findCompletePass(UUID ownerId, MediaReference content) {
-        if (content.type() != ContentType.SERIES && content.type() != ContentType.SEASON) return Optional.empty();
-        User owner = userRepository.findById(ownerId).orElseThrow();
-        String seriesId = content.type() == ContentType.SERIES ? content.tmdbId() : content.seriesTmdbId();
+    private Optional<HistoricalViewingEvidence> findCompletePass(
+            UUID ownerId, MediaReference content, ConfirmedWatchScopeSnapshot snapshot) {
         Instant now = clock.instant();
-        VersionedCompletionScope scope;
-        try {
-            scope = scopeLoader.load(content, owner.getPreferredRegion(), owner.getPreferredLanguage(), now);
-        } catch (NotFoundException | TmdbUnavailableException unavailableScope) {
+        if (snapshot == null || !content.equals(snapshot.target()) || !snapshot.releaseComplete()
+                || !snapshot.validUntil().isAfter(now) || snapshot.episodes().isEmpty()
+                || !watchedSummaryImportApplier.isPreparedScopeCurrent(ownerId, content, snapshot)) {
             return Optional.empty();
         }
-        if (!scope.scope().releaseComplete() || !scope.validUntil().isAfter(now)
-                || scope.scope().episodes().isEmpty()) return Optional.empty();
+        return findCompletePass(ownerId, content, Set.copyOf(snapshot.episodes()), true,
+                snapshot.validUntil(), snapshot.scheduleVersion(), now);
+    }
+
+    private Optional<HistoricalViewingEvidence> findCompletePass(
+            UUID ownerId, MediaReference content, Set<EpisodeCoordinate> expectedEpisodes,
+            boolean releaseComplete, Instant validUntil, String scheduleVersion, Instant now) {
+        if (!releaseComplete || !validUntil.isAfter(now) || expectedEpisodes.isEmpty()) return Optional.empty();
+        String seriesId = content.type() == ContentType.SERIES ? content.tmdbId() : content.seriesTmdbId();
 
         Map<Integer, PassEvents> passes = new HashMap<>();
         for (DiaryEntryRepository.EpisodeCompletionWatch watch : diaryEntryRepository
@@ -177,10 +229,10 @@ public class OpinionImportApplier implements ImportUnitApplier {
         return passes.entrySet().stream()
                 .sorted(Map.Entry.<Integer, PassEvents>comparingByKey().reversed())
                 .filter(entry -> !entry.getValue().hasDuplicateCoordinate
-                        && entry.getValue().coordinates.equals(scope.scope().episodes())
+                        && entry.getValue().coordinates.equals(expectedEpisodes)
                         && !entry.getValue().eventIds.isEmpty())
                 .findFirst()
-                .map(entry -> new HistoricalViewingEvidence(content, entry.getKey(), scope.scheduleVersion(),
+                .map(entry -> new HistoricalViewingEvidence(content, entry.getKey(), scheduleVersion,
                         Set.copyOf(entry.getValue().eventIds)));
     }
 
@@ -192,15 +244,18 @@ public class OpinionImportApplier implements ImportUnitApplier {
                     content.seasonNumber(), null, null, null);
             default -> throw new IllegalArgumentException("Historical opinions require a series or season");
         };
-        contentService.getOrCreateReference(reference);
+        contentService.getOrCreateReferenceFromVerifiedImport(reference);
     }
 
     private void defer(ImportExecutionContext context, ImportItem item, ImportedOpinionUnit unit, String reason) {
         ObjectNode provenance = objectMapper.createObjectNode().put("reason", reason)
-                .put("contentType", unit.content().type().name());
+                .put("resolutionState", "PENDING")
+                .put("contentType", unit.content().type().name())
+                .put("normalizedKind", item.getNormalizedKind().name());
         if (unit.content().tmdbId() != null) provenance.put("tmdbId", unit.content().tmdbId());
         if (unit.content().seriesTmdbId() != null) provenance.put("seriesTmdbId", unit.content().seriesTmdbId());
         if (unit.content().seasonNumber() != null) provenance.put("seasonNumber", unit.content().seasonNumber());
+        if (item.getResolvedTargetJson() != null) provenance.put("resolvedTargetJson", item.getResolvedTargetJson());
         try {
             ImportDeferredRecord deferred = deferredRepository.saveAndFlush(ImportDeferredRecord.builder()
                     .userId(context.ownerId()).sourceNamespace(item.getSourceNamespace())
@@ -214,9 +269,94 @@ public class OpinionImportApplier implements ImportUnitApplier {
         }
     }
 
+    private ImportDeferredRecord deferredRecordForUpdate(ImportExecutionContext context, ImportItem item) {
+        if (!"deferred_opinion_replay".equals(item.getObjectKind())) return null;
+        UUID deferredId;
+        try {
+            deferredId = UUID.fromString(item.getSourceId());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("Deferred replay identity is invalid", exception);
+        }
+        ImportDeferredRecord deferred = deferredRepository.findByIdAndUserIdForUpdate(deferredId, context.ownerId())
+                .orElse(null);
+        if (deferred == null) return null;
+        JsonNode payload = readPayload(item.getPayloadJson());
+        JsonNode marker = payload.path("_deferredReplay");
+        if (!marker.isObject()) marker = payload.path("source").path("_deferredReplay");
+        if (!deferredId.toString().equals(marker.path("deferredRecordId").asString())
+                || !deferred.getSourceNamespace().equals(marker.path("originalSourceNamespace").asString())
+                || !deferred.getObjectKind().equals(marker.path("originalObjectKind").asString())
+                || !deferred.getSourceId().equals(marker.path("originalSourceId").asString())) {
+            throw new IllegalStateException("Deferred replay provenance does not match its stored record");
+        }
+        ExternalImportLink link = externalLinkRepository.findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
+                context.ownerId(), deferred.getSourceNamespace(), deferred.getObjectKind(), deferred.getSourceId())
+                .orElseThrow(() -> new IllegalStateException("Deferred source link is missing"));
+        if (link.getState() != com.watchwise.watchwise_api.platformimport.model.ImportLinkState.APPLIED
+                || !"IMPORT_DEFERRED_RECORD".equals(link.getTargetType())
+                || !deferredId.equals(link.getTargetId())) {
+            return null;
+        }
+        return deferred;
+    }
+
+    private void skipReplay(ImportExecutionContext context, ImportItem item, ImportDeferredRecord deferred) {
+        if (deferred == null) {
+            ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, "DEFERRED_OPINION_ALREADY_RESOLVED");
+            return;
+        }
+        completeDeferred(context, deferred, sourceKey(item), null, null, true, "USER_SKIPPED_DEFERRED_OPINION");
+    }
+
+    private void completeDeferred(ImportExecutionContext context, ImportDeferredRecord deferred,
+                                  ImportSourceKey replayKey, String targetType, UUID targetId,
+                                  boolean skipped, String reason) {
+        ImportSourceKey originalKey = new ImportSourceKey(deferred.getSourceNamespace(),
+                deferred.getObjectKind(), deferred.getSourceId());
+        if (!ledger.completeDeferred(context.ownerId(), originalKey, deferred.getId(),
+                targetType, targetId, skipped, reason)) {
+            throw new IllegalStateException("Deferred source link changed before opinion restoration");
+        }
+        markDeferredResolved(deferred, skipped, targetType, targetId, reason);
+        if (skipped) ledger.markSkipped(context.ownerId(), replayKey, null, null, reason);
+        else ledger.markApplied(context.ownerId(), replayKey, targetType, targetId);
+    }
+
+    private void markDeferredResolved(ImportDeferredRecord deferred, boolean skipped, String targetType,
+                                      UUID targetId, String reason) {
+        try {
+            ObjectNode provenance = (ObjectNode) readPayload(deferred.getProvenance()).deepCopy();
+            provenance.put("resolutionState", skipped ? "RESOLVED_SKIPPED" : "RESOLVED_RESTORED");
+            provenance.put("resolvedAt", clock.instant().toString());
+            if (reason != null) provenance.put("resolutionReason", reason);
+            if (targetType != null) provenance.put("targetType", targetType);
+            if (targetId != null) provenance.put("targetId", targetId.toString());
+            deferred.setProvenance(objectMapper.writeValueAsString(provenance));
+            deferredRepository.save(deferred);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Deferred opinion resolution could not be stored", exception);
+        }
+    }
+
+    private ImportSourceKey sourceKey(ImportItem item) {
+        return new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
+    }
+
+    private JsonNode readPayload(String payload) {
+        try {
+            return objectMapper.readTree(payload);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Deferred opinion payload is invalid", exception);
+        }
+    }
+
     private static final class PassEvents {
         private final Set<EpisodeCoordinate> coordinates = new HashSet<>();
         private final List<UUID> eventIds = new ArrayList<>();
         private boolean hasDuplicateCoordinate;
+    }
+
+    public static final class DeferredOpinionPendingException extends RuntimeException {
+        public DeferredOpinionPendingException(String message) { super(message); }
     }
 }

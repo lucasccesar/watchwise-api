@@ -178,6 +178,59 @@ class TraktExportParserTest {
     }
 
     @Test
+    void inventoryRecognizesSluggedPagesAndDoesNotTreatSlugYearAsPageNumber() {
+        TraktArchiveInspector inspector = new TraktArchiveInspector(mapper);
+        String metadata = "[{\"name\":\"One day\",\"item_count\":2,\"ids\":{\"trakt\":33626948}},"
+                + "{\"name\":\"Remake list\",\"item_count\":1,\"ids\":{\"trakt\":33626949}},"
+                + "{\"name\":\"Numeric slug pages\",\"item_count\":2,\"ids\":{\"trakt\":33626950}}]";
+        String oneItem = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Film\",\"ids\":{\"tmdb\":456}}}]";
+        Map<String, InputStream> files = new LinkedHashMap<>();
+        files.put("lists-lists.json", stream(metadata));
+        files.put("lists-list-33626948-one-day-1.json", stream(oneItem));
+        files.put("lists-list-33626948-one-day-2.json", stream(oneItem));
+        files.put("lists-list-33626949-remake-oct-2023.json", stream(oneItem));
+        files.put("lists-list-33626950-123-day-1000.json", stream(oneItem));
+        files.put("lists-list-33626950-123-day-1001.json", stream(oneItem));
+
+        ImportInventory inventory = inspector.inspectFiles(files);
+
+        assertThat(inventory.lists()).filteredOn(list -> list.sourceId().equals("33626948")).singleElement()
+                .satisfies(list -> assertThat(list.coverage()).isEqualTo("COMPLETE"));
+        assertThat(inventory.lists()).filteredOn(list -> list.sourceId().equals("33626949")).singleElement()
+                .satisfies(list -> assertThat(list.coverage()).isEqualTo("COMPLETE"));
+        assertThat(inventory.lists()).filteredOn(list -> list.sourceId().equals("33626950")).singleElement()
+                .satisfies(list -> assertThat(list.coverage()).isEqualTo("INCOMPLETE"));
+        assertThat(TraktArchiveInspector.selectListFiles(List.of(
+                "lists-list-33626948-one-day-2.json", "lists-list-33626948-one-day-1.json",
+                "lists-list-33626949-remake-oct-2023.json"), "33626948"))
+                .containsExactly("lists-list-33626948-one-day-1.json", "lists-list-33626948-one-day-2.json");
+        assertThat(TraktArchiveInspector.selectListFiles(List.of(
+                "lists-list-33626949-remake-oct-2023.json"), "33626949"))
+                .containsExactly("lists-list-33626949-remake-oct-2023.json");
+        assertThat(TraktArchiveInspector.selectListFiles(List.of(
+                "lists-list-33626950-123-day-1001.json", "lists-list-33626950-123-day-1000.json"), "33626950"))
+                .containsExactly("lists-list-33626950-123-day-1000.json", "lists-list-33626950-123-day-1001.json");
+    }
+
+    @Test
+    void archiveEntriesUseNaturalNumericOrderingForRestartStableTraktPages() throws Exception {
+        ImportLimits limits = new ImportLimits();
+        PrivateImportFileStore store = new PrivateImportFileStore(tempDir, limits);
+        byte[] archive = zip(new String[]{"export/watched-history-10.json", "export/watched-history-2.json",
+                        "export/watched-history-1.json"},
+                new String[]{"[]", "[]", "[]"});
+        String key = store.store(new ByteArrayInputStream(archive), limits.maxUploadBytes()).key();
+        SafeImportReader reader = new SafeImportReader(store, limits);
+
+        assertThat(reader.entryNames(key)).containsExactly(
+                "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
+        List<String> streamed = new ArrayList<>();
+        reader.forEachEntry(key, (path, input) -> streamed.add(path));
+        assertThat(streamed).containsExactly(
+                "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
+    }
+
+    @Test
     void duplicatePageAliasesCannotMakeInMemoryInventoryAppearComplete() {
         String metadata = "[{\"name\":\"Forty two\",\"item_count\":2,\"ids\":{\"trakt\":42}}]";
         String oneItem = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Film\",\"ids\":{\"tmdb\":456}}}]";

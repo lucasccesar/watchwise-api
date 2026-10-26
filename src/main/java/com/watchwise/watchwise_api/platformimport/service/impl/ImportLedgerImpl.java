@@ -76,6 +76,30 @@ public class ImportLedgerImpl implements ImportLedger {
  }
 
  @Override @Transactional
+ public boolean completeDeferred(UUID ownerId, ImportSourceKey sourceKey, UUID deferredRecordId,
+                                 String targetType, UUID targetId, boolean skipped, String reason) {
+  int updated = jdbc.update("""
+   UPDATE external_import_links SET state=?,target_type=?,target_id=?,outcome_reason=?,updated_at=CURRENT_TIMESTAMP
+   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=?
+     AND state='APPLIED' AND target_type='IMPORT_DEFERRED_RECORD' AND target_id=?
+   """, skipped ? ImportLinkState.SKIPPED.name() : ImportLinkState.APPLIED.name(),
+   targetType, targetId, reason, ownerId, sourceKey.namespace(), sourceKey.objectKind(), sourceKey.sourceId(),
+   deferredRecordId);
+  if (updated == 1) return true;
+  ExistingLink existing = jdbc.query("""
+   SELECT state,target_type,target_id,outcome_reason FROM external_import_links
+   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=?
+   """, rs -> rs.next() ? new ExistingLink(ImportLinkState.valueOf(rs.getString("state")),
+   rs.getString("target_type"), rs.getObject("target_id", UUID.class), rs.getString("outcome_reason")) : null,
+   ownerId, sourceKey.namespace(), sourceKey.objectKind(), sourceKey.sourceId());
+  ImportLinkState expectedState = skipped ? ImportLinkState.SKIPPED : ImportLinkState.APPLIED;
+  return existing != null && existing.state() == expectedState
+   && java.util.Objects.equals(existing.targetType(), targetType)
+   && java.util.Objects.equals(existing.targetId(), targetId)
+   && java.util.Objects.equals(existing.reason(), reason);
+ }
+
+ @Override @Transactional
  public void markDeletedByTarget(UUID ownerId, String targetType, UUID targetId) {
   jdbc.update("""
    UPDATE external_import_links SET state='TOMBSTONE', updated_at=CURRENT_TIMESTAMP

@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentrating.service.OpinionEligibility;
 import com.watchwise.watchwise_api.contentrating.service.OpinionEvidenceService;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidence;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidenceVerifier;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -129,6 +130,40 @@ public class ContentRatingServiceImpl implements ContentRatingService {
                 .updatedAt(now)
                 .build();
         historicalEvidenceVerifier.revalidate(ownerId, content, evidence, verified);
+        rating = ratingRepository.saveAndFlush(rating);
+        return Optional.of(rating.getId());
+    }
+
+    @Override
+    @Transactional
+    public Optional<UUID> restoreInitial(
+            UUID ownerId,
+            MediaReference reference,
+            Integer score,
+            HistoricalViewingEvidence evidence,
+            ConfirmedWatchScopeSnapshot preparedScope) {
+        requireScore(score);
+        if (evidence == null || preparedScope == null) {
+            throw new BadRequestException("Prepared historical viewing evidence is required");
+        }
+        Content content = resolveContent(reference);
+        Instant now = Instant.now();
+        HistoricalViewingEvidenceVerifier.Verification verified = historicalEvidenceVerifier.verifyPreparedScope(
+                ownerId, content, evidence, preparedScope, true, now);
+
+        userContentMutationLock.lock(ownerId);
+        if (ratingRepository.findByUserIdAndContentId(ownerId, content.getId()).isPresent()) {
+            return Optional.empty();
+        }
+        ContentRating rating = ContentRating.builder()
+                .userId(ownerId)
+                .contentId(content.getId())
+                .contentType(content.getType())
+                .score(score)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        historicalEvidenceVerifier.revalidatePreparedScope(ownerId, content, evidence, preparedScope, verified);
         rating = ratingRepository.saveAndFlush(rating);
         return Optional.of(rating.getId());
     }

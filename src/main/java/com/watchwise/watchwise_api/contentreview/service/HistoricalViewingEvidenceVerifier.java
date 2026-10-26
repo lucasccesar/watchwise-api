@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
 import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
@@ -82,6 +83,53 @@ public class HistoricalViewingEvidenceVerifier {
                 revisionAfter, scheduleVersion, versionedScope.validUntil(), completeScope, evidence.eventIds());
     }
 
+    public Verification verifyPreparedScope(
+            UUID ownerId,
+            Content content,
+            HistoricalViewingEvidence evidence,
+            ConfirmedWatchScopeSnapshot snapshot,
+            boolean requireCompleteScope,
+            Instant now) {
+        if (evidence == null || snapshot == null || now == null) {
+            throw new BadRequestException("A prepared historical scope is required");
+        }
+        requireTargetMatches(content, evidence.content());
+        if (!snapshot.target().equals(evidence.content())
+                || !snapshot.scheduleVersion().equals(evidence.scopeHash())
+                || !snapshot.validUntil().isAfter(now)) {
+            throw new ConflictException("The confirmed episode scope expired or changed before commit");
+        }
+        User owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        if (!matchesLocalScheduleRevision(content, owner, snapshot)) {
+            throw new ConflictException("Diary completion schedule changed after the episode scope was confirmed");
+        }
+
+        long revisionBefore = historyRevision(ownerId, seriesTmdbId(content));
+        List<DiaryEntryRepository.EpisodeCompletionWatch> eventRows = loadEvents(ownerId, content, evidence);
+        long revisionAfter = historyRevision(ownerId, seriesTmdbId(content));
+        if (revisionBefore != revisionAfter) {
+            throw new ConflictException("Diary evidence changed while historical evidence was checked");
+        }
+
+        Set<EpisodeCoordinate> expectedCoordinates = Set.copyOf(snapshot.episodes());
+        Set<EpisodeCoordinate> eventCoordinates = new HashSet<>();
+        boolean uniqueCoordinates = true;
+        for (DiaryEntryRepository.EpisodeCompletionWatch event : eventRows) {
+            uniqueCoordinates &= eventCoordinates.add(new EpisodeCoordinate(
+                    event.getSeasonNumber(), event.getEpisodeNumber()));
+        }
+        boolean completeScope = snapshot.releaseComplete()
+                && expectedCoordinates.equals(eventCoordinates)
+                && uniqueCoordinates
+                && evidence.watchNumber() > 0;
+        if (requireCompleteScope && !completeScope) {
+            throw new BadRequestException("Historical viewing evidence does not prove a complete pass");
+        }
+        return new Verification(revisionAfter, scheduleVersion(content, owner), snapshot.validUntil(),
+                completeScope, evidence.eventIds());
+    }
+
     public void revalidate(UUID ownerId, Content content, HistoricalViewingEvidence evidence, Verification verified) {
         if (evidence == null || verified == null) {
             throw new BadRequestException("Historical viewing evidence is required");
@@ -98,6 +146,35 @@ public class HistoricalViewingEvidenceVerifier {
         }
         if (verified.completionScopeProven() && !verified.validUntil().isAfter(clock.instant())) {
             throw new ConflictException("Diary completion scope expired while the historical opinion was being saved");
+        }
+    }
+
+    public void revalidatePreparedScope(UUID ownerId, Content content, HistoricalViewingEvidence evidence,
+                                        ConfirmedWatchScopeSnapshot snapshot, Verification verified) {
+        if (evidence == null || snapshot == null || verified == null) {
+            throw new BadRequestException("A prepared historical scope is required");
+        }
+        requireTargetMatches(content, evidence.content());
+        if (!snapshot.target().equals(evidence.content())
+                || !snapshot.scheduleVersion().equals(evidence.scopeHash())
+                || !snapshot.validUntil().isAfter(clock.instant())) {
+            throw new ConflictException("The confirmed episode scope expired before the opinion was saved");
+        }
+        if (historyRevision(ownerId, seriesTmdbId(content)) != verified.historyRevision()) {
+            throw new ConflictException("Diary evidence changed while the historical opinion was being saved");
+        }
+        List<DiaryEntryRepository.EpisodeCompletionWatch> rows = loadEvents(ownerId, content, evidence);
+        Set<EpisodeCoordinate> eventCoordinates = rows.stream()
+                .map(event -> new EpisodeCoordinate(event.getSeasonNumber(), event.getEpisodeNumber()))
+                .collect(Collectors.toSet());
+        if (snapshot.releaseComplete() && !Set.copyOf(snapshot.episodes()).equals(eventCoordinates)) {
+            throw new ConflictException("Diary completion evidence changed after the scope was confirmed");
+        }
+        User owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        if (!matchesLocalScheduleRevision(content, owner, snapshot)
+                || scheduleVersion(content, owner) != verified.scheduleVersion()) {
+            throw new ConflictException("Diary completion schedule changed while the historical opinion was being saved");
         }
     }
 
@@ -156,6 +233,22 @@ public class HistoricalViewingEvidenceVerifier {
                         owner.getPreferredLanguage())
                 .map(CalendarScheduleCompleteness::getScopeVersion)
                 .orElse(0L);
+    }
+
+    private boolean matchesLocalScheduleRevision(Content content, User owner,
+                                                 ConfirmedWatchScopeSnapshot snapshot) {
+        CalendarScheduleCompleteness.GroupType groupType = content.getType() == ContentType.SERIES
+                ? CalendarScheduleCompleteness.GroupType.SERIES
+                : CalendarScheduleCompleteness.GroupType.SEASON;
+        var marker = completenessRepository.findByGroupTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                groupType,
+                seriesTmdbId(content),
+                content.getType() == ContentType.SERIES ? null : content.getSeasonNumber(),
+                owner.getPreferredRegion(),
+                owner.getPreferredLanguage());
+        return marker.isPresent() == snapshot.localCalendarMarkerPresent()
+                && marker.map(CalendarScheduleCompleteness::getScopeVersion)
+                .orElse(0L) == snapshot.localCalendarScopeVersion();
     }
 
     private String seriesTmdbId(Content content) {

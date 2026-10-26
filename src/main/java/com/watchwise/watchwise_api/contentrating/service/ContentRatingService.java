@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.contentrating.service;
 import com.watchwise.watchwise_api.contentrating.dto.ContentRatingResponseDTO;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidence;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -18,4 +19,11 @@ public interface ContentRatingService {
             MediaReference content,
             Integer score,
             HistoricalViewingEvidence evidence);
+
+    Optional<UUID> restoreInitial(
+            UUID ownerId,
+            MediaReference content,
+            Integer score,
+            HistoricalViewingEvidence evidence,
+            ConfirmedWatchScopeSnapshot preparedScope);
 }

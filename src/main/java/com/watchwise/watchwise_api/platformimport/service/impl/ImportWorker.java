@@ -35,8 +35,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 @Component
 public class ImportWorker {
@@ -73,6 +75,8 @@ public class ImportWorker {
     private final PlatformContentResolver contentResolver;
     private final LetterboxdHistoryNormalizer letterboxdHistoryNormalizer;
     private final TraktHistoryNormalizer traktHistoryNormalizer;
+    private final DeferredOpinionReplayStager deferredOpinionReplayStager;
+    private final WatchScopeSnapshotPreparer watchScopeSnapshotPreparer;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final ImportLimits importLimits;
@@ -82,7 +86,10 @@ public class ImportWorker {
                         ImportItemRepository itemRepository, ImportUnitTransaction unitTransaction,
                         ImportModeRegistry modeRegistry, PlatformContentResolver contentResolver,
                         LetterboxdHistoryNormalizer letterboxdHistoryNormalizer,
-                        TraktHistoryNormalizer traktHistoryNormalizer, ObjectMapper objectMapper, Clock clock,
+                        TraktHistoryNormalizer traktHistoryNormalizer,
+                        DeferredOpinionReplayStager deferredOpinionReplayStager,
+                        WatchScopeSnapshotPreparer watchScopeSnapshotPreparer,
+                        ObjectMapper objectMapper, Clock clock,
                         ImportLimits importLimits,
                         @Value("${app.import.worker.enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
@@ -93,6 +100,8 @@ public class ImportWorker {
         this.contentResolver = contentResolver;
         this.letterboxdHistoryNormalizer = letterboxdHistoryNormalizer;
         this.traktHistoryNormalizer = traktHistoryNormalizer;
+        this.deferredOpinionReplayStager = deferredOpinionReplayStager;
+        this.watchScopeSnapshotPreparer = watchScopeSnapshotPreparer;
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.importLimits = importLimits;
@@ -186,7 +195,7 @@ public class ImportWorker {
         AtomicLong emittedOrdinal = new AtomicLong();
         AtomicLong acceptedCount = new AtomicLong(itemRepository.countByJobId(job.id()));
         List<NormalizedImportRecord> batch = new ArrayList<>(MAX_BATCH_SIZE);
-        modeRegistry.normalize(modeKey(job), readContext(job), selection, record -> {
+        Consumer<NormalizedImportRecord> collector = record -> {
             long globalOrdinal = emittedOrdinal.getAndIncrement();
             if (globalOrdinal > Integer.MAX_VALUE) {
                 if (!batch.isEmpty()) {
@@ -213,7 +222,9 @@ public class ImportWorker {
                 persistNormalized(context, batch, lastOrdinal, parserVersion);
                 batch.clear();
             }
-        });
+        };
+        ImportReadContext readContext = readContext(job);
+        modeRegistry.normalize(modeKey(job), readContext, selection, collector);
         if (!batch.isEmpty()) persistNormalized(context, batch, lastOrdinal, parserVersion);
         unitTransaction.finishNormalization(context);
     }
@@ -241,18 +252,133 @@ public class ImportWorker {
 
         if (!unavailable) markCollectionLengthIssues(context);
 
+        ImportSelection selection = selection(job.selectionJson());
         ImportUnitTransaction.ResolutionState state;
         if (unavailable) {
             state = ImportUnitTransaction.ResolutionState.RETRY;
         } else if (hasWaitingForUser(context)) {
             state = ImportUnitTransaction.ResolutionState.WAITING_FOR_USER;
         } else {
-            NormalizedHistoryPlan plan = normalizeHistory(job, context, selection(job.selectionJson()));
+            NormalizedHistoryPlan plan = normalizeHistory(job, context, selection);
             state = plan.issueCount() > 0
                     ? ImportUnitTransaction.ResolutionState.WAITING_FOR_USER
                     : ImportUnitTransaction.ResolutionState.READY;
         }
+        if (state != ImportUnitTransaction.ResolutionState.RETRY && selection.history()
+                && job.inputKind() == ImportInputKind.PLATFORM_ARCHIVE
+                && (job.sourceFormat() == ImportSourceFormat.TRAKT_ZIP
+                || job.sourceFormat() == ImportSourceFormat.LETTERBOXD_ZIP)) {
+            stageDeferredOpinionReplays(context);
+            if (prepareWatchScopeSnapshots(context)) {
+                state = ImportUnitTransaction.ResolutionState.WAITING_FOR_USER;
+            }
+        }
         unitTransaction.settleResolution(context, state);
+    }
+
+    private void stageDeferredOpinionReplays(ImportExecutionContext context) {
+        List<ImportRecordKind> relevantKinds = List.of(ImportRecordKind.DIARY_EVENT,
+                ImportRecordKind.SERIES_EXPANSION, ImportRecordKind.WATCHED_SUMMARY,
+                ImportRecordKind.WATCHED_MARKER, ImportRecordKind.REVIEW,
+                ImportRecordKind.CURRENT_RATING);
+        List<String> relevantOutcomes = List.of("MATCHED", "RESOLVED", "EXPANSION_PREPARED",
+                "AUXILIARY_EVIDENCE", "NORMALIZATION_ISSUE", "AMBIGUOUS", "NOT_FOUND");
+        java.util.Set<String> contentKeys = new java.util.LinkedHashSet<>();
+        java.util.Set<com.watchwise.watchwise_api.platformimport.model.ImportSourceKey> matchingScopeSources =
+                new java.util.LinkedHashSet<>();
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> page = itemRepository.findHistoryRowsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), relevantKinds, relevantOutcomes, afterOrdinal, afterId,
+                    PageRequest.of(0, MAX_BATCH_SIZE));
+            if (page.isEmpty()) break;
+            for (ImportItem item : page) {
+                afterOrdinal = item.getOrdinal();
+                afterId = item.getId();
+                if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
+                    continue;
+                }
+                boolean matchingSourceIdentity = item.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
+                        || item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
+                        || item.getNormalizedKind() == ImportRecordKind.REVIEW
+                        || item.getNormalizedKind() == ImportRecordKind.CURRENT_RATING;
+                if (matchingSourceIdentity) {
+                    matchingScopeSources.add(new com.watchwise.watchwise_api.platformimport.model.ImportSourceKey(
+                            item.getSourceNamespace(), item.getObjectKind(), item.getSourceId()));
+                }
+                if (item.getResolvedContentKey() == null) continue;
+                boolean detailedEvidence = item.getNormalizedKind() == ImportRecordKind.DIARY_EVENT
+                        || item.getNormalizedKind() == ImportRecordKind.SERIES_EXPANSION;
+                boolean explicitlyConfirmedScope = item.getDecision()
+                        == com.watchwise.watchwise_api.platformimport.model.ImportDecision.CONFIRM_WATCH_SCOPE;
+                boolean usableDetailedEvidence = detailedEvidence
+                        && !"NORMALIZATION_ISSUE".equals(item.getOutcome());
+                if (usableDetailedEvidence || explicitlyConfirmedScope) {
+                    contentKeys.add(item.getResolvedContentKey());
+                }
+            }
+            if (page.size() < MAX_BATCH_SIZE) break;
+        }
+        if (contentKeys.isEmpty() && matchingScopeSources.isEmpty()) return;
+
+        AtomicLong acceptedCount = new AtomicLong(
+                itemRepository.countByJobIdAndPlanGeneration(context.jobId(), context.planGeneration()));
+        List<NormalizedImportRecord> batch = new ArrayList<>(MAX_BATCH_SIZE);
+        Consumer<NormalizedImportRecord> collector = record -> {
+            batch.add(record);
+            if (batch.size() == MAX_BATCH_SIZE) {
+                acceptedCount.addAndGet(persistDeferredReplayBatch(context, batch));
+                batch.clear();
+                if (acceptedCount.get() > importLimits.maxRecords()) throw new RecordLimitExceededException();
+            }
+        };
+        deferredOpinionReplayStager.emit(context.ownerId(), context.sourceNamespace(), contentKeys,
+                matchingScopeSources, collector);
+        if (!batch.isEmpty()) acceptedCount.addAndGet(persistDeferredReplayBatch(context, batch));
+        if (acceptedCount.get() > importLimits.maxRecords()) throw new RecordLimitExceededException();
+    }
+
+    private int persistDeferredReplayBatch(ImportExecutionContext context, List<NormalizedImportRecord> records) {
+        int inserted = unitTransaction.stageDeferredOpinionReplays(context, List.copyOf(records));
+        if (inserted < 0) throw new StaleImportExecutionException();
+        return inserted;
+    }
+
+    private boolean prepareWatchScopeSnapshots(ImportExecutionContext context) {
+        List<ImportRecordKind> kinds = List.of(ImportRecordKind.WATCHED_SUMMARY,
+                ImportRecordKind.WATCHED_MARKER, ImportRecordKind.REVIEW, ImportRecordKind.CURRENT_RATING);
+        List<String> outcomes = List.of("MATCHED", "RESOLVED", "AUXILIARY_EVIDENCE");
+        Map<com.watchwise.watchwise_api.content.dto.MediaReference, WatchScopeSnapshotPreparer.LoadedScope> cache =
+                new java.util.HashMap<>();
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        boolean waitingForUser = false;
+        while (true) {
+            List<ImportItem> page = itemRepository.findHistoryRowsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), kinds, outcomes, afterOrdinal, afterId,
+                    PageRequest.of(0, MAX_BATCH_SIZE));
+            if (page.isEmpty()) break;
+            List<ImportUnitTransaction.WatchScopePreparation> prepared = new ArrayList<>();
+            for (ImportItem item : page) {
+                afterOrdinal = item.getOrdinal();
+                afterId = item.getId();
+                if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
+                    continue;
+                }
+                WatchScopeSnapshotPreparer.Prepared result =
+                        watchScopeSnapshotPreparer.prepare(context.ownerId(), item, cache);
+                if (result == null) continue;
+                prepared.add(new ImportUnitTransaction.WatchScopePreparation(result.itemId(), result.payloadJson(),
+                        result.outcome(), result.issue()));
+                waitingForUser |= result.waitingForUser();
+            }
+            if (!prepared.isEmpty() && !unitTransaction.saveWatchScopePreparations(context, prepared)) {
+                throw new StaleImportExecutionException();
+            }
+            if (page.size() < MAX_BATCH_SIZE) break;
+        }
+        return waitingForUser;
     }
 
     private void markCollectionLengthIssues(ImportExecutionContext context) {
@@ -311,6 +437,7 @@ public class ImportWorker {
 
     private NormalizedHistoryPlan normalizeHistory(ClaimedJob job, ImportExecutionContext context,
                                                    ImportSelection selection) {
+        if (!selection.history()) return NormalizedHistoryPlan.empty(job.id());
         return switch (job.sourceFormat()) {
             case TRAKT_ZIP, TRAKT_JSON -> traktHistoryNormalizer.normalize(context);
             case LETTERBOXD_ZIP, LETTERBOXD_CSV ->

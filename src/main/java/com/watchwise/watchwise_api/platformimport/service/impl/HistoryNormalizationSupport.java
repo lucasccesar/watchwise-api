@@ -132,7 +132,7 @@ public class HistoryNormalizationSupport {
             for (ImportItem item : page) {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
-                if (item.getDecision() == ImportDecision.SKIP_ITEM) continue;
+                if (item.getDecision() == ImportDecision.SKIP_ITEM || isDeferredOpinionReplay(item)) continue;
                 String problem = itemProblem(item, context);
                 if (problem != null) {
                     updates.add(issue(item, problem));
@@ -537,7 +537,7 @@ public class HistoryNormalizationSupport {
             for (ImportItem item : opinions) {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
-                if (item.getDecision() == ImportDecision.SKIP_ITEM || item.getIssue() != null
+                if (isDeferredOpinionReplay(item) || item.getDecision() == ImportDecision.SKIP_ITEM || item.getIssue() != null
                         || item.getResolvedTargetJson() == null) continue;
                 ImportTarget target = readTarget(item.getResolvedTargetJson());
                 if (!(target instanceof ImportTarget.ContentTarget contentTarget)) continue;
@@ -563,6 +563,10 @@ public class HistoryNormalizationSupport {
                     + "a rating alone does not create a watch.";
         }
         return null;
+    }
+
+    private boolean isDeferredOpinionReplay(ImportItem item) {
+        return "deferred_opinion_replay".equals(item.getObjectKind());
     }
 
     private void normalizeContentGroup(ImportExecutionContext context, String contentKey, boolean trakt) {
@@ -903,10 +907,10 @@ public class HistoryNormalizationSupport {
         }
         if (eventCount == 0) return new LatestEvent(null, false, null);
         if (tied) return new LatestEvent(latest, latestConsumed,
-                "The latest viewing date is tied without enough time information to choose an event.");
+                "LATEST_REVIEW_AMBIGUOUS: The latest viewing date is tied without enough time information to choose an event.");
         if (undatedCount > 0 && eventCount > 1) {
             return new LatestEvent(latest, latestConsumed,
-                    "The latest viewing cannot be determined because an event has no watched date.");
+                    "LATEST_REVIEW_AMBIGUOUS: The latest viewing cannot be determined because an event has no watched date.");
         }
         if (latest == null && eventCount == 1) {
             List<ImportItem> only = itemRepository.findHistoryTargetFragmentsAfter(context.jobId(), context.ownerId(),

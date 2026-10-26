@@ -21,15 +21,22 @@ import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
+import com.watchwise.watchwise_api.platformimport.model.ConfirmedWatchScopeSnapshot;
+import com.watchwise.watchwise_api.platformimport.dto.ImportWatchScopePreviewDTO;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
+import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
+import com.watchwise.watchwise_api.platformimport.repository.ImportDeferredRecordRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportPreviewServiceImpl;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportedReviewTextNormalizer;
+import com.watchwise.watchwise_api.platformimport.service.impl.DeferredOpinionReplayStager;
 import com.watchwise.watchwise_api.platformimport.service.ExternalContentAliasService;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +84,15 @@ class ImportPreviewServiceTest {
     private ImportItemRepository importItemRepository;
 
     @Mock
+    private ImportDeferredRecordRepository deferredRecordRepository;
+
+    @Mock
+    private DeferredOpinionReplayStager deferredOpinionReplayStager;
+
+    @Mock
+    private CalendarScheduleCompletenessRepository scheduleCompletenessRepository;
+
+    @Mock
     private ImportModeRegistry importModeRegistry;
 
     @Mock
@@ -84,6 +100,9 @@ class ImportPreviewServiceTest {
 
     @Mock
     private UserListRepository userListRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ImportLimits importLimits = new ImportLimits();
@@ -94,8 +113,11 @@ class ImportPreviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ImportPreviewServiceImpl(importJobRepository, importItemRepository, importModeRegistry,
-                externalContentAliasService, userListRepository, objectMapper, new ImportedReviewTextNormalizer(),
+        service = new ImportPreviewServiceImpl(importJobRepository, importItemRepository,
+                deferredRecordRepository, deferredOpinionReplayStager, scheduleCompletenessRepository,
+                importModeRegistry,
+                externalContentAliasService, userListRepository, userRepository,
+                objectMapper, new ImportedReviewTextNormalizer(),
                 importLimits, clock, pageRequestFactory);
     }
 
@@ -142,6 +164,198 @@ class ImportPreviewServiceTest {
         assertThat(result.digest()).isEqualTo(expectedDigest(jobId, 5, selectionJson));
         verify(importJobRepository).findOwnedByIdForUpdate(jobId, ownerId);
         verifyNoInteractions(importItemRepository);
+    }
+
+    @Test
+    @DisplayName("[select] Should Bind The External Account Namespace - When Account Identity Is Supplied")
+    void shouldBindExternalAccountNamespaceWhenAccountIdentityIsSupplied() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.AWAITING_SELECTION);
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        ImportModeKey mode = new ImportModeKey(job.getInputKind(), job.getSourceFormat());
+        when(importModeRegistry.require(mode)).thenReturn(emptyModeHandler(mode));
+        when(importItemRepository.countByJobId(jobId)).thenReturn(0L);
+        ObjectNode metadata = objectMapper.createObjectNode().put("sourceAccount", "letterboxd-lucas");
+
+        service.select(ownerId, jobId, new ImportSelection(true, false, Set.of(), metadata), 4);
+
+        assertThat(job.getSourceAccountId()).isEqualTo("letterboxd-lucas");
+        assertThat(job.getSourceNamespace()).isEqualTo("TRAKT:ACCOUNT:letterboxd-lucas");
+        verify(importItemRepository).countByJobId(jobId);
+    }
+
+    @Test
+    @DisplayName("[select] Should Reject A Different External Account - When Upload Already Bound One")
+    void shouldRejectDifferentExternalAccountWhenUploadAlreadyBoundOne() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        ImportJob job = ImportJob.builder()
+                .id(jobId).userId(ownerId).inputKind(ImportInputKind.PLATFORM_ARCHIVE)
+                .sourceFormat(ImportSourceFormat.TRAKT_ZIP).platform(ImportPlatform.TRAKT)
+                .sourceAccountId("upload-account").sourceNamespace("TRAKT:ACCOUNT:upload-account")
+                .state(ImportJobState.AWAITING_SELECTION).version(9).previewVersion(4)
+                .selectionJson("{}").timezone("UTC").storageKey("private-key").uploadSizeBytes(10)
+                .workPending(false).createdAt(LocalDateTime.of(2026, 10, 21, 0, 0))
+                .updatedAt(LocalDateTime.of(2026, 10, 21, 0, 0)).build();
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        ImportModeKey mode = new ImportModeKey(job.getInputKind(), job.getSourceFormat());
+        when(importModeRegistry.require(mode)).thenReturn(emptyModeHandler(mode));
+        ObjectNode metadata = objectMapper.createObjectNode().put("sourceAccount", "other-account");
+
+        assertThatThrownBy(() -> service.select(ownerId, jobId,
+                new ImportSelection(true, false, Set.of(), metadata), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Source account does not match the uploaded account");
+
+        assertThat(job.getSourceAccountId()).isEqualTo("upload-account");
+        assertThat(job.getSourceNamespace()).isEqualTo("TRAKT:ACCOUNT:upload-account");
+        verifyNoInteractions(importItemRepository);
+    }
+
+    @Test
+    @DisplayName("[select] Should Keep The Job Awaiting Selection - When Archive Account Identity Is Missing")
+    void shouldRequireExternalAccountBeforeArchiveNormalization() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.AWAITING_SELECTION);
+        job.setSourceNamespace("TRAKT:OWNER:" + ownerId);
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        ImportModeKey mode = new ImportModeKey(job.getInputKind(), job.getSourceFormat());
+        when(importModeRegistry.require(mode)).thenReturn(emptyModeHandler(mode));
+
+        assertThatThrownBy(() -> service.select(ownerId, jobId,
+                new ImportSelection(true, false, Set.of(), null), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Source account identifier is required before archive normalization");
+
+        assertThat(job.getState()).isEqualTo(ImportJobState.AWAITING_SELECTION);
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+        assertThat(job.getSelectionJson()).isEqualTo("{}");
+        verifyNoInteractions(importItemRepository);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject Episodes Outside The Resolved Series - When Scope Is Confirmed")
+    void shouldRejectConfirmedEpisodesOutsideResolvedSeries() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem summary = item(itemId, jobId, 4, ImportRecordKind.WATCHED_SUMMARY, "{}", 1);
+        summary.setResolvedTargetJson(objectMapper.writeValueAsString(
+                new ImportTarget.ContentTarget(MediaReference.series("123"))));
+        seedWatchScopeSnapshot(summary, MediaReference.series("123"), "schedule-v2",
+                Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(summary));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ConfirmWatchScope(itemId,
+                        ImportResolutionOperation.WatchScope.SPECIFIC_EPISODES,
+                        "schedule-v1", List.of(MediaReference.episode("999", 1, 1)))), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Watch scope episodes must belong to the resolved series or season");
+
+        assertThat(summary.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Stale Watch Scope Version - When Schedule Changed After Preview")
+    void shouldRejectStaleWatchScopeVersionWhenScheduleChangedAfterPreview() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem summary = item(itemId, jobId, 4, ImportRecordKind.WATCHED_SUMMARY, "{}", 1);
+        summary.setResolvedTargetJson(objectMapper.writeValueAsString(
+                new ImportTarget.ContentTarget(MediaReference.series("123"))));
+        seedWatchScopeSnapshot(summary, MediaReference.series("123"), "schedule-v2",
+                Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(summary));
+        User owner = mock(User.class);
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ConfirmWatchScope(itemId,
+                        ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES, "schedule-v1",
+                        List.of(MediaReference.episode("123", 1, 1)))), 4))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Episode schedule changed; refresh the import preview and confirm again");
+
+        assertThat(summary.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject Specific Episodes Outside The Released Scope")
+    void shouldRejectSpecificEpisodesOutsideCurrentReleasedScope() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem summary = item(itemId, jobId, 4, ImportRecordKind.WATCHED_SUMMARY, "{}", 1);
+        summary.setResolvedTargetJson(objectMapper.writeValueAsString(
+                new ImportTarget.ContentTarget(MediaReference.series("123"))));
+        seedWatchScopeSnapshot(summary, MediaReference.series("123"), "schedule-v1",
+                Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(summary));
+        User owner = mock(User.class);
+        when(owner.getPreferredRegion()).thenReturn("US");
+        when(owner.getPreferredLanguage()).thenReturn("en-US");
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ConfirmWatchScope(itemId,
+                        ImportResolutionOperation.WatchScope.SPECIFIC_EPISODES, "schedule-v1",
+                        List.of(MediaReference.episode("123", 1, 99)))), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Confirmed episodes are outside the current released schedule");
+
+        assertThat(summary.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Resume Deferred Opinion - When The User Confirms Its Watch Scope")
+    void shouldResumeDeferredOpinionWhenWatchScopeIsConfirmed() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem replay = ImportItem.builder().id(itemId).jobId(jobId).planGeneration(4)
+                .normalizedKind(ImportRecordKind.REVIEW).sourceNamespace("trakt")
+                .objectKind("deferred_opinion_replay").sourceId("deferred-id")
+                .payloadJson("{}").ordinal(1).outcome("NORMALIZATION_ISSUE")
+                .issue("OPINION_EVIDENCE_PENDING: A complete pass is required.")
+                .resolvedTargetJson(objectMapper.writeValueAsString(
+                        new ImportTarget.ContentTarget(MediaReference.series("123"))))
+                .build();
+        seedWatchScopeSnapshot(replay, MediaReference.series("123"), "schedule-v1",
+                Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(replay));
+        User owner = mock(User.class);
+        when(owner.getPreferredRegion()).thenReturn("US");
+        when(owner.getPreferredLanguage()).thenReturn("en-US");
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        service.resolve(ownerId, jobId, List.of(new ImportResolutionOperation.ConfirmWatchScope(itemId,
+                ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES, "schedule-v1",
+                List.of(MediaReference.episode("123", 1, 1), MediaReference.episode("123", 1, 2)))), 4);
+
+        assertThat(replay.getDecision()).isEqualTo(ImportDecision.CONFIRM_WATCH_SCOPE);
+        assertThat(replay.getOutcome()).isEqualTo("RESOLVED");
+        assertThat(replay.getIssue()).isNull();
+        assertThat(replay.getPayloadJson()).contains("confirmWatchScope");
     }
 
     @Test
@@ -698,8 +912,38 @@ class ImportPreviewServiceTest {
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
                         itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null, null, null, null,
-                        null, null, false, null, null, false, null, null, false));
+                        null, null, false, null, null, false, null, null, false, null));
         assertThat(result.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[preview] Should Expose Watch Scope For Deferred Replay - When The Pending Opinion Targets A Series")
+    void shouldExposeExactWatchScopePreviewForDeferredReplayItems() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem replay = ImportItem.builder().id(itemId).jobId(jobId).planGeneration(4)
+                .normalizedKind(ImportRecordKind.REVIEW).sourceNamespace("trakt")
+                .objectKind("deferred_opinion_replay").sourceId("deferred-id")
+                .payloadJson("{}").ordinal(1)
+                .resolvedTargetJson(objectMapper.writeValueAsString(
+                        new ImportTarget.ContentTarget(MediaReference.series("123"))))
+                .build();
+        seedWatchScopeSnapshot(replay, MediaReference.series("123"), "schedule-v1",
+                Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)));
+        when(importJobRepository.findOwnedById(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                jobId, 4, PageRequest.of(0, 20)))
+                .thenReturn(new PageImpl<>(List.of(replay), PageRequest.of(0, 20), 1));
+        var preview = service.preview(ownerId, jobId, 0, 20).getContent().getFirst();
+
+        assertThat(preview.watchScopePreview()).isNotNull();
+        assertThat(preview.watchScopePreview().available()).isTrue();
+        assertThat(preview.watchScopePreview().scheduleVersion()).isEqualTo("schedule-v1");
+        assertThat(preview.watchScopePreview().episodes())
+                .containsExactly(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2));
     }
 
     @Test
@@ -915,7 +1159,7 @@ class ImportPreviewServiceTest {
 
     @Test
     @DisplayName("[resolve] Should Store Every Operation Mapping - When A Mixed Resolution Batch Is Applied")
-    void shouldStoreEveryOperationMappingWhenAMixedResolutionBatchIsApplied() {
+    void shouldStoreEveryOperationMappingWhenAMixedResolutionBatchIsApplied() throws Exception {
         UUID ownerId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
         ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
@@ -928,6 +1172,10 @@ class ImportPreviewServiceTest {
         ImportItem editField = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 3);
         ImportItem assignPass = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 4);
         ImportItem watchScope = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.WATCHED_SUMMARY, "{}", 5);
+        watchScope.setResolvedTargetJson(objectMapper.writeValueAsString(
+                new ImportTarget.ContentTarget(MediaReference.series("123"))));
+        seedWatchScopeSnapshot(watchScope, MediaReference.series("123"), "schedule-v1",
+                Set.of(new EpisodeCoordinate(1, 1)));
         ImportItem listMetadata = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.LIST_METADATA, "{}", 6);
         UUID reviewId = UUID.randomUUID();
         UUID beforeReviewId = UUID.randomUUID();
@@ -980,7 +1228,10 @@ class ImportPreviewServiceTest {
         UserList linkedList = mock(UserList.class);
         when(linkedList.getUser()).thenReturn(listOwner);
         when(userListRepository.findById(targetListId)).thenReturn(Optional.of(linkedList));
-
+        User scopeOwner = mock(User.class);
+        when(scopeOwner.getPreferredRegion()).thenReturn("US");
+        when(scopeOwner.getPreferredLanguage()).thenReturn("en-US");
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(scopeOwner));
         List<ImportResolutionOperation> operations = List.of(
                 new ImportResolutionOperation.ResolveTarget(resolveTarget.getId(),
                         new ImportTarget.ContentTarget(MediaReference.movie("123"))),
@@ -989,7 +1240,8 @@ class ImportPreviewServiceTest {
                         ImportResolutionOperation.EditableField.TITLE, "Edited"),
                 new ImportResolutionOperation.AssignPass(assignPass.getId(), 2),
                 new ImportResolutionOperation.ConfirmWatchScope(watchScope.getId(),
-                        ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES, List.of()),
+                        ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES, "schedule-v1",
+                        List.of(MediaReference.episode("123", 1, 1))),
                 new ImportResolutionOperation.LinkImportedList(listMetadata.getId(), targetListId),
                 new ImportResolutionOperation.ResolveReviewOrder(reviewId, beforeReviewId),
                 new ImportResolutionOperation.RemoveNominee(nominee.getId()),
@@ -1084,6 +1336,24 @@ class ImportPreviewServiceTest {
     private void setPlanGeneration(ImportJob job, long generation) {
         job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":" + generation
                 + ",\"selection\":{\"history\":false,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
+    }
+
+    private void seedWatchScopeSnapshot(ImportItem item, MediaReference target, String scheduleVersion,
+                                        Set<EpisodeCoordinate> episodes) throws Exception {
+        List<EpisodeCoordinate> ordered = episodes.stream()
+                .sorted(java.util.Comparator.comparingInt(EpisodeCoordinate::seasonNumber)
+                        .thenComparingInt(EpisodeCoordinate::episodeNumber)).toList();
+        Instant validUntil = Instant.parse("2026-10-23T00:00:00Z");
+        ConfirmedWatchScopeSnapshot snapshot = new ConfirmedWatchScopeSnapshot(target, scheduleVersion,
+                validUntil, true, ordered, false, 0);
+        ObjectNode envelope = objectMapper.createObjectNode().put("_watchwiseResolution", 1);
+        envelope.set("source", objectMapper.readTree(item.getPayloadJson()));
+        ObjectNode resolution = envelope.putObject("resolution");
+        resolution.set("fields", objectMapper.createObjectNode());
+        resolution.set("watchScopeSnapshot", objectMapper.valueToTree(snapshot));
+        resolution.set("watchScopePreview", objectMapper.valueToTree(new ImportWatchScopePreviewDTO(
+                true, null, scheduleVersion, validUntil, true, ordered)));
+        item.setPayloadJson(objectMapper.writeValueAsString(envelope));
     }
 
     private ImportModeHandler emptyModeHandler(ImportModeKey mode) {
