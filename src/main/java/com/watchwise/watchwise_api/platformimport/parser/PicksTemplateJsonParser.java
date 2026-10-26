@@ -40,8 +40,14 @@ public class PicksTemplateJsonParser {
         if (input == null) throw invalid("JSON input is required");
         long maxBytes = Math.min(MAX_BYTES, limits.maxTemplateUploadBytes());
         if (maxBytes < 1) throw invalid("JSON byte limit is invalid");
+        byte[] bytes;
         try {
-            byte[] bytes = input.readNBytes(Math.toIntExact(maxBytes + 1));
+            bytes = input.readNBytes(Math.toIntExact(maxBytes + 1));
+        } catch (IOException | BadRequestException ex) {
+            log.debug("Failed to read Picks template JSON", ex);
+            throw invalid("Invalid template JSON");
+        }
+        try {
             if (bytes.length > maxBytes) throw invalid("JSON exceeds byte limit");
             JsonFactory factory = JsonFactory.builder()
                     .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -54,9 +60,7 @@ public class PicksTemplateJsonParser {
                 if (parser.nextToken() != null) throw invalid("Trailing JSON content");
                 return document(root);
             }
-        } catch (BadRequestException ex) {
-            throw ex;
-        } catch (JacksonException | IOException ex) {
+        } catch (JacksonException ex) {
             log.debug("Rejected malformed Picks template JSON", ex);
             throw invalid("Invalid template JSON");
         }

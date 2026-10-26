@@ -213,6 +213,8 @@ class PicksTemplateJsonParserTest {
     void mapsMalformedJsonAndIoFailuresButPropagatesUncheckedStreamFailures() {
         assertThatThrownBy(() -> parse("{\"title\":"))
                 .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
+        assertThatThrownBy(() -> parse("{\"title\":\"T\",\"categories\":[]}"))
+                .isInstanceOf(BadRequestException.class).hasMessage("categories must contain 1 to 100 entries");
         InputStream failingStream = new InputStream() {
             @Override public int read() throws IOException { throw new IOException("C:\\private\\secret.json"); }
         };
@@ -223,6 +225,15 @@ class PicksTemplateJsonParserTest {
         };
         assertThatThrownBy(() -> parser.parse(uncheckedFailingStream))
                 .isInstanceOf(IllegalStateException.class).hasMessage("internal stream bug");
+    }
+
+    @Test
+    void hidesBadRequestDetailsThrownWhileReadingInput() {
+        InputStream failingStream = new InputStream() {
+            @Override public int read() { throw new BadRequestException("internal detail"); }
+        };
+        assertThatThrownBy(() -> parser.parse(failingStream))
+                .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
     }
 
     private String valid() { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\"}]}"; }
