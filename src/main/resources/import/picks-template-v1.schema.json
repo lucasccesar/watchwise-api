@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchwise.app/schemas/picks-template-v1.schema.json",
+  "title": "Watchwise Picks template import v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "categories"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "title": {"$ref": "#/$defs/name"},
+    "description": {"type": "string"},
+    "coverImage": {"type": "string", "maxLength": 2048, "format": "uri", "pattern": "^https?://"},
+    "instructions": {"type": "string"},
+    "eligibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "end": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      },
+      "$comment": "The parser additionally requires start <= end."
+    },
+    "categories": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"oneOf": [
+      {"$ref": "#/$defs/movieCategory"}, {"$ref": "#/$defs/seriesCategory"},
+      {"$ref": "#/$defs/episodeCategory"}, {"$ref": "#/$defs/personCategory"}
+    ]}}
+  },
+  "$defs": {
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
+    "query": {"type": "string", "pattern": "\\S"},
+    "id": {"type": "string", "pattern": "^[0-9]+$"},
+    "group": {"type": "string", "pattern": "^\\s*([pP][rR][iI][mM][aA][rR][yY]|[sS][eE][cC][oO][nN][dD][aA][rR][yY])\\s*$"},
+    "movieCategory": {"$ref": "#/$defs/mediaCategory", "properties": {"type": {"type": "string", "pattern": "^\\s*[mM][oO][vV][iI][eE]\\s*$"}}},
+    "seriesCategory": {"$ref": "#/$defs/mediaCategory", "properties": {"type": {"type": "string", "pattern": "^\\s*[sS][eE][rR][iI][eE][sS]\\s*$"}}},
+    "mediaCategory": {
+      "type": "object", "additionalProperties": false, "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "type": {"type": "string"}, "group": {"$ref": "#/$defs/group"},
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+          "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/mediaNominee"}]}}
+      }
+    },
+    "episodeCategory": {
+      "type": "object", "additionalProperties": false, "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "type": {"type": "string", "pattern": "^\\s*[eE][pP][iI][sS][oO][dD][eE]\\s*$"},
+        "group": {"$ref": "#/$defs/group"},
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+          "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/episodeNominee"}]}}
+      }
+    },
+    "personCategory": {
+      "type": "object", "additionalProperties": false, "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "type": {"type": "string", "pattern": "^\\s*[pP][eE][rR][sS][oO][nN]\\s*$"},
+        "group": {"$ref": "#/$defs/group"},
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+          "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/personNominee"}]}}
+      }
+    },
+    "mediaNominee": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "tmdbId": {"$ref": "#/$defs/id"}, "title": {"$ref": "#/$defs/query"},
+        "releaseYear": {"type": "integer", "minimum": 1}
+      },
+      "anyOf": [{"required": ["tmdbId"]}, {"required": ["title", "releaseYear"]}]
+    },
+    "episodeNominee": {
+      "type": "object", "additionalProperties": false,
+      "required": ["seriesTmdbId", "seasonNumber", "episodeNumber"],
+      "properties": {
+        "seriesTmdbId": {"$ref": "#/$defs/id"},
+        "seasonNumber": {"type": "integer", "minimum": 0},
+        "episodeNumber": {"type": "integer", "minimum": 1}
+      }
+    },
+    "personNominee": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "personTmdbId": {"$ref": "#/$defs/id"},
+        "name": {"$ref": "#/$defs/query"},
+        "contextContent": {"$ref": "#/$defs/contextContent"}
+      },
+      "anyOf": [{"required": ["personTmdbId"]}, {"required": ["name"]}]
+    },
+    "contextContent": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["type", "tmdbId"],
+        "properties": {"type": {"type": "string", "pattern": "^\\s*([mM][oO][vV][iI][eE]|[sS][eE][rR][iI][eE][sS])\\s*$"}, "tmdbId": {"$ref": "#/$defs/id"}}},
+      {"type": "object", "additionalProperties": false,
+        "required": ["type", "seriesTmdbId", "seasonNumber", "episodeNumber"],
+        "properties": {"type": {"type": "string", "pattern": "^\\s*[eE][pP][iI][sS][oO][dD][eE]\\s*$"},
+          "seriesTmdbId": {"$ref": "#/$defs/id"}, "seasonNumber": {"type": "integer", "minimum": 0},
+          "episodeNumber": {"type": "integer", "minimum": 1}}}
+    ]}
+  },
+  "$comment": "The parser also enforces total nominees <= 5000, upload byte/depth limits, duplicate keys, trailing tokens, and chronological eligibility."
+}

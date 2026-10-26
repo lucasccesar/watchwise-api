@@ -1,0 +1,13 @@
+{
+  "title": "Classics Club Awards",
+  "description": "Crown the best movies, shows and performances from 1960 to 2009.",
+  "coverImage": "https://example.com/covers/classics-club.jpg",
+  "eligibility": {"start": "1960-01-01", "end": "2009-12-31"},
+  "categories": [
+    {"name": "Best movie", "type": "movie"},
+    {"name": "Best sequel", "type": "movie", "nominees": ["Back to the Future Part II", "The Empire Strikes Back", "Revenge of the Sith"]},
+    {"name": "Best series", "type": "series"},
+    {"name": "Best episode", "type": "episode"},
+    {"name": "Best lead performance", "type": "person", "nominees": ["Michael J. Fox", "Christopher Lloyd", "Lea Thompson", "Crispin Glover"]}
+  ]
+}
