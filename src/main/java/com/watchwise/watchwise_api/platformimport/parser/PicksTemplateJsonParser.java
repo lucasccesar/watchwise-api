@@ -6,9 +6,10 @@ import com.watchwise.watchwise_api.platformimport.model.TemplateImportDocument;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
-import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
@@ -17,6 +18,7 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -24,7 +26,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 @Component
@@ -55,7 +56,7 @@ public class PicksTemplateJsonParser {
             }
         } catch (BadRequestException ex) {
             throw ex;
-        } catch (Exception ex) {
+        } catch (JacksonException | IOException ex) {
             log.debug("Rejected malformed Picks template JSON", ex);
             throw invalid("Invalid template JSON");
         }
@@ -231,7 +232,15 @@ public class PicksTemplateJsonParser {
             throw invalid(key + " is required");
         }
         if (!value.isTextual()) throw invalid("Invalid " + key);
-        try { return Enum.valueOf(type, trimEcmaWhitespace(value.asString()).toUpperCase(Locale.ROOT)); }
+        String spelling = trimEcmaWhitespace(value.asString());
+        StringBuilder asciiUppercase = new StringBuilder(spelling.length());
+        for (int index = 0; index < spelling.length(); index++) {
+            char character = spelling.charAt(index);
+            if (character > 0x7F) throw invalid("Invalid " + key);
+            asciiUppercase.append(character >= 'a' && character <= 'z'
+                    ? (char) (character - 'a' + 'A') : character);
+        }
+        try { return Enum.valueOf(type, asciiUppercase.toString()); }
         catch (IllegalArgumentException ex) { throw invalid("Invalid " + key); }
     }
 

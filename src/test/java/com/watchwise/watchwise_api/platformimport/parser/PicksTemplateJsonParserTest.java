@@ -176,6 +176,20 @@ class PicksTemplateJsonParserTest {
     }
 
     @Test
+    void rejectsNonAsciiEnumCaseFoldingThatSchemaPatternDoesNotAllow() {
+        String dotlessIType = "MOV\u0131E";
+        Pattern movieTypePattern = Pattern.compile(
+                schema().at("/$defs/movieCategory/properties/type/pattern").asString(), Pattern.UNICODE_CHARACTER_CLASS);
+        assertThat(movieTypePattern.matcher(dotlessIType).matches()).isFalse();
+        assertRejected(baseCategory("\"type\":\"" + dotlessIType + "\""));
+
+        String dotlessIGroup = "PR\u0131MARY";
+        Pattern groupPattern = Pattern.compile(schema().at("/$defs/group/pattern").asString(), Pattern.UNICODE_CHARACTER_CLASS);
+        assertThat(groupPattern.matcher(dotlessIGroup).matches()).isFalse();
+        assertRejected(baseCategory("\"type\":\"MOVIE\",\"group\":\"" + dotlessIGroup + "\""));
+    }
+
+    @Test
     void usesUnicodeCodePointsForLengthAndEcmaWhitespaceNormalization() {
         String emoji = "\uD83D\uDE03";
         String acceptedTitle = emoji.repeat(120);
@@ -196,7 +210,7 @@ class PicksTemplateJsonParserTest {
     }
 
     @Test
-    void hidesLowLevelJsonAndInputStreamDiagnosticsFromClient() {
+    void mapsMalformedJsonAndIoFailuresButPropagatesUncheckedStreamFailures() {
         assertThatThrownBy(() -> parse("{\"title\":"))
                 .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
         InputStream failingStream = new InputStream() {
@@ -204,6 +218,11 @@ class PicksTemplateJsonParserTest {
         };
         assertThatThrownBy(() -> parser.parse(failingStream))
                 .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
+        InputStream uncheckedFailingStream = new InputStream() {
+            @Override public int read() { throw new IllegalStateException("internal stream bug"); }
+        };
+        assertThatThrownBy(() -> parser.parse(uncheckedFailingStream))
+                .isInstanceOf(IllegalStateException.class).hasMessage("internal stream bug");
     }
 
     private String valid() { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\"}]}"; }
