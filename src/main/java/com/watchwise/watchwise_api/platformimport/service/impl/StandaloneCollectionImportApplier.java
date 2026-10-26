@@ -63,15 +63,14 @@ public class StandaloneCollectionImportApplier {
         PreparedListImport plan = prepared(context, null, original);
         String fingerprint = fingerprints.ofList(context, plan);
         ImportSourceKey alias = localIdentity(context, fingerprint);
+        UUID explicitTarget = plan.linkedListId();
+        UUID externalTarget = externalIdentityTarget(context, plan);
+        if (explicitTarget != null && externalTarget != null && !explicitTarget.equals(externalTarget)) {
+            throw new BadRequestException("This source list is already linked to another Watchwise list");
+        }
+        UUID preferredTarget = explicitTarget == null ? externalTarget : explicitTarget;
         LinkReservation aliasReservation = ledger.reserve(context.ownerId(), context.jobId(), alias,
                 plan.operationKey().sourceId());
-        if (aliasReservation.state() == ImportLinkState.TOMBSTONE
-                || aliasReservation.state() == ImportLinkState.SKIPPED) {
-            skipExternalIdentity(context, plan);
-            ledger.markSkipped(context.ownerId(), plan.operationKey(), null, null,
-                    "SEMANTIC_LIST_TOMBSTONED");
-            return null;
-        }
         if (aliasReservation.state() == ImportLinkState.IN_PROGRESS
                 && aliasReservation.owningJobId() != null
                 && !context.jobId().equals(aliasReservation.owningJobId())) {
@@ -80,11 +79,18 @@ public class StandaloneCollectionImportApplier {
 
         UUID aliasTarget = aliasReservation.state() == ImportLinkState.APPLIED
                 ? aliasTarget(context, alias) : null;
-        UUID linkedTarget = plan.linkedListId();
-        if (aliasTarget != null && linkedTarget != null && !aliasTarget.equals(linkedTarget)) {
+        if (aliasTarget != null && preferredTarget != null && !aliasTarget.equals(preferredTarget)) {
             throw new BadRequestException("This list already has another Watchwise destination");
         }
-        if (linkedTarget == null) linkedTarget = aliasTarget;
+        UUID linkedTarget = preferredTarget == null ? aliasTarget : preferredTarget;
+        boolean aliasUnavailable = aliasReservation.state() == ImportLinkState.TOMBSTONE
+                || aliasReservation.state() == ImportLinkState.SKIPPED;
+        if (aliasUnavailable && linkedTarget == null) {
+            skipExternalIdentity(context, plan);
+            ledger.markSkipped(context.ownerId(), plan.operationKey(), null, null,
+                    "SEMANTIC_LIST_TOMBSTONED");
+            return null;
+        }
         if (!java.util.Objects.equals(linkedTarget, plan.linkedListId())) {
             plan = new PreparedListImport(plan.sourceKey(), plan.operationKey(), plan.name(), plan.description(),
                     plan.parentItemId(), plan.itemCount(), plan.declaredItemCount(), linkedTarget);
@@ -97,6 +103,9 @@ public class StandaloneCollectionImportApplier {
             }
             return null;
         }
+        if (aliasUnavailable) {
+            return target;
+        }
         if (aliasReservation.state() == ImportLinkState.APPLIED) {
             if (!target.equals(aliasTarget)) {
                 throw new BadRequestException("This list already has another Watchwise destination");
@@ -105,6 +114,24 @@ public class StandaloneCollectionImportApplier {
             ledger.markApplied(context.ownerId(), alias, "USER_LIST", target);
         }
         return target;
+    }
+
+    private UUID externalIdentityTarget(ImportExecutionContext context, PreparedListImport plan) {
+        if (!externalIdentity(plan.sourceKey())) return null;
+        ExternalImportLink existing = links.findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
+                        context.ownerId(), plan.sourceKey().namespace(), "user_list", plan.sourceKey().sourceId())
+                .filter(link -> link.getState() == ImportLinkState.APPLIED)
+                .orElse(null);
+        if (existing == null) return null;
+        if (!"USER_LIST".equals(existing.getTargetType()) || existing.getTargetId() == null) {
+            throw new IllegalStateException("Applied external list identity has an invalid target");
+        }
+        var destination = userLists.findById(existing.getTargetId())
+                .orElseThrow(() -> new NotFoundException("User list not found"));
+        if (destination.getUser() == null || !context.ownerId().equals(destination.getUser().getId())) {
+            throw new NotFoundException("User list not found");
+        }
+        return existing.getTargetId();
     }
 
     private UUID aliasTarget(ImportExecutionContext context, ImportSourceKey alias) {

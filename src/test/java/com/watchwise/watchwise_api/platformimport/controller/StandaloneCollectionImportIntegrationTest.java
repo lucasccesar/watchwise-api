@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.ImportedWatchAssertionRepository;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
+import com.watchwise.watchwise_api.platformimport.entity.ExternalImportLink;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
@@ -243,6 +244,43 @@ class StandaloneCollectionImportIntegrationTest {
                   AND target_id = ?
                 """, String.class, owner.getId(), "LETTERBOXD:OWNER:" + owner.getId(), deleted.getId()))
                 .isEqualTo("TOMBSTONE");
+    }
+
+    @Test
+    void stableExternalIdentityReusesLiveDestinationWhenSemanticAliasIsTombstoned() throws Exception {
+        User owner = createUser();
+        createMovie("76001");
+        ImportJob localJob = createJob(owner, ImportInputKind.SINGLE_LIST);
+        ImportItem local = createListMetadata(localJob, "local", "Stable list", "Same description", 0);
+        createListItem(localJob, "same-member-description", local.getSourceId(), "76001", 1);
+        apply(localJob, local);
+        completeJob(localJob);
+        UserList deleted = userLists.findByUserId(owner.getId()).getFirst();
+        userListService.deleteUserList(owner.getId(), deleted.getId());
+
+        LocalDateTime now = LocalDateTime.now();
+        UserList destination = userLists.saveAndFlush(UserList.builder().user(owner).name("Existing destination")
+                .visibility(com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC)
+                .createdAt(now).updatedAt(now).build());
+        String externalNamespace = "LETTERBOXD:ACCOUNT:letterboxd-test-account";
+        importLinks.saveAndFlush(ExternalImportLink.builder().userId(owner.getId())
+                .sourceNamespace(externalNamespace).objectKind("user_list").sourceId("external-list-93")
+                .state(com.watchwise.watchwise_api.platformimport.model.ImportLinkState.APPLIED)
+                .targetType("USER_LIST").targetId(destination.getId()).createdAt(now).updatedAt(now).build());
+
+        ImportJob externalJob = createJob(owner, ImportInputKind.SINGLE_LIST);
+        ImportItem external = createListMetadata(externalJob, "external-list-93", "Stable list",
+                "Same description", 0);
+        setExternalIdentity(external, "external-list-93");
+        createListItem(externalJob, "same-member-description", external.getSourceId(), "76001", 1);
+
+        apply(externalJob, external);
+
+        assertThat(userLists.findByUserId(owner.getId())).hasSize(1);
+        assertThat(userLists.findById(destination.getId()).orElseThrow().getName()).isEqualTo("Existing destination");
+        assertThat(userListItems.findByUserListIdWithContentAndChildListOrderByPositionAsc(destination.getId()))
+                .extracting(item -> item.getContent().getTmdbId()).containsExactly("76001");
+        assertThat(items.findById(external.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
     }
 
     private void setExternalIdentity(ImportItem item, String sourceId) throws Exception {
