@@ -93,8 +93,12 @@ public class CollectionImportApplier implements ImportUnitApplier {
         if (plan.declaredItemCount() != null && plan.declaredItemCount() != plan.itemCount()) {
             throw new ListItemCountMismatchException(plan.declaredItemCount(), plan.itemCount());
         }
-        if (standalone.isStandaloneList(context)) standalone.apply(context, plan);
-        else listWriter.apply(context, plan);
+        if (standalone.isStandaloneList(context)) {
+            if (standalone.apply(context, plan) == null) {
+                item.setOutcome("SKIPPED");
+                item.setIssue("SEMANTIC_LIST_TOMBSTONED");
+            }
+        } else listWriter.apply(context, plan);
     }
 
     private void applyWatchlistBatch(ImportExecutionContext context) {

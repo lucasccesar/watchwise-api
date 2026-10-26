@@ -31,6 +31,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
@@ -84,6 +85,7 @@ class StandaloneCollectionImportIntegrationTest {
     @Autowired private ImportedWatchAssertionRepository assertions;
     @Autowired private ExternalImportLinkRepository importLinks;
     @Autowired private UserListItemService userListItemService;
+    @Autowired private UserListService userListService;
     @Autowired private ObjectMapper mapper;
 
     @BeforeEach
@@ -204,6 +206,43 @@ class StandaloneCollectionImportIntegrationTest {
         assertThatThrownBy(() -> apply(retry, repeated))
                 .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class);
         assertThat(userLists.findByUserId(owner.getId())).hasSize(2);
+    }
+
+    @Test
+    void tombstonedLocalSemanticAliasPreventsExternalIdentityFromRecreatingDeletedList() throws Exception {
+        User owner = createUser();
+        createMovie("75001");
+        ImportJob localJob = createJob(owner, ImportInputKind.SINGLE_LIST);
+        ImportItem local = createListMetadata(localJob, "local", "Deleted semantic list", "Same description", 0);
+        createListItem(localJob, "same-member-description", local.getSourceId(), "75001", 1);
+        apply(localJob, local);
+        completeJob(localJob);
+        UserList deleted = userLists.findByUserId(owner.getId()).getFirst();
+
+        userListService.deleteUserList(owner.getId(), deleted.getId());
+        assertThat(jdbc.queryForObject("""
+                SELECT state FROM external_import_links
+                WHERE user_id = ? AND source_namespace = ? AND object_kind = 'user_list'
+                  AND target_id = ?
+                """, String.class, owner.getId(), "LETTERBOXD:OWNER:" + owner.getId(), deleted.getId()))
+                .isEqualTo("TOMBSTONE");
+
+        ImportJob externalJob = createJob(owner, ImportInputKind.SINGLE_LIST);
+        ImportItem external = createListMetadata(externalJob, "external-list-92", "Deleted semantic list",
+                "Same description", 0);
+        setExternalIdentity(external, "external-list-92");
+        createListItem(externalJob, "same-member-description", external.getSourceId(), "75001", 1);
+
+        apply(externalJob, external);
+
+        assertThat(userLists.findByUserId(owner.getId())).isEmpty();
+        assertThat(items.findById(external.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        assertThat(jdbc.queryForObject("""
+                SELECT state FROM external_import_links
+                WHERE user_id = ? AND source_namespace = ? AND object_kind = 'user_list'
+                  AND target_id = ?
+                """, String.class, owner.getId(), "LETTERBOXD:OWNER:" + owner.getId(), deleted.getId()))
+                .isEqualTo("TOMBSTONE");
     }
 
     private void setExternalIdentity(ImportItem item, String sourceId) throws Exception {

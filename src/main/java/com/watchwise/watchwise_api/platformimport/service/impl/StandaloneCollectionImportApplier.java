@@ -2,10 +2,12 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.platformimport.entity.ExternalImportLink;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportLinkState;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
+import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.platformimport.model.PreparedListImport;
 import com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
@@ -59,25 +61,79 @@ public class StandaloneCollectionImportApplier {
 
     public UUID apply(ImportExecutionContext context, PreparedListImport original) {
         PreparedListImport plan = prepared(context, null, original);
+        String fingerprint = fingerprints.ofList(context, plan);
+        ImportSourceKey alias = localIdentity(context, fingerprint);
+        LinkReservation aliasReservation = ledger.reserve(context.ownerId(), context.jobId(), alias,
+                plan.operationKey().sourceId());
+        if (aliasReservation.state() == ImportLinkState.TOMBSTONE
+                || aliasReservation.state() == ImportLinkState.SKIPPED) {
+            skipExternalIdentity(context, plan);
+            ledger.markSkipped(context.ownerId(), plan.operationKey(), null, null,
+                    "SEMANTIC_LIST_TOMBSTONED");
+            return null;
+        }
+        if (aliasReservation.state() == ImportLinkState.IN_PROGRESS
+                && aliasReservation.owningJobId() != null
+                && !context.jobId().equals(aliasReservation.owningJobId())) {
+            throw new ImportUnitTransaction.WaitForOtherJobException();
+        }
+
+        UUID aliasTarget = aliasReservation.state() == ImportLinkState.APPLIED
+                ? aliasTarget(context, alias) : null;
+        UUID linkedTarget = plan.linkedListId();
+        if (aliasTarget != null && linkedTarget != null && !aliasTarget.equals(linkedTarget)) {
+            throw new BadRequestException("This list already has another Watchwise destination");
+        }
+        if (linkedTarget == null) linkedTarget = aliasTarget;
+        if (!java.util.Objects.equals(linkedTarget, plan.linkedListId())) {
+            plan = new PreparedListImport(plan.sourceKey(), plan.operationKey(), plan.name(), plan.description(),
+                    plan.parentItemId(), plan.itemCount(), plan.declaredItemCount(), linkedTarget);
+        }
+
         UUID target = lists.apply(context, plan);
-        if (target != null && externalIdentity(plan.sourceKey())) {
-            ImportSourceKey alias = localIdentity(context, fingerprints.ofList(context, plan));
-            var reservation = ledger.reserve(context.ownerId(), context.jobId(), alias,
-                    plan.operationKey().sourceId());
-            if (reservation.state() == ImportLinkState.APPLIED) {
-                var existing = links.findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
-                        context.ownerId(), alias.namespace(), alias.objectKind(), alias.sourceId()).orElseThrow();
-                if (!target.equals(existing.getTargetId())) {
-                    throw new BadRequestException("This list already has another Watchwise destination");
-                }
-            } else if (reservation.state() == ImportLinkState.IN_PROGRESS) {
-                if (reservation.owningJobId() != null && !context.jobId().equals(reservation.owningJobId())) {
-                    throw new ImportUnitTransaction.WaitForOtherJobException();
-                }
-                ledger.markApplied(context.ownerId(), alias, "USER_LIST", target);
+        if (target == null) {
+            if (aliasReservation.state() == ImportLinkState.IN_PROGRESS) {
+                ledger.markSkipped(context.ownerId(), alias, null, null, "SOURCE_LIST_NOT_APPLIED");
             }
+            return null;
+        }
+        if (aliasReservation.state() == ImportLinkState.APPLIED) {
+            if (!target.equals(aliasTarget)) {
+                throw new BadRequestException("This list already has another Watchwise destination");
+            }
+        } else if (aliasReservation.state() == ImportLinkState.IN_PROGRESS) {
+            ledger.markApplied(context.ownerId(), alias, "USER_LIST", target);
         }
         return target;
+    }
+
+    private UUID aliasTarget(ImportExecutionContext context, ImportSourceKey alias) {
+        ExternalImportLink existing = links.findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
+                        context.ownerId(), alias.namespace(), alias.objectKind(), alias.sourceId())
+                .orElseThrow(() -> new IllegalStateException("Applied semantic list alias is missing"));
+        if (!"USER_LIST".equals(existing.getTargetType()) || existing.getTargetId() == null) {
+            throw new IllegalStateException("Applied semantic list alias has an invalid target");
+        }
+        var destination = userLists.findById(existing.getTargetId())
+                .orElseThrow(() -> new NotFoundException("User list not found"));
+        if (destination.getUser() == null || !context.ownerId().equals(destination.getUser().getId())) {
+            throw new NotFoundException("User list not found");
+        }
+        return existing.getTargetId();
+    }
+
+    private void skipExternalIdentity(ImportExecutionContext context, PreparedListImport plan) {
+        if (!externalIdentity(plan.sourceKey())) return;
+        ImportSourceKey identity = new ImportSourceKey(plan.sourceKey().namespace(), "user_list",
+                plan.sourceKey().sourceId());
+        LinkReservation reservation = ledger.reserve(context.ownerId(), context.jobId(), identity,
+                plan.operationKey().sourceId());
+        if (reservation.state() == ImportLinkState.IN_PROGRESS) {
+            if (reservation.owningJobId() != null && !context.jobId().equals(reservation.owningJobId())) {
+                throw new ImportUnitTransaction.WaitForOtherJobException();
+            }
+            ledger.markSkipped(context.ownerId(), identity, null, null, "SEMANTIC_LIST_TOMBSTONED");
+        }
     }
 
     private PreparedListImport prepared(ImportExecutionContext context, ImportItem metadata,
@@ -118,14 +174,6 @@ public class StandaloneCollectionImportApplier {
             }
             assertNoConflictingLink(context, sourceKey, linked);
             assertNoConflictingLink(context, localIdentity(context, semantic), linked);
-        }
-        if (linked == null && externalIdentity(sourceKey)) {
-            ImportSourceKey alias = localIdentity(context, semantic);
-            linked = links.findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
-                            context.ownerId(), alias.namespace(), alias.objectKind(), alias.sourceId())
-                    .filter(link -> link.getState() == ImportLinkState.APPLIED
-                            && "USER_LIST".equals(link.getTargetType()))
-                    .map(link -> link.getTargetId()).orElse(null);
         }
         return new PreparedListImport(sourceKey, operation, original.name(), original.description(),
                 original.parentItemId(), original.itemCount(), original.declaredItemCount(), linked);
