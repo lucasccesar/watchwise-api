@@ -800,7 +800,9 @@ class OpinionImportIntegrationTest {
         apply(summary);
 
         assertThat(assertions.findAll()).isEmpty();
-        assertThat(items.findById(summary.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
+        assertThat(items.findById(summary.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        assertThat(items.findById(summary.getId()).orElseThrow().getIssue())
+                .isEqualTo("DETAIL_HISTORY_COVERS_SUMMARY");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM diary_entries WHERE user_id=?", Long.class,
                 owner.getId())).isEqualTo(1L);
     }

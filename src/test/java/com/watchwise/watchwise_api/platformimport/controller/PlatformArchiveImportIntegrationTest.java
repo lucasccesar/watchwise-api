@@ -35,6 +35,8 @@ import com.watchwise.watchwise_api.diarycompletion.model.CompletionScope;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
 import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -109,6 +111,7 @@ class PlatformArchiveImportIntegrationTest {
     @Autowired private ImportItemRepository items;
     @Autowired private ImportFileStore fileStore;
     @Autowired private UserRepository users;
+    @Autowired private DiaryEntryRepository diaryEntries;
     @Autowired private ContentRepository contents;
     @Autowired private UserListRepository lists;
     @Autowired private WatchlistEntryRepository watchlist;
@@ -232,6 +235,115 @@ class PlatformArchiveImportIntegrationTest {
     }
 
     @Test
+    void importsLetterboxdWatchedCsvAsUnknownAssertionUnlessDiaryAlreadyCoversIt() throws Exception {
+        User owner = createUser();
+        String movieId = "55113";
+        seedMovie(movieId);
+        importLetterboxdWatchedCsv(owner, movieId);
+
+        assertThat(jdbc.queryForObject("select count(*) from diary_entries where user_id=?", Long.class,
+                owner.getId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from imported_watch_assertions where user_id=?", Long.class,
+                owner.getId())).isEqualTo(1L);
+        var assertion = jdbc.queryForMap("select assertion.coverage, assertion.declared_date, "
+                        + "assertion.declared_plays, content.type, content.tmdb_id "
+                        + "from imported_watch_assertions assertion join contents content "
+                        + "on content.id=assertion.content_id where assertion.user_id=?",
+                owner.getId());
+        assertThat(assertion.get("coverage")).isEqualTo("UNKNOWN");
+        assertThat(assertion.get("declared_date")).isNull();
+        assertThat(assertion.get("declared_plays")).isNull();
+        assertThat(assertion.get("type").toString()).isEqualTo("MOVIE");
+        assertThat(assertion.get("tmdb_id")).isEqualTo(movieId);
+        assertThat(jdbc.queryForObject("select target_type from external_import_links where user_id=? "
+                        + "and source_id=?", String.class, owner.getId(),
+                "https://letterboxd.com/film/primer/")).isEqualTo("IMPORTED_WATCH_ASSERTION");
+
+        User previouslyWatchedOwner = createUser();
+        String previouslyWatchedMovieId = "55114";
+        seedMovie(previouslyWatchedMovieId);
+        Content movie = contents.findByTmdbIdAndType(previouslyWatchedMovieId, ContentType.MOVIE).orElseThrow();
+        LocalDateTime now = LocalDateTime.now(Clock.systemUTC());
+        diaryEntries.saveAndFlush(DiaryEntry.builder().user(previouslyWatchedOwner).content(movie).watchNumber(1)
+                .watchedDate(LocalDate.of(2025, 5, 30)).createdAt(now).updatedAt(now).build());
+        ImportJobDTO job = importLetterboxdWatchedCsv(previouslyWatchedOwner, previouslyWatchedMovieId);
+
+        assertThat(jdbc.queryForObject("select count(*) from diary_entries where user_id=?", Long.class,
+                previouslyWatchedOwner.getId())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("select count(*) from imported_watch_assertions where user_id=?", Long.class,
+                previouslyWatchedOwner.getId())).isZero();
+        ImportItem marker = items.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                job.id(), 1, ImportRecordKind.WATCHED_MARKER,
+                "https://letterboxd.com/film/primer/").orElseThrow();
+        assertThat(marker.getOutcome()).isEqualTo("SKIPPED");
+        assertThat(jdbc.queryForObject("select state from external_import_links where user_id=? "
+                        + "and source_namespace='LETTERBOXD:ACCOUNT:letterboxd-lucas' "
+                        + "and object_kind='watched_content' and source_id=?", String.class,
+                previouslyWatchedOwner.getId(), "https://letterboxd.com/film/primer/")).isEqualTo("SKIPPED");
+        verifyNoInteractions(tmdbClient);
+    }
+
+    private ImportJobDTO importLetterboxdWatchedCsv(User owner, String movieId) throws Exception {
+        aliasService.remember(owner.getId(), new AliasQuery("Primer", 2004, ContentType.MOVIE),
+                new ImportTarget.ContentTarget(MediaReference.movie(movieId)), AliasTrust.USER_CONFIRMED);
+        String watchedCsv = "Date,Name,Year,Letterboxd URI\n"
+                + "2025-06-01,Primer,2004,https://letterboxd.com/film/primer/\n";
+        ImportJobDTO job = createAndInspect(owner, zip(Map.of("data/watched.csv", watchedCsv)),
+                ImportSourceFormat.LETTERBOXD_ZIP, ImportPlatform.LETTERBOXD, null);
+        job = jobService.select(owner.getId(), job.id(), new ImportSelectionDTO(job.previewVersion(),
+                true, false, List.of(), objectMapper.createObjectNode().put("sourceAccount", "letterboxd-lucas")));
+        driveUntil(job.id(), ImportJobState.READY);
+        job = jobService.get(owner.getId(), job.id());
+        jobService.commit(owner.getId(), job.id(), new ImportCommitDTO(job.previewVersion(), job.previewDigest()));
+        driveUntil(job.id(), ImportJobState.COMPLETED);
+        return job;
+    }
+
+    @Test
+    void importsTraktWatchedEpisodeMarkerAsUnknownAssertionWithoutDiaryEvent() throws Exception {
+        User owner = createUser();
+        String seriesId = "66104";
+        seedSeries(seriesId);
+        String watchedEpisode = "[{\"id\":99011,\"type\":\"episode\","
+                + "\"episode\":{\"title\":\"Pilot\",\"season\":1,\"number\":1,\"ids\":{\"trakt\":9901}},"
+                + "\"show\":{\"title\":\"Marker series\",\"year\":2020,\"ids\":{\"tmdb\":"
+                + seriesId + "}}}]";
+        ImportJobDTO job = createAndInspect(owner,
+                zip(Map.of("export/watched-episodes-1.json", watchedEpisode)),
+                ImportSourceFormat.TRAKT_ZIP, ImportPlatform.TRAKT, "trakt-lucas");
+        job = jobService.select(owner.getId(), job.id(), new ImportSelectionDTO(job.previewVersion(),
+                true, false, List.of(), objectMapper.createObjectNode().put("sourceAccount", "trakt-lucas")));
+        driveUntil(job.id(), ImportJobState.READY);
+
+        job = jobService.get(owner.getId(), job.id());
+        jobService.commit(owner.getId(), job.id(), new ImportCommitDTO(job.previewVersion(), job.previewDigest()));
+        driveUntil(job.id(), ImportJobState.COMPLETED);
+
+        assertThat(jdbc.queryForObject("select count(*) from diary_entries where user_id=?", Long.class,
+                owner.getId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from imported_watch_assertions where user_id=?", Long.class,
+                owner.getId())).isEqualTo(1L);
+        var assertion = jdbc.queryForMap("select assertion.coverage, assertion.declared_date, "
+                        + "assertion.declared_plays, content.type, content.series_tmdb_id, "
+                        + "content.season_number, content.episode_number "
+                        + "from imported_watch_assertions assertion join contents content "
+                        + "on content.id=assertion.content_id where assertion.user_id=?",
+                owner.getId());
+        assertThat(assertion.get("coverage")).isEqualTo("UNKNOWN");
+        assertThat(assertion.get("declared_date")).isNull();
+        assertThat(assertion.get("declared_plays")).isNull();
+        assertThat(assertion.get("type").toString()).isEqualTo("EPISODE");
+        assertThat(assertion.get("series_tmdb_id")).isEqualTo(seriesId);
+        assertThat(assertion.get("season_number")).isEqualTo(1);
+        assertThat(assertion.get("episode_number")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select target_type from external_import_links where user_id=? "
+                        + "and source_namespace='TRAKT:ACCOUNT:trakt-lucas' "
+                        + "and object_kind='watched_marker' and source_id='99011'", String.class,
+                owner.getId())).isEqualTo("IMPORTED_WATCH_ASSERTION");
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
     void importsLetterboxdHistoryFromZipWithFullReviewExportHeader() throws Exception {
         User owner = createUser();
         String movieId = "55111";
@@ -269,6 +381,8 @@ class PlatformArchiveImportIntegrationTest {
         assertThat(imported.get("watched_date").toString()).isEqualTo("2025-05-30");
         assertThat(imported.get("score")).isEqualTo(10);
         assertThat(imported.get("comment")).isEqualTo("A thoughtful review");
+        assertThat(jdbc.queryForObject("select count(*) from imported_watch_assertions where user_id=?",
+                Long.class, owner.getId())).isZero();
         verifyNoInteractions(tmdbClient);
     }
 

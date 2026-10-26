@@ -98,7 +98,7 @@ public class WatchedSummaryImportApplier implements ImportUnitApplier {
 
     @Override
     public boolean supports(ImportRecordKind kind) {
-        return kind == ImportRecordKind.WATCHED_SUMMARY;
+        return kind == ImportRecordKind.WATCHED_SUMMARY || kind == ImportRecordKind.WATCHED_MARKER;
     }
 
     @Override
@@ -106,27 +106,40 @@ public class WatchedSummaryImportApplier implements ImportUnitApplier {
         ImportItem item = itemRepository.findById(itemId)
                 .filter(candidate -> context.jobId().equals(candidate.getJobId())
                         && context.planGeneration() == candidate.getPlanGeneration()
-                        && candidate.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY)
-                .orElseThrow(() -> new IllegalArgumentException("Watched summary does not belong to this import"));
+                        && (candidate.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
+                        || candidate.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER))
+                .orElseThrow(() -> new IllegalArgumentException("Watched history does not belong to this import"));
+        JsonNode sourcePayload = readPayload(item.getPayloadJson());
+        if (item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
+                && ("AUXILIARY_EVIDENCE".equals(item.getOutcome())
+                || "auxiliary_watch_marker".equals(item.getObjectKind())
+                || sourcePayload.path("auxiliaryWatchEvidence").asBoolean(false))) {
+            throw new IllegalStateException("Auxiliary watch evidence cannot be applied as user history");
+        }
         ImportTarget target = readTarget(item.getResolvedTargetJson());
         if (!(target instanceof ImportTarget.ContentTarget contentTarget)) {
-            throw new IllegalStateException("Watched summary must resolve to a content target before applying");
+            throw new IllegalStateException("Watched history must resolve to a content target before applying");
         }
 
         MediaReference media = contentTarget.content();
         ensureContentReference(media);
         List<NormalizedImportRecord> events = detailEvents(context.ownerId(), media);
         NormalizedImportRecord summary = new NormalizedImportRecord(item.getId().toString(),
-                ImportRecordKind.WATCHED_SUMMARY, sourceKey(item), null, target,
-                readPayload(item.getPayloadJson()), Math.toIntExact(item.getOrdinal()));
+                ImportRecordKind.WATCHED_SUMMARY, sourceKey(item), null, target, sourcePayload,
+                Math.toIntExact(item.getOrdinal()));
         WatchedSummaryReconciler.Decision decision = reconciler.reconcile(context, events, List.of(summary)).getFirst();
         if (decision.disposition() == WatchedSummaryReconciler.Disposition.COVERED_BY_DETAIL_HISTORY) {
-            ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, "DETAIL_HISTORY_COVERS_SUMMARY");
+            String reason = item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
+                    ? "DETAIL_HISTORY_COVERS_WATCH_MARKER" : "DETAIL_HISTORY_COVERS_SUMMARY";
+            ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, reason);
+            item.setOutcome("SKIPPED");
+            item.setIssue(reason);
+            itemRepository.save(item);
             return;
         }
         if (decision.disposition() != WatchedSummaryReconciler.Disposition.STORE_UNKNOWN_ASSERTION
                 || decision.assertion() == null) {
-            throw new IllegalStateException("Watched summary cannot be reconciled without a resolved target");
+            throw new IllegalStateException("Watched history cannot be reconciled without a resolved target");
         }
 
         Content content = requireContent(media);
