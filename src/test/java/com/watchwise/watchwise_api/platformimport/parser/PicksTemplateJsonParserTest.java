@@ -8,9 +8,14 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.regex.Pattern;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -81,6 +86,8 @@ class PicksTemplateJsonParserTest {
 
     @Test
     void enforcesDateUrlAndCardinalityBounds() {
+        assertThat(schema().at("/properties/eligibility/$comment").asString())
+                .contains("JSON Schema 2020-12 cannot compare sibling date strings", "Java parser enforces start <= end");
         for (String json : new String[]{
                 "{\"title\":\"T\",\"eligibility\":{\"start\":\"2020-01-01\"},\"categories\":[]}",
                 valid().replace("\"categories\"", "\"eligibility\":{\"start\":\"2021-01-01\",\"end\":\"2020-01-01\"},\"categories\""),
@@ -124,8 +131,96 @@ class PicksTemplateJsonParserTest {
         assertRejected(baseCategory("\"type\":\"MOVIE\",\"nominees\":[{\"tmdbId\":\"1\",\"tmdbId\":\"2\"}]"));
     }
 
+    @Test
+    void acceptsNumericallyEquivalentSchemaVersionAndMatchesIntegerBounds() {
+        assertThat(parse(valid().replace("\"title\"", "\"schemaVersion\":1.0,\"title\"")).schemaVersion()).isEqualTo(1);
+        assertThat(parse(valid().replace("\"title\"", "\"schemaVersion\":1e0,\"title\"")).schemaVersion()).isEqualTo(1);
+        for (String version : new String[]{"0.999999999999999999", "1.000000000000000001", "2147483648", "1e100"})
+            assertRejected(valid().replace("\"title\"", "\"schemaVersion\":" + version + ",\"title\""));
+
+        assertThat(parse(mediaNominee("releaseYear", "9999")).categories()).hasSize(1);
+        assertThat(parse(mediaNominee("releaseYear", "2000.0")).categories()).hasSize(1);
+        assertRejected(mediaNominee("releaseYear", "0"));
+        assertRejected(mediaNominee("releaseYear", "10000"));
+        assertThat(parse(episodeNominee("seasonNumber", "2147483647")).categories()).hasSize(1);
+        assertThat(parse(episodeNominee("seasonNumber", "1.0")).categories()).hasSize(1);
+        assertRejected(episodeNominee("seasonNumber", "-1"));
+        assertRejected(episodeNominee("seasonNumber", "1.1"));
+        assertRejected(episodeNominee("seasonNumber", "2147483648"));
+        assertThat(parse(episodeNominee("episodeNumber", "2147483647")).categories()).hasSize(1);
+        assertRejected(episodeNominee("episodeNumber", "0"));
+        assertRejected(episodeNominee("episodeNumber", "2147483648"));
+
+        JsonNode schema = schema();
+        assertThat(schema.at("/$defs/mediaNominee/properties/releaseYear/maximum").intValue()).isEqualTo(9999);
+        assertThat(schema.at("/$defs/mediaNominee/properties/releaseYear/minimum").intValue()).isEqualTo(1);
+        assertThat(schema.at("/$defs/episodeNominee/properties/seasonNumber/maximum").longValue()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(schema.at("/$defs/episodeNominee/properties/seasonNumber/minimum").intValue()).isZero();
+        assertThat(schema.at("/$defs/episodeNominee/properties/episodeNumber/maximum").longValue()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(schema.at("/$defs/episodeNominee/properties/episodeNumber/minimum").intValue()).isEqualTo(1);
+        assertThat(schema.at("/$defs/contextContent/oneOf/1/properties/seasonNumber/maximum").longValue()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(schema.at("/$defs/contextContent/oneOf/1/properties/episodeNumber/maximum").longValue()).isEqualTo(Integer.MAX_VALUE);
+    }
+
+    @Test
+    void coverUrlParserAndSchemaPatternBothRequireHostAndRejectUserInfo() {
+        Pattern pattern = Pattern.compile(schema().at("/properties/coverImage/pattern").asString(), Pattern.UNICODE_CHARACTER_CLASS);
+        String validUrl = "https://example.com/covers/club.jpg";
+        assertThat(parse(valid().replace("\"categories\"", "\"coverImage\":\"" + validUrl + "\",\"categories\"")))
+                .isNotNull();
+        assertThat(pattern.matcher(validUrl).matches()).isTrue();
+        for (String url : new String[]{"https:///cover.jpg", "https://user@example.com/cover.jpg", "https://example.com/a\u2003b"}) {
+            assertRejected(valid().replace("\"categories\"", "\"coverImage\":\"" + url + "\",\"categories\""));
+            assertThat(pattern.matcher(url).matches()).isFalse();
+        }
+    }
+
+    @Test
+    void usesUnicodeCodePointsForLengthAndEcmaWhitespaceNormalization() {
+        String emoji = "\uD83D\uDE03";
+        String acceptedTitle = emoji.repeat(120);
+        assertThat(parse(valid().replace("\"T\"", "\"" + acceptedTitle + "\"")).title()).isEqualTo(acceptedTitle);
+        assertRejected(valid().replace("\"T\"", "\"" + emoji.repeat(121) + "\""));
+        String acceptedCategoryName = emoji.repeat(120);
+        assertThat(parse("{\"title\":\"T\",\"categories\":[{\"name\":\"" + acceptedCategoryName + "\",\"type\":\"MOVIE\"}]}" )
+                .categories().getFirst().name()).isEqualTo(acceptedCategoryName);
+        assertRejected("{\"title\":\"T\",\"categories\":[{\"name\":\"" + emoji.repeat(121) + "\",\"type\":\"MOVIE\"}]}");
+        assertRejected(valid().replace("\"T\"", "\"\u00a0\ufeff\u2003\""));
+        assertRejected(baseCategory("\"type\":\"MOVIE\",\"nominees\":[\"\u00a0\ufeff\u2003\"]"));
+        assertRejected(baseCategory("\"type\":\"MOVIE\",\"nominees\":[{\"title\":\"\u00a0\ufeff\u2003\",\"releaseYear\":2000}]"));
+
+        var normalized = parse(baseCategory("\"type\":\"\u00a0mOvIe\ufeff\",\"group\":\"\u2003sEcOnDaRy\u00a0\""))
+                .categories().getFirst();
+        assertThat(normalized.type()).isEqualTo(PickAllowedType.MOVIE);
+        assertThat(normalized.group()).isEqualTo(PickCategoryGroup.SECONDARY);
+    }
+
+    @Test
+    void hidesLowLevelJsonAndInputStreamDiagnosticsFromClient() {
+        assertThatThrownBy(() -> parse("{\"title\":"))
+                .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
+        InputStream failingStream = new InputStream() {
+            @Override public int read() throws IOException { throw new IOException("C:\\private\\secret.json"); }
+        };
+        assertThatThrownBy(() -> parser.parse(failingStream))
+                .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
+    }
+
     private String valid() { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\"}]}"; }
     private String baseCategory(String fields) { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\"," + fields + "}]}"; }
+    private String mediaNominee(String field, String value) {
+        return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\",\"nominees\":[{\"title\":\"Film\",\"" + field + "\":" + value + "}]}]}";
+    }
+    private String episodeNominee(String field, String value) {
+        String season = field.equals("seasonNumber") ? value : "0";
+        String episode = field.equals("episodeNumber") ? value : "1";
+        return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"EPISODE\",\"nominees\":[{\"seriesTmdbId\":\"1\",\"seasonNumber\":" + season + ",\"episodeNumber\":" + episode + "}]}]}";
+    }
+    private JsonNode schema() {
+        try (InputStream input = getClass().getResourceAsStream("/import/picks-template-v1.schema.json")) {
+            return JsonMapper.builder().build().readTree(input);
+        } catch (IOException ex) { throw new AssertionError(ex); }
+    }
     private TemplateImportDocument parse(String json) {
         return parser.parse(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
     }

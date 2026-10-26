@@ -7,16 +7,18 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JacksonException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -28,6 +30,7 @@ import java.util.Set;
 @Component
 public class PicksTemplateJsonParser {
     private static final long MAX_BYTES = 5L * 1024 * 1024;
+    private static final Logger log = LoggerFactory.getLogger(PicksTemplateJsonParser.class);
     private final ImportLimits limits;
 
     public PicksTemplateJsonParser(ImportLimits limits) { this.limits = limits; }
@@ -43,7 +46,8 @@ public class PicksTemplateJsonParser {
                     .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                     .streamReadConstraints(StreamReadConstraints.builder()
                             .maxNestingDepth(limits.maxJsonDepth()).build()).build();
-            JsonMapper mapper = JsonMapper.builder(factory).build();
+            JsonMapper mapper = JsonMapper.builder(factory)
+                    .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
             try (JsonParser parser = factory.createParser(bytes)) {
                 JsonNode root = mapper.readTree(parser);
                 if (parser.nextToken() != null) throw invalid("Trailing JSON content");
@@ -51,15 +55,16 @@ public class PicksTemplateJsonParser {
             }
         } catch (BadRequestException ex) {
             throw ex;
-        } catch (JacksonException | IOException | IllegalArgumentException ex) {
-            throw invalid("Invalid template JSON: " + ex.getMessage());
+        } catch (Exception ex) {
+            log.debug("Rejected malformed Picks template JSON", ex);
+            throw invalid("Invalid template JSON");
         }
     }
 
     private TemplateImportDocument document(JsonNode root) {
         requireObject(root, "root", Set.of("schemaVersion", "title", "description", "coverImage", "instructions", "eligibility", "categories"));
         JsonNode version = root.get("schemaVersion");
-        if (version != null && (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() != 1))
+        if (version != null && (!version.isNumber() || version.decimalValue().compareTo(BigDecimal.ONE) != 0))
             throw invalid("Unsupported schemaVersion");
         String title = requiredText(root, "title", 120);
         String description = optionalText(root, "description", Integer.MAX_VALUE);
@@ -112,7 +117,7 @@ public class PicksTemplateJsonParser {
 
     private void validateNominee(JsonNode node, PickAllowedType type) {
         if (node.isTextual()) {
-            if (node.asString().isBlank()) throw invalid("nominee text is blank");
+            if (isEcmaBlank(node.asString())) throw invalid("nominee text is blank");
             return;
         }
         switch (type) {
@@ -121,6 +126,7 @@ public class PicksTemplateJsonParser {
                 String id = optionalId(node, "tmdbId");
                 String title = optionalNonblank(node, "title");
                 Integer year = optionalInteger(node, "releaseYear", 1);
+                if (year != null && year > 9999) throw invalid("Invalid releaseYear");
                 if (id == null && (title == null || year == null))
                     throw invalid("media nominee requires tmdbId or title and releaseYear");
                 if ((title == null) != (year == null) && id == null)
@@ -169,20 +175,21 @@ public class PicksTemplateJsonParser {
 
     private static String requiredText(JsonNode node, String key, int max) {
         String value = optionalText(node, key, max);
-        if (value == null || value.isBlank()) throw invalid(key + " is required");
+        if (value == null || isEcmaBlank(value)) throw invalid(key + " is required");
         return value;
     }
 
     private static String optionalText(JsonNode node, String key, int max) {
         JsonNode value = node.get(key);
         if (value == null) return null;
-        if (!value.isTextual() || value.asString().length() > max) throw invalid("Invalid " + key);
+        if (!value.isTextual() || value.asString().codePointCount(0, value.asString().length()) > max)
+            throw invalid("Invalid " + key);
         return value.asString();
     }
 
     private static String optionalNonblank(JsonNode node, String key) {
         String value = optionalText(node, key, Integer.MAX_VALUE);
-        if (value != null && value.isBlank()) throw invalid("Invalid " + key);
+        if (value != null && isEcmaBlank(value)) throw invalid("Invalid " + key);
         return value;
     }
 
@@ -207,9 +214,14 @@ public class PicksTemplateJsonParser {
     private static Integer optionalInteger(JsonNode node, String key, int min) {
         JsonNode value = node.get(key);
         if (value == null) return null;
-        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < min)
+        if (!value.isNumber()) throw invalid("Invalid " + key);
+        try {
+            int exact = value.decimalValue().intValueExact();
+            if (exact < min) throw invalid("Invalid " + key);
+            return exact;
+        } catch (ArithmeticException ex) {
             throw invalid("Invalid " + key);
-        return value.intValue();
+        }
     }
 
     private static <E extends Enum<E>> E enumValue(JsonNode node, String key, Class<E> type, E fallback) {
@@ -219,7 +231,7 @@ public class PicksTemplateJsonParser {
             throw invalid(key + " is required");
         }
         if (!value.isTextual()) throw invalid("Invalid " + key);
-        try { return Enum.valueOf(type, value.asString().trim().toUpperCase(Locale.ROOT)); }
+        try { return Enum.valueOf(type, trimEcmaWhitespace(value.asString()).toUpperCase(Locale.ROOT)); }
         catch (IllegalArgumentException ex) { throw invalid("Invalid " + key); }
     }
 
@@ -239,4 +251,32 @@ public class PicksTemplateJsonParser {
     }
 
     private static BadRequestException invalid(String message) { return new BadRequestException(message); }
+
+    private static boolean isEcmaBlank(String value) {
+        return value.codePoints().allMatch(PicksTemplateJsonParser::isEcmaWhitespace);
+    }
+
+    private static String trimEcmaWhitespace(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end) {
+            int codePoint = value.codePointAt(start);
+            if (!isEcmaWhitespace(codePoint)) break;
+            start += Character.charCount(codePoint);
+        }
+        while (end > start) {
+            int codePoint = value.codePointBefore(end);
+            if (!isEcmaWhitespace(codePoint)) break;
+            end -= Character.charCount(codePoint);
+        }
+        return value.substring(start, end);
+    }
+
+    private static boolean isEcmaWhitespace(int codePoint) {
+        return codePoint >= 0x0009 && codePoint <= 0x000D || codePoint == 0x0020
+                || codePoint == 0x00A0 || codePoint == 0x1680
+                || codePoint >= 0x2000 && codePoint <= 0x200A
+                || codePoint == 0x2028 || codePoint == 0x2029 || codePoint == 0x202F
+                || codePoint == 0x205F || codePoint == 0x3000 || codePoint == 0xFEFF;
+    }
 }

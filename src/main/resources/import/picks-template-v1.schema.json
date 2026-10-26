@@ -9,7 +9,7 @@
     "schemaVersion": {"const": 1},
     "title": {"$ref": "#/$defs/name"},
     "description": {"type": "string"},
-    "coverImage": {"type": "string", "maxLength": 2048, "format": "uri", "pattern": "^https?://"},
+    "coverImage": {"type": "string", "maxLength": 2048, "format": "uri", "pattern": "^https?://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]+)?(?:[/?#][^\\s]*)?$"},
     "instructions": {"type": "string"},
     "eligibility": {
       "type": "object", "additionalProperties": false,
@@ -18,7 +18,7 @@
         "start": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
         "end": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
       },
-      "$comment": "The parser additionally requires start <= end."
+      "$comment": "JSON Schema 2020-12 cannot compare sibling date strings. The Java parser enforces start <= end."
     },
     "categories": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"oneOf": [
       {"$ref": "#/$defs/movieCategory"}, {"$ref": "#/$defs/seriesCategory"},
@@ -65,7 +65,7 @@
       "type": "object", "additionalProperties": false,
       "properties": {
         "tmdbId": {"$ref": "#/$defs/id"}, "title": {"$ref": "#/$defs/query"},
-        "releaseYear": {"type": "integer", "minimum": 1}
+        "releaseYear": {"type": "integer", "minimum": 1, "maximum": 9999}
       },
       "anyOf": [{"required": ["tmdbId"]}, {"required": ["title", "releaseYear"]}]
     },
@@ -74,8 +74,8 @@
       "required": ["seriesTmdbId", "seasonNumber", "episodeNumber"],
       "properties": {
         "seriesTmdbId": {"$ref": "#/$defs/id"},
-        "seasonNumber": {"type": "integer", "minimum": 0},
-        "episodeNumber": {"type": "integer", "minimum": 1}
+        "seasonNumber": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "episodeNumber": {"type": "integer", "minimum": 1, "maximum": 2147483647}
       }
     },
     "personNominee": {
@@ -93,8 +93,8 @@
       {"type": "object", "additionalProperties": false,
         "required": ["type", "seriesTmdbId", "seasonNumber", "episodeNumber"],
         "properties": {"type": {"type": "string", "pattern": "^\\s*[eE][pP][iI][sS][oO][dD][eE]\\s*$"},
-          "seriesTmdbId": {"$ref": "#/$defs/id"}, "seasonNumber": {"type": "integer", "minimum": 0},
-          "episodeNumber": {"type": "integer", "minimum": 1}}}
+          "seriesTmdbId": {"$ref": "#/$defs/id"}, "seasonNumber": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+          "episodeNumber": {"type": "integer", "minimum": 1, "maximum": 2147483647}}}
     ]}
   },
   "$comment": "The parser also enforces total nominees <= 5000, upload byte/depth limits, duplicate keys, trailing tokens, and chronological eligibility."
