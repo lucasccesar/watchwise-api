@@ -67,7 +67,7 @@ public class ImportCleanupJob {
         this.enabled = enabled;
     }
 
-    @Scheduled(cron = "${app.import.cleanup.cron:0 0 2 * * *}", zone = "UTC")
+    @Scheduled(cron = "${app.import.cleanup.cron:0 */15 * * * *}", zone = "UTC")
     public void runScheduled() {
         if (enabled) runOnce(clock.instant());
     }

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.platformimport.service.impl;
 
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
@@ -53,7 +54,7 @@ public class ImportWorker {
                 WHERE state IN ('ANALYZING', 'RESOLVING', 'IMPORTING')
                   AND work_pending = true AND next_run_at <= ?
                   AND (lease_until IS NULL OR lease_until <= ?)
-                  AND (expires_at IS NULL OR expires_at > ?)
+                  AND (state = 'IMPORTING' OR expires_at IS NULL OR expires_at > ?)
                 ORDER BY created_at ASC, id ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT ?
@@ -131,6 +132,8 @@ public class ImportWorker {
             try {
                 process(job, context);
             } catch (ImportUnitTransaction.WaitForOtherJobException exception) {
+                unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, false);
+            } catch (TmdbUnavailableException exception) {
                 unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, false);
             } catch (RecordLimitExceededException exception) {
                 unitTransaction.failDeterministically(context);
@@ -269,6 +272,7 @@ public class ImportWorker {
             if (job.inputKind() == ImportInputKind.SINGLE_LIST) {
                 resolveStandaloneListIdentities(job, context, selection);
             }
+            modeRegistry.validateResolved(modeKey(job), context);
         }
         ImportUnitTransaction.ResolutionState state;
         if (unavailable) {
@@ -545,9 +549,14 @@ public class ImportWorker {
             for (ImportItem item : page) {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
+                boolean templateOptionNeedsChoice = item.getNormalizedKind() == ImportRecordKind.TEMPLATE_OPTION
+                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.REMOVE_NOMINEE
+                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM;
                 if ("NORMALIZATION_ISSUE".equals(item.getOutcome())
+                        && (templateOptionNeedsChoice
+                        || item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION
                         && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.RESOLVE_TARGET) {
+                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.RESOLVE_TARGET)) {
                     return true;
                 }
                 if (isCandidateEnvelope(item.getResolvedTargetJson())
@@ -561,6 +570,7 @@ public class ImportWorker {
     }
 
     private void apply(ClaimedJob job, ImportExecutionContext context) {
+        modeRegistry.prepareForApply(modeKey(job), context);
         List<ImportItem> units = itemRepository.findApplyPending(
                 job.id(), context.planGeneration(), PageRequest.of(0, MAX_BATCH_SIZE));
         for (ImportItem item : units) {

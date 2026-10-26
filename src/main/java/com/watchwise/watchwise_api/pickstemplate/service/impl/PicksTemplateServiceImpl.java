@@ -7,19 +7,16 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
-import com.watchwise.watchwise_api.pick.service.PickTargetService;
-import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.dto.*;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
-import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
-import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateOptionMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
-import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.service.PreparedTemplateCreation;
+import com.watchwise.watchwise_api.pickstemplate.service.PreparedTemplateCreationService;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
-import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
@@ -39,37 +36,20 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
 
     private final PicksTemplateRepository templateRepository;
     private final PicksTemplateCategoryRepository categoryRepository;
-    private final PicksTemplateOptionRepository optionRepository;
     private final PickRepository pickRepository;
     private final PickSelectionRepository selectionRepository;
     private final UserRepository userRepository;
-    private final PickTargetService pickTargetService;
-    private final PicksTemplateMapper templateMapper;
-    private final PicksTemplateOptionMapper optionMapper;
-    private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
     private final PicksTemplatePreviewAssembler previewAssembler;
+    private final PicksTemplateResponseAssembler responseAssembler;
+    private final PreparedTemplateCreationService preparedTemplateCreationService;
+    private final ImportLedger importLedger;
     private final UserBlockAccessService userBlockAccessService;
 
     @Override
-    @Transactional
     public PicksTemplateResponseDTO createTemplate(UUID actorId, PicksTemplateCreationDTO dto) {
-        validateCreation(dto);
-        User actor = requireActor(actorId);
-        LocalDateTime now = LocalDateTime.now();
-        PicksTemplate template = PicksTemplate.builder().creator(actor)
-                .origin(actor.getRole() == UserRole.ADMIN ? PickOrigin.OFFICIAL : PickOrigin.COMMUNITY)
-                .name(dto.name()).description(dto.description()).coverImage(dto.coverImage()).instructions(dto.instructions())
-                .eligibilityStartDate(dto.eligibilityStartDate()).eligibilityEndDate(dto.eligibilityEndDate())
-                .createdAt(now).updatedAt(now).build();
-        PicksTemplate saved = templateRepository.save(template);
-
-        for (PicksTemplateCategoryCreationDTO categoryDto : dto.categories()) {
-            PicksTemplateCategory category = buildCategory(saved, categoryDto, now);
-            PicksTemplateCategory savedCategory = categoryRepository.save(category);
-            saveInitialOptions(actorId, saved, savedCategory, categoryDto.options(), now);
-        }
-        return toResponse(saved, actorId);
+        PreparedTemplateCreation prepared = preparedTemplateCreationService.prepare(actorId, dto);
+        return preparedTemplateCreationService.createPrepared(actorId, prepared);
     }
 
     @Override
@@ -145,43 +125,12 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
         PicksTemplate template = templateRepository.findByIdForUpdate(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
         assertCanManage(actorId, template);
+        importLedger.markDeletedByTarget("PICKS_TEMPLATE", templateId);
         if (!pickRepository.existsByPicksTemplateId(templateId)) {
             templateRepository.delete(template);
             return;
         }
         templateRepository.save(detached(template));
-    }
-
-    private void validateCreation(PicksTemplateCreationDTO dto) {
-        if (dto == null || dto.categories() == null || dto.categories().isEmpty()) {
-            throw new BadRequestException("At least one category is required");
-        }
-        validateDatePair(dto.eligibilityStartDate(), dto.eligibilityEndDate());
-        dto.categories().forEach(category -> {
-            if (category == null || category.optionMode() == null || category.allowedType() == null || category.group() == null) {
-                throw new BadRequestException("Category configuration is incomplete");
-            }
-            PicksTemplateCategoryOptionsValidator.validateNewCategory(category.optionMode(), category.options());
-        });
-    }
-
-    private PicksTemplateCategory buildCategory(PicksTemplate template, PicksTemplateCategoryCreationDTO dto, LocalDateTime now) {
-        return PicksTemplateCategory.builder().picksTemplate(template).name(dto.name()).description(dto.description())
-                .group(dto.group()).displayOrder(dto.displayOrder()).allowedType(dto.allowedType()).optionMode(dto.optionMode())
-                .createdAt(now).updatedAt(now).build();
-    }
-
-    private void saveInitialOptions(UUID actorId, PicksTemplate template, PicksTemplateCategory category,
-                                    List<PicksTemplateOptionCreationDTO> options, LocalDateTime now) {
-        if (options == null) return;
-        for (PicksTemplateOptionCreationDTO optionDto : options) {
-            if (optionDto == null) {
-                throw new com.watchwise.watchwise_api.common.exception.BadRequestException("Fixed option must not be null");
-            }
-            ResolvedPickTarget target = pickTargetService.validateFixedOption(actorId, template, category, optionDto.target());
-            FixedOptionPersistence.saveAndFlush(optionRepository, PicksTemplateOption.builder().category(category).content(target.content())
-                    .personTmdbId(target.personTmdbId()).contextContent(target.contextContent()).createdAt(now).build());
-        }
     }
 
     private void applyPatch(PicksTemplate template, PicksTemplatePatchDTO dto) {
@@ -252,28 +201,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
     }
 
     private PicksTemplateResponseDTO toResponse(PicksTemplate template, UUID viewerId) {
-        List<PicksTemplateCategoryDTO> categories = categoryRepository
-                .findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId()).stream().map(this::toCategoryDto).toList();
-        var preview = previewAssembler == null
-                ? templateMapper.picksTemplateToPreviewDto(template)
-                : previewAssembler.assembleOne(template, viewerId);
-        if (preview == null) {
-            preview = new PicksTemplatePreviewDTO(template.getId(), null, template.getOrigin(), template.getName(),
-                    template.getDescription(), template.getCoverImage(), template.getCreatedAt(), 0, categories.size(),
-                    categories.stream().map(PicksTemplateCategoryDTO::name).toList(), template.getLikesCount(), 0, false, 0, null);
-        }
-        return new PicksTemplateResponseDTO(template.getId(), template.getCreator() == null ? null : userMapper.userToUserPreviewDto(template.getCreator()),
-                template.getOrigin(), template.getName(), template.getDescription(), template.getCoverImage(), template.getInstructions(),
-                template.getEligibilityStartDate(), template.getEligibilityEndDate(), template.getCreatedAt(), template.getUpdatedAt(), categories,
-                preview.picksCount(), preview.categoriesCount(), preview.categoryNames(), preview.likesCount(), preview.commentsCount(),
-                preview.isLikedByViewer(), preview.myPicksCount(), preview.latestMyPickId());
-    }
-
-    private PicksTemplateCategoryDTO toCategoryDto(PicksTemplateCategory category) {
-        List<PicksTemplateOptionDTO> options = optionRepository.findByCategoryId(category.getId()).stream()
-                .map(option -> new PicksTemplateOptionDTO(option.getId(), optionMapper.picksTemplateOptionToSearchDto(option), option.getCreatedAt())).toList();
-        return new PicksTemplateCategoryDTO(category.getId(), category.getName(), category.getDescription(), category.getGroup(),
-                category.getDisplayOrder(), category.getAllowedType(), category.getOptionMode(), category.getCreatedAt(), category.getUpdatedAt(), options);
+        return responseAssembler.toResponse(template, viewerId);
     }
 
     private String escapeLike(String value) {

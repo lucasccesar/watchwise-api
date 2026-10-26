@@ -94,8 +94,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (namespace.length() > 255) throw new IllegalArgumentException("Import source namespace is too long");
         ZoneId zone = parseZone(timeZone);
         LocalDateTime now = LocalDateTime.now(clock);
-        boolean requiresNormalization = inputKind == ImportInputKind.PLATFORM_ARCHIVE
-                || inputKind == ImportInputKind.SINGLE_LIST || inputKind == ImportInputKind.SINGLE_WATCHLIST;
+        boolean requiresNormalization = requiresNormalization(inputKind);
         ImportJobState initialState = requiresNormalization ? ImportJobState.ANALYZING : ImportJobState.RESOLVING;
         return importJobRepository.save(ImportJob.builder()
                 .userId(ownerId)
@@ -110,8 +109,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
                 .timezone(zone.getId())
                 .storageKey(storageKey)
                 .uploadSizeBytes(uploadBytes)
-                .workPhase(inputKind == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT"
-                        : requiresNormalization ? "NORMALIZE" : "RESOLVE")
+                .workPhase(initialWorkPhase(inputKind))
                 .workPending(false)
                 .createdAt(now)
                 .updatedAt(now)
@@ -172,7 +170,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         requireRetryQuotaAvailable(ownerId);
         String phase = job.getWorkPhase();
         if (phase == null || phase.isBlank()) {
-            phase = job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT" : "RESOLVE";
+            phase = initialWorkPhase(job.getInputKind());
         }
         job.setState(switch (phase) {
             case "INSPECT", "NORMALIZE" -> ImportJobState.ANALYZING;
@@ -350,6 +348,18 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (platform == null) return "WATCHWISE:TEMPLATE:" + ownerId;
         if (accountId == null) return platform.name() + ":OWNER:" + ownerId;
         return platform.name() + ":ACCOUNT:" + accountId;
+    }
+
+    private boolean requiresNormalization(ImportInputKind inputKind) {
+        return inputKind == ImportInputKind.PLATFORM_ARCHIVE
+                || inputKind == ImportInputKind.SINGLE_LIST
+                || inputKind == ImportInputKind.SINGLE_WATCHLIST
+                || inputKind == ImportInputKind.PICKS_TEMPLATE;
+    }
+
+    private String initialWorkPhase(ImportInputKind inputKind) {
+        if (inputKind == ImportInputKind.PLATFORM_ARCHIVE) return "INSPECT";
+        return requiresNormalization(inputKind) ? "NORMALIZE" : "RESOLVE";
     }
 
     private ZoneId parseZone(String timeZone) {

@@ -10,4 +10,5 @@ public interface ImportLedger {
  boolean completeDeferred(UUID ownerId, ImportSourceKey sourceKey, UUID deferredRecordId,
                           String targetType, UUID targetId, boolean skipped, String reason);
  void markDeletedByTarget(UUID ownerId, String targetType, UUID targetId);
+ void markDeletedByTarget(String targetType, UUID targetId);
 }

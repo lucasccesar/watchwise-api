@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportWatchScopePreviewDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportDeferredRecord;
@@ -191,11 +192,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             if (preparedTarget != null) preparedTargets.put(decision.itemId(), preparedTarget);
         }
         validateFixedCategoryConstraints(jobId, generation, decisions, itemsById);
+        validateTemplateCategoryConstraints(jobId, generation, decisions);
 
         for (ImportResolutionOperation decision : decisions) {
             applyDecision(ownerId, job, decision, itemsById, preparedTargets.get(decision.itemId()),
                     confirmedWatchScopes.get(decision.itemId()));
         }
+        validateTemplateEligibilityPlan(decisions, itemsById);
         importItemRepository.saveAll(changedItems(decisions, itemsById));
 
         long nextVersion = nextVersion(job.getPreviewVersion());
@@ -251,6 +254,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private void requireMutable(ImportJob job) {
+        if (job.getExpiresAt() != null && !job.getExpiresAt().isAfter(LocalDateTime.now(clock))) {
+            throw new ConflictException("Import job has expired");
+        }
         if (!MUTABLE_JOB_STATES.contains(job.getState())) {
             throw new ConflictException("Import job cannot change its preview in the current state");
         }
@@ -490,6 +496,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 || operation instanceof ImportResolutionOperation.SetCategoryOpen) {
             requireKind(item, ImportRecordKind.TEMPLATE_CATEGORY, "Only a template category can be changed");
         } else if (operation instanceof ImportResolutionOperation.SkipItem
+                && item.getNormalizedKind() == ImportRecordKind.TEMPLATE) {
+            throw new BadRequestException("Cancel the import to skip the entire Picks template");
+        } else if (operation instanceof ImportResolutionOperation.SkipItem
                 && item.getNormalizedKind() == ImportRecordKind.TEMPLATE_CATEGORY
                 && isFixedCategory(item)) {
             throw new BadRequestException("A fixed template category must be removed explicitly");
@@ -584,6 +593,11 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 if (item.getNormalizedKind() == ImportRecordKind.LIST_METADATA && value.length() > 255) {
                     throw new BadRequestException("List name cannot exceed 255 characters");
                 }
+                if ((item.getNormalizedKind() == ImportRecordKind.TEMPLATE
+                        || item.getNormalizedKind() == ImportRecordKind.TEMPLATE_CATEGORY)
+                        && value.length() > 120) {
+                    throw new BadRequestException("Picks template names cannot exceed 120 characters");
+                }
             }
             case DESCRIPTION -> {
                 if (item.getNormalizedKind() != ImportRecordKind.LIST_ITEM
@@ -658,14 +672,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                     ImportRecordKind.CURRENT_RATING, ImportRecordKind.LIST_METADATA,
                     ImportRecordKind.LIST_ITEM, ImportRecordKind.WATCHLIST_ITEM,
                     ImportRecordKind.SERIES_EXPANSION, ImportRecordKind.TEMPLATE,
-                    ImportRecordKind.TEMPLATE_CATEGORY, ImportRecordKind.TEMPLATE_OPTION).contains(kind);
+                    ImportRecordKind.TEMPLATE_CATEGORY).contains(kind);
             case DESCRIPTION -> kind == ImportRecordKind.LIST_METADATA || kind == ImportRecordKind.LIST_ITEM
                     || kind == ImportRecordKind.TEMPLATE;
             case RELEASE_YEAR -> Set.of(ImportRecordKind.DIARY_EVENT, ImportRecordKind.REVIEW,
                     ImportRecordKind.WATCHED_MARKER, ImportRecordKind.WATCHED_SUMMARY,
                     ImportRecordKind.CURRENT_RATING, ImportRecordKind.LIST_ITEM,
-                    ImportRecordKind.WATCHLIST_ITEM, ImportRecordKind.SERIES_EXPANSION,
-                    ImportRecordKind.TEMPLATE_OPTION).contains(kind);
+                    ImportRecordKind.WATCHLIST_ITEM, ImportRecordKind.SERIES_EXPANSION).contains(kind);
             case RATING -> kind == ImportRecordKind.DIARY_EVENT || kind == ImportRecordKind.REVIEW
                     || kind == ImportRecordKind.CURRENT_RATING;
             case REVIEW -> kind == ImportRecordKind.DIARY_EVENT || kind == ImportRecordKind.REVIEW
@@ -687,6 +700,49 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             }
         } catch (IllegalArgumentException exception) {
             throw new BadRequestException("Cover image must be a valid URL");
+        }
+    }
+
+    private void validateTemplateEligibilityPlan(List<ImportResolutionOperation> decisions,
+                                                 Map<UUID, ImportItem> items) {
+        Set<UUID> changedTemplates = decisions.stream()
+                .filter(ImportResolutionOperation.EditField.class::isInstance)
+                .map(ImportResolutionOperation.EditField.class::cast)
+                .filter(edit -> edit.field() == ImportResolutionOperation.EditableField.ELIGIBILITY_START
+                        || edit.field() == ImportResolutionOperation.EditableField.ELIGIBILITY_END)
+                .map(ImportResolutionOperation.EditField::itemId)
+                .filter(id -> items.get(id) != null && items.get(id).getNormalizedKind() == ImportRecordKind.TEMPLATE)
+                .collect(java.util.stream.Collectors.toSet());
+        for (UUID templateId : changedTemplates) {
+            ImportItem template = items.get(templateId);
+            JsonNode payload = readPayload(template.getPayloadJson());
+            JsonNode source = sourcePayload(payload);
+            JsonNode fields = payload.path("resolution").path("fields");
+            String startValue = fields.path("ELIGIBILITY_START").isTextual()
+                    ? fields.path("ELIGIBILITY_START").asString() : textual(source.path("eligibilityStart"));
+            String endValue = fields.path("ELIGIBILITY_END").isTextual()
+                    ? fields.path("ELIGIBILITY_END").asString() : textual(source.path("eligibilityEnd"));
+            LocalDate start = dateValue(startValue);
+            LocalDate end = dateValue(endValue);
+            boolean invalidPair = (start == null) != (end == null)
+                    || start != null && end != null && start.isAfter(end);
+            if (invalidPair) {
+                template.setOutcome("NORMALIZATION_ISSUE");
+                template.setIssue("TEMPLATE_ELIGIBILITY_PERIOD_INVALID: Provide both dates with start no later than end.");
+            } else if (template.getIssue() != null
+                    && template.getIssue().startsWith("TEMPLATE_ELIGIBILITY_PERIOD_INVALID")) {
+                template.setOutcome("RESOLVED");
+                template.setIssue(null);
+            }
+        }
+    }
+
+    private LocalDate dateValue(String value) {
+        if (value == null) return null;
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new BadRequestException("Edited date must use ISO format");
         }
     }
 
@@ -887,6 +943,26 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 throw new BadRequestException(
                         "A fixed template category must retain at least one nominee or be opened explicitly");
             }
+        }
+    }
+
+    private void validateTemplateCategoryConstraints(UUID jobId, long generation,
+                                                     List<ImportResolutionOperation> decisions) {
+        List<ImportItem> roots = importItemRepository.findAllByJobIdAndPlanGenerationAndNormalizedKind(
+                jobId, generation, ImportRecordKind.TEMPLATE);
+        if (roots.isEmpty()) return;
+        if (roots.size() != 1) throw new BadRequestException("Import contains multiple template roots");
+        List<ImportItem> categories = importItemRepository.findAllByJobIdAndPlanGenerationAndNormalizedKind(
+                jobId, generation, ImportRecordKind.TEMPLATE_CATEGORY);
+        long activeCategories = categories.stream().filter(category -> {
+            if (category.getDecision() == ImportDecision.REMOVE_CATEGORY
+                    || category.getDecision() == ImportDecision.SKIP_ITEM) return false;
+            return decisions.stream().noneMatch(decision -> category.getId().equals(decision.itemId())
+                    && (decision instanceof ImportResolutionOperation.RemoveCategory
+                    || decision instanceof ImportResolutionOperation.SkipItem));
+        }).count();
+        if (activeCategories == 0) {
+            throw new BadRequestException("A Picks template must retain at least one category");
         }
     }
 
@@ -1202,14 +1278,81 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         PreviewItemTitle itemTitle = previewItemTitle(item);
         PreviewItemDescription itemDescription = previewItemDescription(item);
         PreviewReviewText reviewText = previewReviewText(item);
+        PreviewTemplateEligibility eligibility = previewTemplateEligibility(item);
         return new ImportPreviewItemDTO(
                 item.getId(), item.getOrdinal(), item.getNormalizedKind(),
+                previewParentItemId(job, item), templateTargetType(item),
+                eligibility.start(), eligibility.end(),
                 item.getDecision(), item.getOutcome(), item.getIssue(),
                 watchDate.date(), watchDate.timestamp(), watchDate.precision(),
-                optionalJson(item.getResolvedTargetJson()), itemTitle.text(), itemTitle.length(),
+                previewResolvedTarget(item), itemTitle.text(), itemTitle.length(),
                 itemTitle.truncated(), itemDescription.text(), itemDescription.length(),
                 itemDescription.truncated(), reviewText.text(), reviewText.length(),
                 reviewText.truncated(), watchScopePreview(job, item));
+    }
+
+    private UUID previewParentItemId(ImportJob job, ImportItem item) {
+        if ((item.getNormalizedKind() != ImportRecordKind.TEMPLATE_CATEGORY
+                && item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION)
+                || item.getParentSourceId() == null) return null;
+        String seed = job.getId() + ":" + readPlanGeneration(job.getSelectionJson()) + ":"
+                + item.getParentSourceId();
+        return UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private PickAllowedType templateTargetType(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.TEMPLATE_CATEGORY
+                && item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION) return null;
+        JsonNode source = sourcePayload(readPayload(item.getPayloadJson()));
+        JsonNode value = item.getNormalizedKind() == ImportRecordKind.TEMPLATE_OPTION
+                ? source.path("targetType") : source.path("type");
+        if (!value.isTextual()) return null;
+        try {
+            return PickAllowedType.valueOf(value.asString());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("Staged template target type is invalid", exception);
+        }
+    }
+
+    private PreviewTemplateEligibility previewTemplateEligibility(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.TEMPLATE) {
+            return new PreviewTemplateEligibility(null, null);
+        }
+        JsonNode root = readPayload(item.getPayloadJson());
+        JsonNode source = sourcePayload(root);
+        JsonNode fields = root.path("resolution").path("fields");
+        String start = fields.path("ELIGIBILITY_START").isTextual()
+                ? fields.path("ELIGIBILITY_START").asString() : textual(source.path("eligibilityStart"));
+        String end = fields.path("ELIGIBILITY_END").isTextual()
+                ? fields.path("ELIGIBILITY_END").asString() : textual(source.path("eligibilityEnd"));
+        return new PreviewTemplateEligibility(dateValue(start), dateValue(end));
+    }
+
+    private JsonNode previewResolvedTarget(ImportItem item) {
+        JsonNode target = optionalJson(item.getResolvedTargetJson());
+        if (target == null || item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION) return target;
+        JsonNode source = sourcePayload(readPayload(item.getPayloadJson()));
+        JsonNode context = source.path("nominee").path("contextContent");
+        if (!context.isObject()) return target;
+
+        JsonNode candidates = target.path("candidates");
+        if (candidates.isArray()) {
+            ObjectNode projected = (ObjectNode) target.deepCopy();
+            ArrayNode projectedCandidates = (ArrayNode) projected.path("candidates");
+            for (JsonNode value : projectedCandidates) {
+                JsonNode candidateTarget = value.path("target");
+                if (candidateTarget.isObject() && "PERSON".equals(candidateTarget.path("kind").asString())) {
+                    ((ObjectNode) candidateTarget).set("contextContent", context.deepCopy());
+                }
+            }
+            return projected;
+        }
+        if (target.isObject() && "PERSON".equals(target.path("kind").asString())) {
+            ObjectNode projected = (ObjectNode) target.deepCopy();
+            projected.set("contextContent", context.deepCopy());
+            return projected;
+        }
+        return target;
     }
 
     private ImportWatchScopePreviewDTO watchScopePreview(ImportJob job, ImportItem item) {
@@ -1226,15 +1369,16 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private PreviewItemTitle previewItemTitle(ImportItem item) {
-        if (item.getNormalizedKind() != ImportRecordKind.LIST_METADATA) {
-            return new PreviewItemTitle(null, null, false);
-        }
         JsonNode root = readPayload(item.getPayloadJson());
         JsonNode source = sourcePayload(root);
-        JsonNode edited = root.path("resolution").path("fields").path("TITLE");
-        JsonNode value = edited.isTextual() ? edited : source.path("title");
-        if (!value.isTextual()) return new PreviewItemTitle(null, null, false);
-        String text = value.asString();
+        JsonNode fields = root.path("resolution").path("fields");
+        String text = switch (item.getNormalizedKind()) {
+            case LIST_METADATA, TEMPLATE -> fieldText(fields.path("TITLE"), source.path("title"));
+            case TEMPLATE_CATEGORY -> fieldText(fields.path("CATEGORY_NAME"), source.path("name"));
+            case TEMPLATE_OPTION -> templateNomineeLabel(source.path("nominee"));
+            default -> null;
+        };
+        if (text == null) return new PreviewItemTitle(null, null, false);
         int length = text.length();
         int previewLength = Math.min(length, 255);
         if (previewLength < length && previewLength > 0 && Character.isHighSurrogate(text.charAt(previewLength - 1))
@@ -1246,15 +1390,18 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private PreviewItemDescription previewItemDescription(ImportItem item) {
         if (item.getNormalizedKind() != ImportRecordKind.LIST_METADATA
-                && item.getNormalizedKind() != ImportRecordKind.LIST_ITEM) {
+                && item.getNormalizedKind() != ImportRecordKind.LIST_ITEM
+                && item.getNormalizedKind() != ImportRecordKind.TEMPLATE
+                && item.getNormalizedKind() != ImportRecordKind.TEMPLATE_CATEGORY) {
             return new PreviewItemDescription(null, null, false);
         }
         JsonNode root = readPayload(item.getPayloadJson());
         JsonNode source = sourcePayload(root);
-        JsonNode edited = root.path("resolution").path("fields").path("DESCRIPTION");
-        JsonNode value = edited.isTextual() ? edited : source.path("description");
-        if (!value.isTextual()) return new PreviewItemDescription(null, null, false);
-        String text = value.asString();
+        JsonNode fields = root.path("resolution").path("fields");
+        String text = item.getNormalizedKind() == ImportRecordKind.TEMPLATE_CATEGORY
+                ? textual(source.path("description"))
+                : fieldText(fields.path("DESCRIPTION"), source.path("description"));
+        if (text == null) return new PreviewItemDescription(null, null, false);
         int length = text.length();
         int previewLength = Math.min(length, 400);
         if (previewLength < length && previewLength > 0 && Character.isHighSurrogate(text.charAt(previewLength - 1))
@@ -1262,6 +1409,28 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             previewLength--;
         }
         return new PreviewItemDescription(text.substring(0, previewLength), length, length > 400);
+    }
+
+    private String fieldText(JsonNode edited, JsonNode source) {
+        return edited.isTextual() ? edited.asString() : textual(source);
+    }
+
+    private String templateNomineeLabel(JsonNode nominee) {
+        if (nominee == null || nominee.isMissingNode() || nominee.isNull()) return null;
+        if (nominee.isTextual()) return nominee.asString();
+        String title = textual(nominee.path("name"));
+        if (title == null) title = textual(nominee.path("title"));
+        if (title != null) return title;
+        String personId = textual(nominee.path("personTmdbId"));
+        if (personId != null) return "Person TMDB ID " + personId;
+        String contentId = textual(nominee.path("tmdbId"));
+        if (contentId != null) return "TMDB ID " + contentId;
+        JsonNode season = nominee.path("seasonNumber");
+        JsonNode episode = nominee.path("episodeNumber");
+        if (season.isIntegralNumber() && episode.isIntegralNumber()) {
+            return "Season " + season.asInt() + ", episode " + episode.asInt();
+        }
+        return null;
     }
 
     private PreviewReviewText previewReviewText(ImportItem item) {
@@ -1382,5 +1551,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private record PreviewItemDescription(String text, Integer length, boolean truncated) {
+    }
+
+    private record PreviewTemplateEligibility(LocalDate start, LocalDate end) {
     }
 }

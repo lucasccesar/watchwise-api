@@ -32,5 +32,5 @@ public class ImportJob {
  @Setter @Column(name="lease_until") private LocalDateTime leaseUntil;
  @Column(name="created_at", nullable=false) private LocalDateTime createdAt;
  @Column(name="updated_at", nullable=false) @Setter private LocalDateTime updatedAt;
- @Column(name="expires_at") private LocalDateTime expiresAt;
+ @Setter @Column(name="expires_at") private LocalDateTime expiresAt;
 }

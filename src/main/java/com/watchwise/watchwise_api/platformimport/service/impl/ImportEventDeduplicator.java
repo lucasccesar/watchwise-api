@@ -1,16 +1,13 @@
 package com.watchwise.watchwise_api.platformimport.service.impl;
 
 import com.watchwise.watchwise_api.platformimport.model.ImportLinkState;
+import com.watchwise.watchwise_api.platformimport.model.ImportPayloadHash;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.platformimport.model.SourceApplicationDecision;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
@@ -37,12 +34,6 @@ public class ImportEventDeduplicator {
     }
 
     public static String payloadHash(String payload) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest((payload == null ? "" : payload).getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is not available", exception);
-        }
+        return ImportPayloadHash.sha256(payload);
     }
 }

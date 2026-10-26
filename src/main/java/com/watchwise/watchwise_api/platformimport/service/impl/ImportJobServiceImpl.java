@@ -83,6 +83,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         validateMode(inputKind, sourceFormat, platform);
         importModeRegistry.require(new ImportModeKey(inputKind, sourceFormat));
         validateFile(file, sourceFormat, inputKind);
+        if (inputKind == ImportInputKind.PICKS_TEMPLATE) validateTemplateUpload(file, inputKind, sourceFormat);
         validateSourceAccountId(sourceAccountId);
         validateTimeZone(timeZone);
 
@@ -164,6 +165,9 @@ public class ImportJobServiceImpl implements ImportJobService {
             throw new ConflictException("Import preview is not ready to commit");
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        if (job.getExpiresAt() != null && !job.getExpiresAt().isAfter(now)) {
+            throw new ConflictException("Import job has expired");
+        }
         job.setState(ImportJobState.IMPORTING);
         job.setWorkPhase("APPLY");
         job.setWorkPending(true);
@@ -296,6 +300,15 @@ public class ImportJobServiceImpl implements ImportJobService {
         };
         if (!expectedExtension.equals(extension)) throw new BadRequestException("File extension does not match the selected import format");
         validateMediaType(file.getContentType(), sourceFormat);
+    }
+
+    private void validateTemplateUpload(MultipartFile file, ImportInputKind inputKind,
+                                       ImportSourceFormat sourceFormat) {
+        try (InputStream input = file.getInputStream()) {
+            importModeRegistry.validateUpload(new ImportModeKey(inputKind, sourceFormat), input);
+        } catch (IOException exception) {
+            throw new BadRequestException("Picks template JSON could not be read");
+        }
     }
 
     private long effectiveUploadLimit(ImportInputKind inputKind) {

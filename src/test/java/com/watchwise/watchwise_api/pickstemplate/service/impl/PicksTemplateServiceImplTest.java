@@ -9,6 +9,9 @@ import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pickstemplate.dto.*;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
+import com.watchwise.watchwise_api.pickstemplate.service.PreparedTemplateCreation;
+import com.watchwise.watchwise_api.pickstemplate.service.PreparedTemplateCreationService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateOptionMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.*;
@@ -48,6 +51,9 @@ class PicksTemplateServiceImplTest {
     @Mock PickRepository pickRepository;
     @Mock PickSelectionRepository selectionRepository;
     @Mock UserRepository userRepository;
+    @Mock PreparedTemplateCreationService preparedTemplateCreationService;
+    @Mock ImportLedger importLedger;
+    @Mock PicksTemplateResponseAssembler responseAssembler;
     @Mock PickTargetService pickTargetService;
     @Mock PicksTemplateMapper templateMapper;
     @Mock PicksTemplateOptionMapper optionMapper;
@@ -186,30 +192,33 @@ class PicksTemplateServiceImplTest {
     }
 
     @Test
-    void shouldDeriveOfficialOriginFromPersistedAdminRole() {
+    @DisplayName("[createTemplate] Should Delegate Creation Through Prepared Workflow - When Request Is Valid")
+    void shouldDelegateCreationThroughPreparedWorkflow() {
         UUID actorId = UUID.randomUUID();
-        User admin = user(actorId, UserRole.ADMIN);
-        PicksTemplateCategory category = category(PickCategoryOptionMode.OPEN);
-        when(userRepository.findById(actorId)).thenReturn(Optional.of(admin));
-        when(templateRepository.save(any())).thenAnswer(invocation -> {
-            PicksTemplate template = invocation.getArgument(0); template.setId(UUID.randomUUID()); return template;
-        });
-        when(categoryRepository.save(any())).thenAnswer(invocation -> {
-            PicksTemplateCategory saved = invocation.getArgument(0); saved.setId(UUID.randomUUID()); return saved;
-        });
-        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(any())).thenReturn(List.of(category));
-        when(optionRepository.findByCategoryId(any())).thenReturn(List.of());
-        when(userMapper.userToUserPreviewDto(admin)).thenReturn(new UserPreviewDTO(actorId, "admin", "image", true));
+        PicksTemplateCreationDTO request = creation(List.of(categoryCreation(PickCategoryOptionMode.OPEN, List.of())));
+        PreparedTemplateCreation prepared = new PreparedTemplateCreation(actorId, request, List.of(),
+                "digest", LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplateResponseDTO expected = new PicksTemplateResponseDTO(UUID.randomUUID(), null,
+                PickOrigin.COMMUNITY, "Awards", null, null, null, null, null, now, now, List.of());
+        when(preparedTemplateCreationService.prepare(actorId, request)).thenReturn(prepared);
+        when(preparedTemplateCreationService.createPrepared(actorId, prepared)).thenReturn(expected);
 
-        PicksTemplateResponseDTO result = service.createTemplate(actorId, creation(List.of(categoryCreation(PickCategoryOptionMode.OPEN, List.of()))));
-
-        assertThat(result.origin()).isEqualTo(PickOrigin.OFFICIAL);
+        assertThat(service.createTemplate(actorId, request)).isSameAs(expected);
+        verify(preparedTemplateCreationService).prepare(actorId, request);
+        verify(preparedTemplateCreationService).createPrepared(actorId, prepared);
+        verifyNoInteractions(templateRepository, categoryRepository, userRepository);
     }
 
     @Test
+    @DisplayName("[createTemplate] Should Reject Template Without Categories - When Creation Request Has No Categories")
     void shouldRejectTemplateWithoutCategoriesBeforePersistence() {
         UUID actorId = UUID.randomUUID();
-        assertThatThrownBy(() -> service.createTemplate(actorId, creation(List.of()))).isInstanceOf(BadRequestException.class);
+        PicksTemplateCreationDTO request = creation(List.of());
+        when(preparedTemplateCreationService.prepare(actorId, request))
+                .thenThrow(new BadRequestException("At least one category is required"));
+
+        assertThatThrownBy(() -> service.createTemplate(actorId, request)).isInstanceOf(BadRequestException.class);
         verifyNoInteractions(templateRepository, userRepository);
     }
 
@@ -217,10 +226,11 @@ class PicksTemplateServiceImplTest {
     @DisplayName("[createTemplate] Should Reject - When Creating A Template With An Empty Fixed Category")
     void shouldRejectFixedCategoryWithoutOptionsWhenCreatingTemplate() {
         UUID actorId = UUID.randomUUID();
+        PicksTemplateCreationDTO request = creation(List.of(categoryCreation(PickCategoryOptionMode.FIXED, List.of())));
+        when(preparedTemplateCreationService.prepare(actorId, request))
+                .thenThrow(new BadRequestException("Fixed categories must have at least one option"));
 
-        assertThatThrownBy(() -> service.createTemplate(actorId,
-                creation(List.of(categoryCreation(PickCategoryOptionMode.FIXED, List.of())))))
-                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> service.createTemplate(actorId, request)).isInstanceOf(BadRequestException.class);
     }
 
     @Test
@@ -234,6 +244,23 @@ class PicksTemplateServiceImplTest {
     }
 
     @Test
+    @DisplayName("[detachOrDeleteTemplate] Should Tombstone Imported Links - Before Deleting An Unused Template")
+    void shouldTombstoneImportedLinksBeforeDeletingUnusedTemplate() {
+        UUID actorId = UUID.randomUUID();
+        User actor = user(actorId, UserRole.USER);
+        PicksTemplate template = template(actor, PickOrigin.COMMUNITY);
+        when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(pickRepository.existsByPicksTemplateId(template.getId())).thenReturn(false);
+
+        service.detachOrDeleteTemplate(actorId, template.getId());
+
+        verify(importLedger).markDeletedByTarget("PICKS_TEMPLATE", template.getId());
+        verify(templateRepository).delete(template);
+    }
+
+    @Test
+    @DisplayName("[detachOrDeleteTemplate] Should Tombstone Imported Links - When An Admin Detaches A Used Template")
     void shouldKeepOriginWhenAdminDetachesUsedTemplate() {
         UUID actorId = UUID.randomUUID();
         PicksTemplate template = template(user(UUID.randomUUID(), UserRole.USER), PickOrigin.COMMUNITY);
@@ -243,6 +270,7 @@ class PicksTemplateServiceImplTest {
 
         service.detachOrDeleteTemplate(actorId, template.getId());
 
+        verify(importLedger).markDeletedByTarget("PICKS_TEMPLATE", template.getId());
         ArgumentCaptor<PicksTemplate> captor = ArgumentCaptor.forClass(PicksTemplate.class);
         verify(templateRepository).save(captor.capture());
         assertThat(captor.getValue().getCreator()).isNull();
@@ -250,6 +278,7 @@ class PicksTemplateServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateTemplate] Should Clear Eligibility Period - When Clear Is Explicitly Requested")
     void shouldClearUnusedEligibilityPeriodOnlyWhenExplicitlyRequested() {
         UUID actorId = UUID.randomUUID();
         User actor = user(actorId, UserRole.USER);
@@ -259,6 +288,10 @@ class PicksTemplateServiceImplTest {
         when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of());
+        when(responseAssembler.toResponse(template, actorId)).thenAnswer(call -> new PicksTemplateResponseDTO(
+                template.getId(), null, template.getOrigin(), template.getName(), template.getDescription(),
+                template.getCoverImage(), template.getInstructions(), template.getEligibilityStartDate(),
+                template.getEligibilityEndDate(), template.getCreatedAt(), template.getUpdatedAt(), List.of()));
 
         PicksTemplateResponseDTO result = service.updateTemplate(actorId, template.getId(),
                 new PicksTemplatePatchDTO(null, null, null, null, null, null, true));

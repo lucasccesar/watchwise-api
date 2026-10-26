@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadConstraints;
@@ -48,7 +49,7 @@ public class PicksTemplateJsonParser {
             throw invalid("Invalid template JSON");
         }
         try {
-            if (bytes.length > maxBytes) throw invalid("JSON exceeds byte limit");
+            if (bytes.length > maxBytes) throw new MaxUploadSizeExceededException(maxBytes);
             JsonFactory factory = JsonFactory.builder()
                     .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                     .streamReadConstraints(StreamReadConstraints.builder()
@@ -230,22 +231,7 @@ public class PicksTemplateJsonParser {
     }
 
     private static <E extends Enum<E>> E enumValue(JsonNode node, String key, Class<E> type, E fallback) {
-        JsonNode value = node.get(key);
-        if (value == null) {
-            if (fallback != null) return fallback;
-            throw invalid(key + " is required");
-        }
-        if (!value.isTextual()) throw invalid("Invalid " + key);
-        String spelling = trimEcmaWhitespace(value.asString());
-        StringBuilder asciiUppercase = new StringBuilder(spelling.length());
-        for (int index = 0; index < spelling.length(); index++) {
-            char character = spelling.charAt(index);
-            if (character > 0x7F) throw invalid("Invalid " + key);
-            asciiUppercase.append(character >= 'a' && character <= 'z'
-                    ? (char) (character - 'a' + 'A') : character);
-        }
-        try { return Enum.valueOf(type, asciiUppercase.toString()); }
-        catch (IllegalArgumentException ex) { throw invalid("Invalid " + key); }
+        return TemplateImportEnumValues.enumValue(node, key, type, fallback);
     }
 
     private static LocalDate date(JsonNode node, String key) {
@@ -266,30 +252,6 @@ public class PicksTemplateJsonParser {
     private static BadRequestException invalid(String message) { return new BadRequestException(message); }
 
     private static boolean isEcmaBlank(String value) {
-        return value.codePoints().allMatch(PicksTemplateJsonParser::isEcmaWhitespace);
-    }
-
-    private static String trimEcmaWhitespace(String value) {
-        int start = 0;
-        int end = value.length();
-        while (start < end) {
-            int codePoint = value.codePointAt(start);
-            if (!isEcmaWhitespace(codePoint)) break;
-            start += Character.charCount(codePoint);
-        }
-        while (end > start) {
-            int codePoint = value.codePointBefore(end);
-            if (!isEcmaWhitespace(codePoint)) break;
-            end -= Character.charCount(codePoint);
-        }
-        return value.substring(start, end);
-    }
-
-    private static boolean isEcmaWhitespace(int codePoint) {
-        return codePoint >= 0x0009 && codePoint <= 0x000D || codePoint == 0x0020
-                || codePoint == 0x00A0 || codePoint == 0x1680
-                || codePoint >= 0x2000 && codePoint <= 0x200A
-                || codePoint == 0x2028 || codePoint == 0x2029 || codePoint == 0x202F
-                || codePoint == 0x205F || codePoint == 0x3000 || codePoint == 0xFEFF;
+        return TemplateImportEnumValues.isEcmaBlank(value);
     }
 }

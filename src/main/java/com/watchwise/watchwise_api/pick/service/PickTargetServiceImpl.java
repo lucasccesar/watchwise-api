@@ -358,12 +358,10 @@ public class PickTargetServiceImpl implements PickTargetService {
     }
 
     private ContentType contentType(PickAllowedType type) {
-        return switch (type) {
-            case MOVIE -> ContentType.MOVIE;
-            case SERIES -> ContentType.SERIES;
-            case EPISODE -> ContentType.EPISODE;
-            case PERSON -> throw new BadRequestException("Person categories do not use a primary content target");
-        };
+        if (type == PickAllowedType.PERSON) {
+            throw new BadRequestException("Person categories do not use a primary content target");
+        }
+        return type.toContentType();
     }
 
     private void requireCategory(PicksTemplateCategory category) {

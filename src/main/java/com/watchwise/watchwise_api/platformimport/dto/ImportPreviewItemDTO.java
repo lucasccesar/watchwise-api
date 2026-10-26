@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.platformimport.dto;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportDatePrecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
@@ -13,6 +14,10 @@ public record ImportPreviewItemDTO(
         UUID itemId,
         long ordinal,
         ImportRecordKind kind,
+        UUID parentItemId,
+        PickAllowedType targetType,
+        LocalDate templateEligibilityStart,
+        LocalDate templateEligibilityEnd,
         ImportDecision decision,
         String outcome,
         String issue,
@@ -32,7 +37,7 @@ public record ImportPreviewItemDTO(
         ImportWatchScopePreviewDTO watchScopePreview
 ) {
     public ImportPreviewItemDTO(UUID itemId, ImportRecordKind kind, ImportDecision decision, String outcome) {
-        this(itemId, 0, kind, decision, outcome, null, null, null, null, null,
+        this(itemId, 0, kind, null, null, null, null, decision, outcome, null, null, null, null, null,
                 null, null, false, null, null, false, null, null, false, null);
     }
 }

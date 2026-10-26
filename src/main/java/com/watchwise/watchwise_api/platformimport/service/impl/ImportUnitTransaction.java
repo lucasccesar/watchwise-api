@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.platformimport.service.impl;
 
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -83,7 +86,7 @@ public class ImportUnitTransaction {
         ImportUnitApplier applier = applierFor(item);
         ImportSourceKey sourceKey = applier.sourceKey(context, item);
         SourceApplicationDecision sourceDecision = eventDeduplicator.decide(context.ownerId(), context.jobId(),
-                sourceKey, ImportEventDeduplicator.payloadHash(item.getPayloadJson()));
+                sourceKey, applier.payloadHash(context, item));
         if (sourceDecision == SourceApplicationDecision.SKIP_CONSUMED) {
             item.setOutcome("SKIPPED");
             item.setIssue("SOURCE_ALREADY_CONSUMED");
@@ -356,6 +359,120 @@ public class ImportUnitTransaction {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean updateTemplateResolutionIssues(ImportExecutionContext context,
+                                                  List<TemplateResolutionIssueUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return true;
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        List<UUID> ids = updates.stream().map(TemplateResolutionIssueUpdate::itemId).distinct().toList();
+        if (ids.size() != updates.size()) throw new IllegalArgumentException("Template issue updates repeat an item");
+        List<ImportItem> changed = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), ids);
+        if (changed.size() != updates.size()
+                || changed.stream().anyMatch(item -> item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION)) {
+            throw new IllegalArgumentException("Template issue updates contain an invalid item");
+        }
+        java.util.Map<UUID, TemplateResolutionIssueUpdate> byId = updates.stream()
+                .collect(java.util.stream.Collectors.toMap(TemplateResolutionIssueUpdate::itemId, update -> update));
+        for (ImportItem item : changed) {
+            TemplateResolutionIssueUpdate update = byId.get(item.getId());
+            item.setOutcome(update.outcome());
+            item.setIssue(update.issue());
+        }
+        itemRepository.saveAll(changed);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean savePreparedTemplatePlan(ImportExecutionContext context, UUID templateItemId,
+                                            String payloadJson) {
+        ImportJob job = lockRunnableJob(context, null);
+        if (job == null || !(job.getState() == ImportJobState.RESOLVING && "RESOLVE".equals(job.getWorkPhase())
+                || job.getState() == ImportJobState.IMPORTING && "APPLY".equals(job.getWorkPhase()))) return false;
+        ImportItem item = itemRepository.findById(templateItemId).orElse(null);
+        if (item == null || !context.jobId().equals(item.getJobId())
+                || context.planGeneration() != item.getPlanGeneration()
+                || item.getNormalizedKind() != ImportRecordKind.TEMPLATE) {
+            return false;
+        }
+        item.setPayloadJson(payloadJson);
+        itemRepository.save(item);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean returnTemplateToResolution(ImportExecutionContext context, UUID templateItemId,
+                                              UUID nomineeItemId, String issue) {
+        if (issue == null || issue.isBlank()) throw new IllegalArgumentException("Template issue is required");
+        ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
+        if (job == null || !"APPLY".equals(job.getWorkPhase())) return false;
+        ImportItem template = itemRepository.findById(templateItemId).orElse(null);
+        ImportItem nominee = itemRepository.findById(nomineeItemId).orElse(null);
+        if (template == null || nominee == null || !context.jobId().equals(template.getJobId())
+                || !context.jobId().equals(nominee.getJobId())
+                || context.planGeneration() != template.getPlanGeneration()
+                || context.planGeneration() != nominee.getPlanGeneration()
+                || template.getNormalizedKind() != ImportRecordKind.TEMPLATE
+                || nominee.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION) {
+            throw new BadRequestException("Template issue item does not belong to this import");
+        }
+        ImportItem category = itemRepository.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                context.jobId(), context.planGeneration(), ImportRecordKind.TEMPLATE_CATEGORY,
+                nominee.getParentSourceId()).orElse(null);
+        if (category == null || !template.getSourceId().equals(category.getParentSourceId())) {
+            throw new BadRequestException("Template issue nominee does not belong to its root");
+        }
+        ObjectNode payload = templatePayloadWithoutPreparedPlan(template.getPayloadJson());
+        template.setPayloadJson(writeJson(payload));
+        nominee.setOutcome("NORMALIZATION_ISSUE");
+        nominee.setIssue(issue);
+        itemRepository.saveAll(List.of(template, nominee));
+
+        long nextVersion;
+        try {
+            nextVersion = Math.addExact(job.getPreviewVersion(), 1);
+        } catch (ArithmeticException exception) {
+            throw new ConflictException("Import preview version is exhausted");
+        }
+        LocalDateTime now = now();
+        job.setPreviewVersion(nextVersion);
+        job.setExpiresAt(now.plusHours(24));
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        job.setUpdatedAt(now);
+        releaseLease(job);
+        return true;
+    }
+
+    private ObjectNode templatePayloadWithoutPreparedPlan(String serialized) {
+        JsonNode original;
+        try {
+            original = serialized == null || serialized.isBlank()
+                    ? objectMapper.createObjectNode() : objectMapper.readTree(serialized);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Staged Picks template payload is invalid", exception);
+        }
+        ObjectNode overlay;
+        if (original.isObject() && original.path("_watchwiseResolution").asInt(-1) == 1
+                && original.path("source").isObject() && original.path("resolution").isObject()) {
+            overlay = (ObjectNode) original.deepCopy();
+        } else {
+            overlay = objectMapper.createObjectNode();
+            overlay.put("_watchwiseResolution", 1);
+            overlay.set("source", original.deepCopy());
+            ObjectNode resolution = overlay.putObject("resolution");
+            resolution.set("fields", objectMapper.createObjectNode());
+        }
+        JsonNode resolution = overlay.path("resolution");
+        if (resolution.isObject()) ((ObjectNode) resolution).remove("preparedTemplate");
+        return overlay;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean finishApplyChunk(ImportExecutionContext context, boolean moreUnits) {
         ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
         if (job == null || !"APPLY".equals(job.getWorkPhase())) return false;
@@ -418,6 +535,8 @@ public class ImportUnitTransaction {
                 || !job.isWorkPending()
                 || !context.leaseToken().equals(job.getLeaseToken())
                 || job.getLeaseUntil() == null || !job.getLeaseUntil().isAfter(now)
+                || (job.getState() != ImportJobState.IMPORTING
+                && job.getExpiresAt() != null && !job.getExpiresAt().isAfter(now))
                 || job.getPreviewVersion() != context.previewVersion()
                 || readPlanGeneration(job.getSelectionJson()) != context.planGeneration()) {
             return null;
@@ -441,8 +560,11 @@ public class ImportUnitTransaction {
                 .parserVersion(parserVersion)
                 .payloadJson(writeJson(record.payload()))
                 .resolvedTargetJson(record.target() == null ? null : writeJson(record.target()))
-                .outcome(record.kind() == ImportRecordKind.LIST_METADATA && record.target() == null
-                        ? record.payload().path("issueCode").isTextual() ? "NORMALIZATION_ISSUE" : "RESOLVED" : null)
+                .outcome(isTemplateStructure(record.kind())
+                        ? "RESOLVED"
+                        : record.kind() == ImportRecordKind.LIST_METADATA && record.target() == null
+                                ? record.payload().path("issueCode").isTextual() ? "NORMALIZATION_ISSUE" : "RESOLVED"
+                                : null)
                 .issue(record.kind() == ImportRecordKind.LIST_METADATA
                         && record.payload().path("issueCode").isTextual()
                         ? record.payload().path("issueExplanation").isTextual()
@@ -452,6 +574,10 @@ public class ImportUnitTransaction {
                 .ordinal(record.ordinal())
                 .build();
         return item;
+    }
+
+    private boolean isTemplateStructure(ImportRecordKind kind) {
+        return kind == ImportRecordKind.TEMPLATE || kind == ImportRecordKind.TEMPLATE_CATEGORY;
     }
 
     private UUID uuidForItem(ImportExecutionContext context, String itemId) {
@@ -576,6 +702,8 @@ public class ImportUnitTransaction {
                                              String outcome, String issue) { }
 
     public record WatchScopePreparation(UUID itemId, String payloadJson, String outcome, String issue) { }
+
+    public record TemplateResolutionIssueUpdate(UUID itemId, String outcome, String issue) { }
 
     public static final class WaitForOtherJobException extends RuntimeException { }
 }

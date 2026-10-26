@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -22,6 +24,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PicksTemplateJsonParserTest {
     private final ImportLimits limits = new ImportLimits();
     private final PicksTemplateJsonParser parser = new PicksTemplateJsonParser(limits);
+
+    @Test
+    @DisplayName("[parse] Should Reject A Template Above The Hard Byte Limit - When Configuration Is Raised")
+    void shouldRejectTemplateAboveHardByteLimitAsPayloadTooLarge() {
+        limits.setMaxTemplateUploadBytes(10L * 1024 * 1024);
+        byte[] bytes = new byte[5 * 1024 * 1024 + 1];
+
+        assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(bytes)))
+                .isInstanceOf(MaxUploadSizeExceededException.class);
+    }
 
     @Test
     void parsesSpecFixtureWithOpenAndFixedCategories() throws Exception {
@@ -102,9 +114,10 @@ class PicksTemplateJsonParserTest {
     }
 
     @Test
+    @DisplayName("[parse] Should Reject The Configured Byte Limit - When The Document Exceeds It")
     void enforcesConfiguredByteAndDepthLimits() {
         limits.setMaxTemplateUploadBytes(valid().getBytes(StandardCharsets.UTF_8).length - 1);
-        assertRejected(valid());
+        assertThatThrownBy(() -> parse(valid())).isInstanceOf(MaxUploadSizeExceededException.class);
         limits.setMaxTemplateUploadBytes(5L * 1024 * 1024);
         limits.setMaxJsonDepth(1);
         assertRejected(valid());
@@ -124,10 +137,12 @@ class PicksTemplateJsonParserTest {
     }
 
     @Test
+    @DisplayName("[parse] Should Reject The Hard Byte Limit - When Upload Exceeds Five Mebibytes")
     void rejectsUploadAboveFiveMebibytesAndNestedDuplicateKeys() {
         String prefix = "{\"title\":\"T\",\"description\":\"";
         String suffix = "\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\"}]}";
-        assertRejected(prefix + "x".repeat(5 * 1024 * 1024 - prefix.length() - suffix.length() + 1) + suffix);
+        String oversized = prefix + "x".repeat(5 * 1024 * 1024 - prefix.length() - suffix.length() + 1) + suffix;
+        assertThatThrownBy(() -> parse(oversized)).isInstanceOf(MaxUploadSizeExceededException.class);
         assertRejected(baseCategory("\"type\":\"MOVIE\",\"nominees\":[{\"tmdbId\":\"1\",\"tmdbId\":\"2\"}]"));
     }
 

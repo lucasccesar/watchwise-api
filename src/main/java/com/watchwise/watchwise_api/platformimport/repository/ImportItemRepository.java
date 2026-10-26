@@ -27,6 +27,12 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     List<ImportItem> findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind);
 
+    List<ImportItem> findAllByJobIdAndPlanGenerationAndNormalizedKind(
+            UUID jobId, long planGeneration, ImportRecordKind normalizedKind);
+
+    List<ImportItem> findAllByJobIdAndPlanGenerationAndParentSourceIdIn(
+            UUID jobId, long planGeneration, Collection<String> parentSourceIds);
+
     Optional<ImportItem> findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
             UUID jobId, long planGeneration, ImportRecordKind normalizedKind, String sourceId);
 

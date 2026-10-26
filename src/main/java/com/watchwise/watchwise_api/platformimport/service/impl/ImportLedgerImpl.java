@@ -107,6 +107,14 @@ public class ImportLedgerImpl implements ImportLedger {
    """, ownerId, targetType, targetId);
  }
 
+ @Override @Transactional
+ public void markDeletedByTarget(String targetType, UUID targetId) {
+  jdbc.update("""
+   UPDATE external_import_links SET state='TOMBSTONE', updated_at=CURRENT_TIMESTAMP
+   WHERE target_type=? AND target_id=?
+   """, targetType, targetId);
+ }
+
  private void updateState(UUID ownerId, ImportSourceKey key, ImportLinkState state, String targetType, UUID targetId, String reason) {
   int updated = jdbc.update("""
    UPDATE external_import_links SET state=?,target_type=?,target_id=?,outcome_reason=?,updated_at=CURRENT_TIMESTAMP
