@@ -22,7 +22,6 @@ import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
-import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
@@ -45,7 +44,9 @@ import org.springframework.data.domain.Page;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,7 +64,6 @@ class PickServiceImplTest {
     @Mock FollowerRepository followerRepository;
     @Mock PickTargetService targetService;
     @Mock PickMapper pickMapper;
-    @Mock PicksTemplateMapper templateMapper;
     @Mock CommentRepository commentRepository;
     @Mock LikeService likeService;
     @Mock UserMapper userMapper;
@@ -81,8 +81,10 @@ class PickServiceImplTest {
         PickPreviewAssembler pickPreviewAssembler = new PickPreviewAssembler(selectionRepository, categoryRepository,
                 optionRepository, commentRepository, mock(CommentPreviewAssembler.class), likeService, pickMapper,
                 targetService, userMapper, templatePreviewAssembler);
+        PickResponseAssembler pickResponseAssembler = new PickResponseAssembler(selectionRepository,
+                categoryRepository, templatePreviewAssembler, commentRepository, likeService, pickMapper, targetService);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
-                userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
+                userRepository, followerRepository, targetService, pageRequestFactory, pickResponseAssembler,
                 pickPreviewAssembler, userBlockAccessService);
         savedSelections = new ArrayList<>();
     }
@@ -141,8 +143,6 @@ class PickServiceImplTest {
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
-        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
-
         PickResponseDTO result = service.createPick(userId, template.getId(), request);
 
         assertThat(result.visibility()).isEqualTo(PickVisibility.FOLLOWERS);
@@ -167,8 +167,6 @@ class PickServiceImplTest {
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
-        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
-
         PickResponseDTO result = service.createPick(userId, template.getId(),
                 new PickCreationDTO(PickVisibility.PUBLIC, List.of(selectionRequest(movie.getId(), "550"))));
 
@@ -223,8 +221,6 @@ class PickServiceImplTest {
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         when(targetService.isValid(eq(userId), same(template), same(category), any())).thenReturn(true);
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
-
         PickCreationDTO request = new PickCreationDTO(PickVisibility.PUBLIC, List.of(selectionRequest(category.getId(), "550")));
         PickResponseDTO first = service.createPick(userId, template.getId(), request);
         PickResponseDTO second = service.createPick(userId, template.getId(), request);
@@ -252,8 +248,6 @@ class PickServiceImplTest {
                 .thenReturn(List.of(category));
         lenient().when(targetService.isStructurallyValid(same(category), any(), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
-
         var result = service.getMyPicks(userId, template.getId(), 1, 10);
 
         assertThat(result.getContent()).hasSize(2);
@@ -345,8 +339,6 @@ class PickServiceImplTest {
         when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of(category));
         when(targetService.isValid(eq(viewerId), same(template), same(category), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
-
         assertThat(service.getPick(viewerId, followersPick.getId()).id()).isEqualTo(followersPick.getId());
 
         when(pickRepository.findById(privatePick.getId())).thenReturn(Optional.of(privatePick));
@@ -372,9 +364,6 @@ class PickServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         PicksTemplate template = template();
         Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
-        service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
-                userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                templatePreviewAssembler, commentRepository, likeService, null, userBlockAccessService);
         when(pickRepository.findById(pick.getId())).thenReturn(Optional.of(pick));
         lenient().when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId())))
                 .thenReturn(List.of(new CommentRepository.PickCommentCount() {
@@ -384,6 +373,33 @@ class PickServiceImplTest {
 
         assertThat(service.getPick(viewerId, pick.getId()).commentsCount()).isEqualTo(1L);
         verify(commentRepository, never()).countByPickIdIn(any());
+    }
+
+    @Test
+    void shouldReturnViewerVisibleSocialStateAndTemplatePreviewForRawPickResponses() {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplate template = template();
+        Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
+        pick.setLikesCount(5);
+        PicksTemplatePreviewDTO visiblePreview = templatePreview(template);
+        when(pickRepository.findById(pick.getId())).thenReturn(Optional.of(pick));
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), visiblePreview));
+        when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId())))
+                .thenReturn(List.of(commentCount(pick.getId(), 2)));
+        when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of());
+
+        PickResponseDTO result = service.getPick(viewerId, pick.getId());
+
+        assertThat(result.likesCount()).isEqualTo(5);
+        assertThat(result.commentsCount()).isEqualTo(2);
+        assertThat(result.isLikedByViewer()).isFalse();
+        assertThat(result.progress()).isEqualTo(PickProgress.EMPTY);
+        assertThat(result.selections()).isEmpty();
+        assertThat(result.picksTemplate()).isSameAs(visiblePreview);
+        verify(templatePreviewAssembler).assemble(anyCollection(), eq(viewerId));
+        verify(commentRepository).countVisiblePickComments(viewerId, List.of(pick.getId()));
+        verify(likeService).getLikedPickIds(viewerId, List.of(pick.getId()));
     }
 
     @Test
@@ -468,6 +484,13 @@ class PickServiceImplTest {
 
     private PicksTemplatePreviewDTO templatePreview(PicksTemplate template) {
         return new PicksTemplatePreviewDTO(template.getId(), template.getOrigin(), template.getName(), template.getDescription(), template.getCoverImage());
+    }
+
+    private CommentRepository.PickCommentCount commentCount(UUID pickId, long count) {
+        return new CommentRepository.PickCommentCount() {
+            @Override public UUID getPickId() { return pickId; }
+            @Override public long getCount() { return count; }
+        };
     }
 
     private ResolvedPickTarget.TargetKey movieKey(String tmdbId) {

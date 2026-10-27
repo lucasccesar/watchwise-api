@@ -6,12 +6,19 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickProgress;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateCategoryService;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -52,6 +59,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -262,6 +270,44 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[upsertSelection] Should Serialize Complete Social State - When A Pick Selection Is Updated")
+    void shouldSerializeCompleteSocialStateWhenPickSelectionIsUpdated() throws Exception {
+        RegisteredUser viewer = registerUser("pickselectionupdate");
+        UUID pickId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        UUID selectionId = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(UUID.randomUUID(), PickOrigin.COMMUNITY,
+                "Awards", null, null);
+        PickOptionSearchDTO target = new PickOptionSearchDTO(contentId,
+                new ContentRefDTO(contentId, "551", ContentType.MOVIE, null, null, null, null, null, null, null),
+                null, null);
+        PickResponseDTO response = new PickResponseDTO(pickId, templatePreview, viewer.id(), PickVisibility.PUBLIC,
+                now, now, PickProgress.PARTIAL,
+                List.of(new PickSelectionDTO(selectionId, categoryId, target, now, now, true)), 8, 3, true);
+        when(pickSelectionService.upsertSelection(eq(viewer.id()), eq(pickId), eq(categoryId), any()))
+                .thenReturn(response);
+
+        mockMvc.perform(put("/picks/{pickId}/categories/{categoryId}/selection", pickId, categoryId)
+                        .cookie(viewer.accessToken(), viewer.csrfToken())
+                        .header("X-XSRF-TOKEN", viewer.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":{"type":"MOVIE","tmdbId":"551"}}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.likesCount").value(8))
+                .andExpect(jsonPath("$.commentsCount").value(3))
+                .andExpect(jsonPath("$.isLikedByViewer").value(true))
+                .andExpect(jsonPath("$.picksTemplate.id").value(templatePreview.id().toString()))
+                .andExpect(jsonPath("$.progress").value("PARTIAL"))
+                .andExpect(jsonPath("$.selections[0].target.content.tmdbId").value("551"));
+
+        verify(pickSelectionService).upsertSelection(eq(viewer.id()), eq(pickId), eq(categoryId), any());
+    }
+
+    @Test
     @DisplayName("[getTemplatePicks] Should Return Not Found - When Template Does Not Exist")
     void shouldReturnNotFoundForUnknownTemplatePicks() throws Exception {
         RegisteredUser viewer = registerUser("unknownpicktemplate");
@@ -317,7 +363,8 @@ class PickControllerIntegrationTest {
 
     private PickResponseDTO response(UUID userId) {
         LocalDateTime now = LocalDateTime.now();
-        return new PickResponseDTO(UUID.randomUUID(), null, userId, PickVisibility.PUBLIC, now, now, null, List.of());
+        return new PickResponseDTO(UUID.randomUUID(), null, userId, PickVisibility.PUBLIC, now, now, null,
+                List.of(), 0, 0, false);
     }
 
     private PickPreviewDTO preview(UUID pickId) {

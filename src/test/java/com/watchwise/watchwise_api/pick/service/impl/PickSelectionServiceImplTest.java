@@ -3,8 +3,10 @@ package com.watchwise.watchwise_api.pick.service.impl;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.pick.dto.*;
 import com.watchwise.watchwise_api.pick.entity.Pick;
@@ -16,11 +18,12 @@ import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
-import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +36,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,7 +56,9 @@ class PickSelectionServiceImplTest {
     @Mock FollowerRepository followerRepository;
     @Mock PickTargetService targetService;
     @Mock PickMapper pickMapper;
-    @Mock PicksTemplateMapper templateMapper;
+    @Mock PicksTemplatePreviewAssembler templatePreviewAssembler;
+    @Mock CommentRepository commentRepository;
+    @Mock LikeService likeService;
 
     PickSelectionService service;
     UUID ownerId;
@@ -62,9 +69,11 @@ class PickSelectionServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new PickSelectionServiceImpl(pickRepository, selectionRepository, categoryRepository,
-                templateRepository, targetService, pickMapper, templateMapper);
         ownerId = UUID.randomUUID();
+        PickResponseAssembler responseAssembler = new PickResponseAssembler(selectionRepository, categoryRepository,
+                templatePreviewAssembler, commentRepository, likeService, pickMapper, targetService);
+        service = new PickSelectionServiceImpl(pickRepository, selectionRepository, categoryRepository,
+                templateRepository, targetService, responseAssembler);
         template = template();
         movieCategory = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED, 1);
         personCategory = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN, 2);
@@ -75,6 +84,7 @@ class PickSelectionServiceImplTest {
     @DisplayName("[upsertSelection] Should Replace Existing Selection - When Category Already Has A Target")
     void shouldReplaceExistingSelectionForTheSameCategory() {
         stubTemplateLock();
+        pick.setLikesCount(8);
         Content oldContent = content("550");
         Content newContent = content("551");
         PickSelection existing = selection(pick, movieCategory, oldContent);
@@ -86,10 +96,25 @@ class PickSelectionServiceImplTest {
                 .thenReturn(new ResolvedPickTarget(newContent, null, null, movieKey("551")));
         when(selectionRepository.save(any())).thenAnswer(invocation -> assignSelectionId(invocation.getArgument(0)));
         stubAssembly(List.of(selection(pick, movieCategory, newContent)), true);
+        when(commentRepository.countVisiblePickComments(ownerId, List.of(pick.getId())))
+                .thenReturn(List.of(commentCount(pick.getId(), 3)));
+        when(likeService.getLikedPickIds(ownerId, List.of(pick.getId()))).thenReturn(Set.of(pick.getId()));
+        when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(newContent.getId(),
+                new ContentRefDTO(newContent.getId(), "551", ContentType.MOVIE, null, null, null, null, null, null, null),
+                null, null));
 
         PickResponseDTO result = service.upsertSelection(ownerId, pick.getId(), movieCategory.getId(), movieTarget("551"));
 
+        assertThat(result.likesCount()).isEqualTo(8);
+        assertThat(result.commentsCount()).isEqualTo(3);
+        assertThat(result.isLikedByViewer()).isTrue();
+        assertThat(result.picksTemplate()).isEqualTo(templatePreview(template));
+        assertThat(result.selections()).extracting(selection -> selection.target().content().tmdbId())
+                .containsExactly("551");
         assertThat(result.selections()).hasSize(1);
+        verify(commentRepository).countVisiblePickComments(ownerId, List.of(pick.getId()));
+        verify(likeService).getLikedPickIds(ownerId, List.of(pick.getId()));
+        verify(templatePreviewAssembler).assemble(anyCollection(), eq(ownerId));
         verify(selectionRepository).delete(existing);
         verify(selectionRepository).flush();
         ArgumentCaptor<PickSelection> captor = ArgumentCaptor.forClass(PickSelection.class);
@@ -131,10 +156,19 @@ class PickSelectionServiceImplTest {
                         new ResolvedPickTarget.TargetKey(null, "42", movieKey("550").content())));
         when(selectionRepository.save(any())).thenAnswer(invocation -> assignSelectionId(invocation.getArgument(0)));
         stubAssembly(List.of(personSelection(pick, personCategory, "42", context)), true);
+        when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(context.getId(), null,
+                "42", new ContentRefDTO(context.getId(), "550", ContentType.MOVIE,
+                null, null, null, null, null, null, null)));
 
-        service.upsertSelection(ownerId, pick.getId(), personCategory.getId(),
+        PickResponseDTO response = service.upsertSelection(ownerId, pick.getId(), personCategory.getId(),
                 new PickTargetDTO(null, "42", new PickContentTargetDTO(PickAllowedType.MOVIE, "550", null, null, null)));
 
+        assertThat(response.progress()).isEqualTo(PickProgress.PARTIAL);
+        assertThat(response.selections()).singleElement().satisfies(selection -> {
+            assertThat(selection.categoryId()).isEqualTo(personCategory.getId());
+            assertThat(selection.target().personTmdbId()).isEqualTo("42");
+            assertThat(selection.target().contextContent().tmdbId()).isEqualTo("550");
+        });
         ArgumentCaptor<PickSelection> captor = ArgumentCaptor.forClass(PickSelection.class);
         verify(selectionRepository).save(captor.capture());
         assertThat(captor.getValue().getPersonTmdbId()).isEqualTo("42");
@@ -230,8 +264,15 @@ class PickSelectionServiceImplTest {
                 .thenReturn(List.of(movieCategory, personCategory));
         when(targetService.isValid(eq(ownerId), same(template), any(), any())).thenReturn(valid);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(
-                new PicksTemplatePreviewDTO(template.getId(), template.getOrigin(), template.getName(), null, null));
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(ownerId)))
+                .thenReturn(Map.of(template.getId(), templatePreview(template)));
+    }
+
+    private CommentRepository.PickCommentCount commentCount(UUID pickId, long count) {
+        return new CommentRepository.PickCommentCount() {
+            @Override public UUID getPickId() { return pickId; }
+            @Override public long getCount() { return count; }
+        };
     }
 
     private PickSelection assignSelectionId(PickSelection selection) {
@@ -268,6 +309,11 @@ class PickSelectionServiceImplTest {
     private User user(UUID id) {
         return User.builder().id(id).username("user").email("user@example.com").password("hash")
                 .isProfilePublic(true).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+    }
+
+    private PicksTemplatePreviewDTO templatePreview(PicksTemplate template) {
+        return new PicksTemplatePreviewDTO(template.getId(), template.getOrigin(), template.getName(),
+                template.getDescription(), template.getCoverImage());
     }
 
     private Content content(String tmdbId) {

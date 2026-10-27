@@ -132,6 +132,7 @@ class PickControllerTest {
         return new PickResponseDTO(pickId,
                 new PicksTemplatePreviewDTO(templateId, PickOrigin.COMMUNITY, "Awards", null, null),
                 currentUserId, PickVisibility.PUBLIC, now, now, null,
-                List.of(new PickSelectionDTO(UUID.randomUUID(), UUID.randomUUID(), null, now, now, true)));
+                List.of(new PickSelectionDTO(UUID.randomUUID(), UUID.randomUUID(), null, now, now, true)),
+                0, 0, false);
     }
 }

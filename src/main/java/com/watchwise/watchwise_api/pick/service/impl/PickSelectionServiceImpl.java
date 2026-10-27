@@ -3,31 +3,26 @@ package com.watchwise.watchwise_api.pick.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.pick.dto.PickProgress;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
-import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
-import com.watchwise.watchwise_api.pick.mapper.PickMapper;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
-import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
-import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -37,8 +32,7 @@ public class PickSelectionServiceImpl implements PickSelectionService {
     private final PicksTemplateCategoryRepository categoryRepository;
     private final PicksTemplateRepository templateRepository;
     private final PickTargetService targetService;
-    private final PickMapper pickMapper;
-    private final PicksTemplateMapper templateMapper;
+    private final PickResponseAssembler pickResponseAssembler;
 
     @Override
     @Transactional
@@ -71,7 +65,7 @@ public class PickSelectionServiceImpl implements PickSelectionService {
                 .updatedAt(now)
                 .build());
         pick.setUpdatedAt(now);
-        return assemble(pick, userId);
+        return pickResponseAssembler.assemble(pick, userId);
     }
 
     @Override
@@ -95,34 +89,4 @@ public class PickSelectionServiceImpl implements PickSelectionService {
         return pick;
     }
 
-    private PickResponseDTO assemble(Pick pick, UUID viewerId) {
-        List<PicksTemplateCategory> categories =
-                categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(pick.getPicksTemplate().getId());
-        Map<UUID, PicksTemplateCategory> categoryById = categories.stream()
-                .collect(Collectors.toMap(PicksTemplateCategory::getId, Function.identity()));
-        List<PickSelectionDTO> selectionDtos = new ArrayList<>();
-        Set<UUID> validCategoryIds = new HashSet<>();
-
-        for (PickSelection selection : selectionRepository.findByPickIdIn(List.of(pick.getId()))) {
-            PicksTemplateCategory category = categoryById.get(selection.getCategory().getId());
-            boolean valid = category != null && targetService.isValid(viewerId, pick.getPicksTemplate(), category, selection);
-            if (valid) {
-                validCategoryIds.add(category.getId());
-            }
-            selectionDtos.add(new PickSelectionDTO(selection.getId(), selection.getCategory().getId(),
-                    pickMapper.pickSelectionToSearchDto(selection), selection.getCreatedAt(), selection.getUpdatedAt(), valid));
-        }
-
-        return new PickResponseDTO(pick.getId(), templateMapper.picksTemplateToPreviewDto(pick.getPicksTemplate()),
-                pick.getUser().getId(), pick.getVisibility(), pick.getCreatedAt(), pick.getUpdatedAt(),
-                progress(categories, validCategoryIds), selectionDtos);
-    }
-
-    private PickProgress progress(List<PicksTemplateCategory> categories, Set<UUID> validCategoryIds) {
-        if (validCategoryIds.isEmpty()) {
-            return PickProgress.EMPTY;
-        }
-        boolean complete = categories.stream().map(PicksTemplateCategory::getId).allMatch(validCategoryIds::contains);
-        return complete ? PickProgress.COMPLETE : PickProgress.PARTIAL;
-    }
 }
