@@ -115,6 +115,8 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
 
     long countByUserIdAndRankIsNotNull(UUID userId);
 
+    List<UserList> findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(UUID userId, Integer rank);
+
     @Modifying
     @Query("UPDATE UserList ul SET ul.rank = ul.rank + :offset WHERE ul.user.id = :userId AND ul.rank >= :rangeStart AND ul.rank <= :rangeEnd")
     void parkRanksInRange(

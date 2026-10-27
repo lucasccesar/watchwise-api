@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
@@ -92,6 +94,9 @@ class UserListServiceImplTest {
 
     @Mock
     private UserListRepository userListRepository;
+
+    @Mock
+    private AdvisoryLock advisoryLock;
 
     @Mock
     private UserRepository userRepository;
@@ -2204,6 +2209,24 @@ class UserListServiceImplTest {
                 .hasMessage("List could not be reordered due to a concurrent update");
     }
 
+    @Test
+    @DisplayName("[updateUserList] Should Lock The Owner Before Reading The List - When Changing Rank")
+    void shouldLockOwnerBeforeReadingListWhenChangingRank() {
+        UserList existing = buildList(lucas, "List", null, UserListVisibility.PUBLIC);
+        existing.setRank(1);
+        when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(userListRepository.countByUserIdAndRankIsNotNull(lucasId)).thenReturn(2L);
+        when(userListRepository.saveAndFlush(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, null, 2));
+
+        InOrder inOrder = inOrder(userRepository, userListRepository);
+        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        inOrder.verify(userListRepository).findById(existing.getId());
+    }
+
     // ---------- deleteUserList ----------
 
     @Test
@@ -2216,6 +2239,35 @@ class UserListServiceImplTest {
 
         verify(importLedger).markDeletedByTarget(lucasId, "USER_LIST", list.getId());
         verify(userListRepository).delete(list);
+    }
+
+    @Test
+    @DisplayName("[deleteUserList] Should Lock The Owner And Compact Later Ranks In Order")
+    void shouldLockOwnerAndCompactLaterRanksInOrderWhenDeleting() {
+        UserList deletedList = buildList(lucas, "Deleted", null, UserListVisibility.PUBLIC);
+        deletedList.setRank(2);
+        UserList laterList = buildList(lucas, "Later", null, UserListVisibility.PUBLIC);
+        laterList.setRank(3);
+        UserList lastList = buildList(lucas, "Last", null, UserListVisibility.PUBLIC);
+        lastList.setRank(7);
+        when(userListRepository.findById(deletedList.getId())).thenReturn(Optional.of(deletedList));
+        when(userListRepository.findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 2))
+                .thenReturn(List.of(laterList, lastList));
+
+        userListService.deleteUserList(lucasId, deletedList.getId());
+
+        assertThat(laterList.getRank()).isEqualTo(2);
+        assertThat(lastList.getRank()).isEqualTo(3);
+        InOrder inOrder = inOrder(advisoryLock, userRepository, userListRepository, userListItemService);
+        inOrder.verify(advisoryLock).lock(UserListStructureLock.IDENTITY);
+        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        inOrder.verify(userListRepository).findById(deletedList.getId());
+        inOrder.verify(userListItemService).removeItemsReferencingChildList(deletedList.getId());
+        inOrder.verify(userListRepository).delete(deletedList);
+        inOrder.verify(userListRepository).flush();
+        inOrder.verify(userListRepository).findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 2);
+        inOrder.verify(userListRepository).saveAndFlush(laterList);
+        inOrder.verify(userListRepository).saveAndFlush(lastList);
     }
 
     @Test

@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -71,6 +73,7 @@ public class UserListServiceImpl implements UserListService {
 
     private final UserListRepository userListRepository;
     private final UserRepository userRepository;
+    private final AdvisoryLock advisoryLock;
     private final FollowerRepository followerRepository;
     private final UserListItemService userListItemService;
     private final UserListItemPageReader userListItemPageReader;
@@ -521,6 +524,9 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public UserListResponseDTO updateUserList(UUID userId, UUID listId, UserListPatchDTO userListPatchDTO) {
+        if (userListPatchDTO.rank() != null) {
+            lockUserForListMutation(userId);
+        }
         UserList userList = findOwnedList(userId, listId);
 
         applyPatch(userList, userListPatchDTO);
@@ -593,11 +599,32 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public void deleteUserList(UUID userId, UUID listId) {
+        advisoryLock.lock(UserListStructureLock.IDENTITY);
+        lockUserForListMutation(userId);
         UserList userList = findOwnedList(userId, listId);
+        Integer deletedRank = userList.getRank();
 
         importLedger.markDeletedByTarget(userId, "USER_LIST", listId);
         userListItemService.removeItemsReferencingChildList(listId);
         userListRepository.delete(userList);
+        userListRepository.flush();
+
+        if (deletedRank != null) {
+            int nextRank = deletedRank;
+            for (UserList laterList : userListRepository
+                    .findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(userId, deletedRank)) {
+                if (laterList.getRank() != nextRank) {
+                    laterList.setRank(nextRank);
+                    userListRepository.saveAndFlush(laterList);
+                }
+                nextRank++;
+            }
+        }
+    }
+
+    private void lockUserForListMutation(UUID userId) {
+        userRepository.findByIdForListCreation(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
     }
 
     private UserList findOwnedList(UUID userId, UUID listId) {

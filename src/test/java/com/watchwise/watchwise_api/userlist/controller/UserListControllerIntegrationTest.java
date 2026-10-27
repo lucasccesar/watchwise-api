@@ -27,6 +27,9 @@ import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.service.UserListService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,6 +41,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -49,6 +54,11 @@ import java.time.LocalDateTime;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -91,6 +101,12 @@ class UserListControllerIntegrationTest {
 
     @Autowired
     private UserListRepository userListRepository;
+
+    @Autowired
+    private UserListService userListService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private UserListItemRepository userListItemRepository;
@@ -1337,6 +1353,114 @@ class UserListControllerIntegrationTest {
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(userListRepository.findByUserId(entity.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[createUserList] Should Append A Contiguous Rank - When A Middle List Was Deleted")
+    void shouldAppendContiguousRankWhenMiddleListWasDeleted() throws Exception {
+        RegisteredUser user = registerUser("createlistrankgap");
+
+        mockMvc.perform(createRequest(user, creationBody("A", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("B", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("C", null, null))).andExpect(status().isCreated());
+        UserList middleList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("B"))
+                .findFirst()
+                .orElseThrow();
+
+        mockMvc.perform(deleteRequest(user, middleList.getId())).andExpect(status().isNoContent());
+
+        mockMvc.perform(createRequest(user, creationBody("D", null, null)))
+                .andExpect(status().isCreated());
+
+        assertThat(userListRepository.findByUserId(user.id()))
+                .extracting(UserList::getRank)
+                .containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Append A Contiguous Rank - When A Middle List Was Deleted")
+    void shouldAppendContiguousRankWhenMiddleListWasDeletedBeforeBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulkcreatelistrankgap");
+        mockMvc.perform(createRequest(user, creationBody("A", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("B", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("C", null, null))).andExpect(status().isCreated());
+        UserList middleList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("B"))
+                .findFirst()
+                .orElseThrow();
+
+        mockMvc.perform(deleteRequest(user, middleList.getId())).andExpect(status().isNoContent());
+
+        String items = "[" + contentRefJson("5000", "MOVIE") + "]";
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("D", null, null, items)))
+                .andExpect(status().isCreated());
+
+        assertThat(userListRepository.findByUserId(user.id()).stream()
+                .map(UserList::getRank)
+                .sorted()
+                .toList()).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("[user list rank mutations] Should Keep Ranks Contiguous - When Create, Rank, And Delete Run Concurrently")
+    void shouldKeepRanksContiguousWhenCreateRankAndDeleteRunConcurrently() throws Exception {
+        RegisteredUser user = registerUser("concurrentlistrankchanges");
+        mockMvc.perform(createRequest(user, creationBody("A", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("B", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("C", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("D", null, null))).andExpect(status().isCreated());
+        UserList middleList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("B"))
+                .findFirst()
+                .orElseThrow();
+        UserList reorderedList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("D"))
+                .findFirst()
+                .orElseThrow();
+
+        CountDownLatch ready = new CountDownLatch(3);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> create = executor.submit(() -> runRankMutationAtBarrier(ready, start, () ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                            userListService.createUserList(user.id(), new UserListCreationDTO("E", null, null)))));
+            Future<?> rank = executor.submit(() -> runRankMutationAtBarrier(ready, start, () ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                            userListService.updateUserList(user.id(), reorderedList.getId(),
+                                    new UserListPatchDTO(null, null, null, 1)))));
+            Future<?> delete = executor.submit(() -> runRankMutationAtBarrier(ready, start, () ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                            userListService.deleteUserList(user.id(), middleList.getId()))));
+
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            create.get(20, TimeUnit.SECONDS);
+            rank.get(20, TimeUnit.SECONDS);
+            delete.get(20, TimeUnit.SECONDS);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(userListRepository.findByUserId(user.id()).stream()
+                .map(UserList::getRank)
+                .sorted()
+                .toList()).containsExactly(1, 2, 3, 4);
+    }
+
+    private void runRankMutationAtBarrier(CountDownLatch ready, CountDownLatch start, Runnable operation) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for concurrent rank mutations to start");
+            }
+            operation.run();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting to start a rank mutation", exception);
+        }
     }
 
     @Test
