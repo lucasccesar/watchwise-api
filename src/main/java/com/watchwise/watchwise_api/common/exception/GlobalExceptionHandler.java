@@ -36,6 +36,14 @@ import java.util.stream.Stream;
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    @ExceptionHandler({org.springframework.dao.PessimisticLockingFailureException.class,
+            jakarta.persistence.LockTimeoutException.class, jakarta.persistence.PessimisticLockException.class})
+    ResponseEntity<ApiError> handleLockContention(RuntimeException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiError(LocalDateTime.now(), HttpStatus.SERVICE_UNAVAILABLE.value(),
+                        "Service Unavailable", "Resource is busy; retry the request", request.getRequestURI()));
+    }
+
     @ExceptionHandler(NotFoundException.class)
     ResponseEntity<ApiError> handleNotFound(
             NotFoundException ex,

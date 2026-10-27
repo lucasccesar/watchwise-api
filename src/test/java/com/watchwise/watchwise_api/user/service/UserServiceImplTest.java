@@ -8,14 +8,12 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.follower.entity.Follower;
-import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
@@ -25,18 +23,12 @@ import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
-import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
-import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
-import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
-import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
-import org.mockito.InOrder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -44,6 +36,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -66,24 +59,11 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
-
     @Mock
     private UserMapper userMapper;
 
     @Mock
     private UserRepository userRepository;
-
-    @Mock
-    private UserListRepository userListRepository;
-
-    @Mock
-    private UserListItemRepository userListItemRepository;
-
-    @Mock
-    private UserListItemService userListItemService;
-
-    @Mock
-    private AdvisoryLock advisoryLock;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -105,12 +85,6 @@ class UserServiceImplTest {
 
     @Mock
     private UserBlockAccessService userBlockAccessService;
-
-    @Mock
-    private ReportReporterDeletionService reportReporterDeletionService;
-
-    @Mock
-    private ImportUploadQuotaService importUploadQuotaService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -1477,60 +1451,6 @@ class UserServiceImplTest {
         userService.findByEmail("  " + savedUser.getEmail() + "  ");
 
         verify(userRepository).findByEmailIgnoreCase(savedUser.getEmail());
-    }
-
-    @Test
-    @DisplayName("[deleteAccount] Should Delete User - When Password Matches")
-    void shouldDeleteUserWhenPasswordMatches() {
-        UUID id = savedUser.getId();
-        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
-        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(userRepository.findByIdForListCreation(id)).thenReturn(Optional.of(savedUser));
-        when(userListRepository.findByUserId(id)).thenReturn(List.of());
-        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-
-        userService.deleteAccount(id, deleteAccountDTO);
-
-        verify(importUploadQuotaService).prepareAccountDeletion(id);
-        verify(userRepository).delete(savedUser);
-        verify(reportReporterDeletionService).removeReporterSubmissions(id);
-        InOrder inOrder = inOrder(advisoryLock, importUploadQuotaService, userRepository, reportReporterDeletionService);
-        inOrder.verify(advisoryLock).lock(com.watchwise.watchwise_api.common.transaction.UserListStructureLock.IDENTITY);
-        inOrder.verify(importUploadQuotaService).prepareAccountDeletion(id);
-        inOrder.verify(userRepository).findByIdForListCreation(id);
-        inOrder.verify(reportReporterDeletionService).removeReporterSubmissions(id);
-    }
-
-    @Test
-    @DisplayName("[deleteAccount] Should Throw UnauthorizedException - When Password Does Not Match")
-    void shouldThrowUnauthorizedExceptionWhenDeleteAccountPasswordDoesNotMatch() {
-        UUID id = savedUser.getId();
-        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("WrongPassword123");
-        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(passwordEncoder.matches("WrongPassword123", savedUser.getPassword())).thenReturn(false);
-
-        assertThatThrownBy(() -> userService.deleteAccount(id, deleteAccountDTO))
-                .isInstanceOf(UnauthorizedException.class)
-                .hasMessage("Invalid password");
-
-        verifyNoInteractions(importUploadQuotaService);
-        verify(userRepository, never()).delete(any());
-    }
-
-    @Test
-    @DisplayName("[deleteAccount] Should Throw NotFoundException - When Id Does Not Exist")
-    void shouldThrowNotFoundExceptionWhenDeletingAccountThatDoesNotExist() {
-        UUID id = UUID.randomUUID();
-        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
-        when(userRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> userService.deleteAccount(id, deleteAccountDTO))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessage("User not found");
-
-        verifyNoInteractions(importUploadQuotaService);
-        verifyNoInteractions(passwordEncoder);
-        verify(userRepository, never()).delete(any());
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

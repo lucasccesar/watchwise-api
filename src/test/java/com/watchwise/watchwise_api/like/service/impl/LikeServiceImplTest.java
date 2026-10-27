@@ -65,6 +65,57 @@ import static org.mockito.Mockito.when;
 class LikeServiceImplTest {
 
     @Mock
+    private jakarta.persistence.EntityManager entityManager;
+
+    @Test
+    void refreshesPickCounterAfterLockBeforeIncrementingStaleManagedEntity() {
+        pick.setLikesCount(2);
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+        org.mockito.Mockito.doAnswer(call -> { pick.setLikesCount(1); return null; })
+                .when(entityManager).refresh(pick);
+
+        likeService.likePick(lucasId, pickId);
+
+        assertThat(pick.getLikesCount()).isEqualTo(2);
+    }
+
+    @Test
+    void refreshesTemplateCounterAfterLockBeforeIncrementingStaleManagedEntity() {
+        template.setLikesCount(2);
+        when(picksTemplateRepository.findByIdWithCreator(templateId)).thenReturn(Optional.of(template));
+        when(picksTemplateRepository.findByIdForUpdate(templateId)).thenReturn(Optional.of(template));
+        org.mockito.Mockito.doAnswer(call -> { template.setLikesCount(1); return null; })
+                .when(entityManager).refresh(template);
+
+        likeService.likePicksTemplate(lucasId, templateId);
+
+        assertThat(template.getLikesCount()).isEqualTo(2);
+    }
+
+    @Test
+    void unlikeLocksActorLifecycleBeforeRemovingLike() {
+        when(userRepository.findByIdForLifecycle(lucasId)).thenReturn(Optional.of(lucas));
+
+        likeService.unlikeComment(lucasId, commentId);
+
+        InOrder order = inOrder(userRepository, likeRepository);
+        order.verify(userRepository).findByIdForLifecycle(lucasId);
+        order.verify(likeRepository).lockLikeTarget(
+                com.watchwise.watchwise_api.like.repository.LikeAccountDeletionOperations.TargetType.COMMENT, commentId);
+        order.verify(likeRepository).deleteByUserIdAndCommentId(lucasId, commentId);
+    }
+
+    @Test
+    void unlikeRejectsActorDeletedWhileRequestWasWaiting() {
+        when(userRepository.findByIdForLifecycle(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> likeService.unlikeComment(lucasId, commentId))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(likeRepository);
+    }
+
+    @Mock
     private LikeRepository likeRepository;
 
     @Mock
@@ -199,6 +250,8 @@ class LikeServiceImplTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
+        lenient().when(userRepository.findByIdForLifecycle(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(userRepository.findByIdForLifecycle(marinaId)).thenReturn(Optional.of(marina));
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
     }

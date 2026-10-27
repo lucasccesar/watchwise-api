@@ -8,8 +8,6 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
-import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -26,16 +24,11 @@ import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import com.watchwise.watchwise_api.userlist.entity.UserList;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
-import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
-import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.UserAccountDeletionService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
-import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
-import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -49,13 +42,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -64,10 +55,6 @@ import java.util.stream.Collectors;
 public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final UserRepository userRepository;
-    private final UserListRepository userListRepository;
-    private final UserListItemRepository userListItemRepository;
-    private final UserListItemService userListItemService;
-    private final AdvisoryLock advisoryLock;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final FollowerService followerService;
@@ -76,8 +63,7 @@ public class UserServiceImpl implements UserService {
     private final FollowerRepository followerRepository;
     private final UserVisibilityService userVisibilityService;
     private final UserBlockAccessService userBlockAccessService;
-    private final ReportReporterDeletionService reportReporterDeletionService;
-    private final ImportUploadQuotaService importUploadQuotaService;
+    private final UserAccountDeletionService userAccountDeletionService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -388,80 +374,8 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    @Transactional
-    public void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO) {
-        User userSnapshot = userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("User not found"));
-
-        if (!passwordEncoder.matches(deleteAccountDTO.password(), userSnapshot.getPassword())) {
-            throw new UnauthorizedException("Invalid password");
-        }
-
-        advisoryLock.lock(UserListStructureLock.IDENTITY);
-        importUploadQuotaService.prepareAccountDeletion(id);
-
-        TreeSet<UUID> ownedListIds = userListRepository.findByUserId(id).stream()
-                .map(UserList::getId)
-                .collect(Collectors.toCollection(TreeSet::new));
-        TreeSet<UUID> parentListIds = ownedListIds.isEmpty()
-                ? new TreeSet<>()
-                : new TreeSet<>(userListItemRepository.findDistinctParentListIdsByChildListIdIn(ownedListIds));
-        List<UserList> parentSnapshots = parentListIds.isEmpty()
-                ? List.of()
-                : userListRepository.findByIdInWithUser(parentListIds);
-
-        TreeSet<UUID> ownerIdsToLock = new TreeSet<>();
-        ownerIdsToLock.add(id);
-        Map<UUID, UUID> expectedOwnerByParentId = new HashMap<>();
-        for (UserList parent : parentSnapshots) {
-            expectedOwnerByParentId.put(parent.getId(), parent.getUser().getId());
-            ownerIdsToLock.add(parent.getUser().getId());
-        }
-
-        User lockedUser = null;
-        for (UUID ownerId : ownerIdsToLock) {
-            User lockedOwner = userRepository.findByIdForListCreation(ownerId)
-                    .orElseThrow(() -> new NotFoundException("User not found"));
-            if (ownerId.equals(id)) {
-                lockedUser = lockedOwner;
-            }
-        }
-
-        if (!passwordEncoder.matches(deleteAccountDTO.password(), lockedUser.getPassword())) {
-            throw new UnauthorizedException("Invalid password");
-        }
-
-        TreeSet<UUID> lockedOwnedListIds = userListRepository.findByUserId(id).stream()
-                .map(UserList::getId)
-                .collect(Collectors.toCollection(TreeSet::new));
-        ownedListIds.addAll(lockedOwnedListIds);
-        TreeSet<UUID> currentParentListIds = ownedListIds.isEmpty()
-                ? new TreeSet<>()
-                : new TreeSet<>(userListItemRepository.findDistinctParentListIdsByChildListIdIn(ownedListIds));
-        if (!currentParentListIds.equals(parentListIds)) {
-            throw new ConflictException("List structure changed while preparing account deletion");
-        }
-
-        TreeSet<UUID> affectedListIds = new TreeSet<>(ownedListIds);
-        affectedListIds.addAll(parentListIds);
-        for (UUID listId : affectedListIds) {
-            UserList affectedList = userListRepository.findByIdForUpdate(listId)
-                    .orElseThrow(() -> new NotFoundException("List not found"));
-            UUID expectedOwnerId = ownedListIds.contains(listId)
-                    ? id
-                    : expectedOwnerByParentId.get(listId);
-            if (expectedOwnerId == null || !expectedOwnerId.equals(affectedList.getUser().getId())) {
-                throw new ConflictException("List ownership changed while preparing account deletion");
-            }
-        }
-        for (UUID listId : affectedListIds) {
-            userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(listId);
-        }
-
-        userListItemService.removeItemsReferencingChildLists(ownedListIds);
-
-        reportReporterDeletionService.removeReporterSubmissions(id);
-        userRepository.delete(lockedUser);
+    public void deleteAccount(UUID id, DeleteAccountDTO request) {
+        userAccountDeletionService.deleteAccount(id, request);
     }
 
     private String extractConstraintName(DataIntegrityViolationException e) {

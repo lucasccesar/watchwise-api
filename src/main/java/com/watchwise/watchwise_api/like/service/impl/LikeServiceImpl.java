@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
+import com.watchwise.watchwise_api.like.repository.LikeAccountDeletionOperations.TargetType;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
@@ -27,6 +28,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LikeServiceImpl implements LikeService {
 
+    private final EntityManager entityManager;
     private final LikeRepository likeRepository;
     private final UserRepository userRepository;
     private final CommentRepository commentRepository;
@@ -64,7 +67,9 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, commentCounterparts(comment));
+                likeRepository.lockLikeTarget(TargetType.COMMENT, commentId);
                 Comment currentComment = commentRepository.findByIdWithTargets(commentId)
                         .orElseThrow(() -> new NotFoundException("Comment not found"));
                 assertCommentIsVisibleTo(userId, currentComment);
@@ -92,6 +97,8 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikeComment(UUID userId, UUID commentId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.COMMENT, commentId);
         if (likeRepository.deleteByUserIdAndCommentId(userId, commentId) > 0) {
             commentRepository.decrementLikesCount(commentId);
         }
@@ -104,7 +111,9 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, diaryEntry.getUser().getId());
+                likeRepository.lockLikeTarget(TargetType.DIARY_ENTRY, diaryEntryId);
                 DiaryEntry currentEntry = diaryEntryRepository.findByIdWithUser(diaryEntryId)
                         .orElseThrow(() -> new NotFoundException("Diary entry not found"));
                 assertDiaryEntryIsVisibleTo(userId, currentEntry);
@@ -132,6 +141,8 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikeDiaryEntry(UUID userId, UUID diaryEntryId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.DIARY_ENTRY, diaryEntryId);
         if (likeRepository.deleteByUserIdAndDiaryEntryId(userId, diaryEntryId) > 0) {
             diaryEntryRepository.decrementLikesCount(diaryEntryId);
         }
@@ -142,7 +153,9 @@ public class LikeServiceImpl implements LikeService {
         ContentReview initialReview = contentReviewTargetReader.findWritable(userId, reviewId);
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, initialReview.getUserId());
+                likeRepository.lockLikeTarget(TargetType.CONTENT_REVIEW, reviewId);
                 ContentReview review = contentReviewTargetReader.findWritable(userId, reviewId);
                 if (likeRepository.existsByUserIdAndContentReviewId(userId, reviewId)) {
                     return null;
@@ -167,6 +180,8 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikeContentReview(UUID userId, UUID reviewId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.CONTENT_REVIEW, reviewId);
         likeRepository.deleteByUserIdAndContentReviewId(userId, reviewId);
     }
 
@@ -177,7 +192,9 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, droppedEntry.getUser().getId());
+                likeRepository.lockLikeTarget(TargetType.DROPPED_ENTRY, droppedEntryId);
                 DroppedEntry currentEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
                         .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
                 assertDroppedEntryIsVisibleTo(userId, currentEntry);
@@ -205,6 +222,8 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikeDroppedEntry(UUID userId, UUID droppedEntryId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.DROPPED_ENTRY, droppedEntryId);
         if (likeRepository.deleteByUserIdAndDroppedEntryId(userId, droppedEntryId) > 0) {
             droppedEntryRepository.decrementLikesCount(droppedEntryId);
         }
@@ -217,7 +236,9 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, list.getUser().getId());
+                likeRepository.lockLikeTarget(TargetType.LIST, listId);
                 UserList currentList = userListRepository.findById(listId)
                         .orElseThrow(() -> new NotFoundException("List not found"));
                 assertListIsVisibleTo(userId, currentList);
@@ -245,6 +266,8 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikeList(UUID userId, UUID listId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.LIST, listId);
         if (likeRepository.deleteByUserIdAndListId(userId, listId) > 0) {
             userListRepository.decrementLikesCount(listId);
         }
@@ -257,14 +280,17 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 List<UUID> counterpartIds = new ArrayList<>();
                 counterpartIds.add(pick.getUser().getId());
                 if (pick.getPicksTemplate().getCreator() != null) {
                     counterpartIds.add(pick.getPicksTemplate().getCreator().getId());
                 }
                 userBlockAccessService.lockAndAssertInteractionAllowed(userId, counterpartIds);
+                likeRepository.lockLikeTarget(TargetType.PICK, pickId);
                 Pick lockedPick = pickRepository.findByIdForUpdate(pickId)
                         .orElseThrow(() -> new NotFoundException("Pick not found"));
+                entityManager.refresh(lockedPick);
                 assertPickIsVisibleTo(userId, lockedPick);
                 if (likeRepository.existsByUserIdAndPickId(userId, pickId)) {
                     return null;
@@ -290,9 +316,12 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikePick(UUID userId, UUID pickId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.PICK, pickId);
         if (likeRepository.deleteByUserIdAndPickId(userId, pickId) > 0) {
             Pick pick = pickRepository.findByIdForUpdate(pickId)
                     .orElseThrow(() -> new NotFoundException("Pick not found"));
+            entityManager.refresh(pick);
             pick.setLikesCount(Math.max(0, pick.getLikesCount() == null ? 0 : pick.getLikesCount() - 1));
         }
     }
@@ -304,11 +333,14 @@ public class LikeServiceImpl implements LikeService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                lockActor(userId);
                 if (template.getCreator() != null) {
                     userBlockAccessService.lockAndAssertInteractionAllowed(userId, template.getCreator().getId());
                 }
+                likeRepository.lockLikeTarget(TargetType.PICKS_TEMPLATE, templateId);
                 PicksTemplate lockedTemplate = picksTemplateRepository.findByIdForUpdate(templateId)
                         .orElseThrow(() -> new NotFoundException("Picks template not found"));
+                entityManager.refresh(lockedTemplate);
                 if (lockedTemplate.getCreator() != null) {
                     userBlockAccessService.assertInteractionAllowed(userId, lockedTemplate.getCreator().getId());
                 }
@@ -341,9 +373,12 @@ public class LikeServiceImpl implements LikeService {
     @Override
     @Transactional
     public void unlikePicksTemplate(UUID userId, UUID templateId) {
+        lockActor(userId);
+        likeRepository.lockLikeTarget(TargetType.PICKS_TEMPLATE, templateId);
         if (likeRepository.deleteByUserIdAndPicksTemplateId(userId, templateId) > 0) {
             PicksTemplate template = picksTemplateRepository.findByIdForUpdate(templateId)
                     .orElseThrow(() -> new NotFoundException("Picks template not found"));
+            entityManager.refresh(template);
             template.setLikesCount(Math.max(0, template.getLikesCount() == null ? 0 : template.getLikesCount() - 1));
         }
     }
@@ -394,6 +429,11 @@ public class LikeServiceImpl implements LikeService {
             return Set.of();
         }
         return likeRepository.findLikedPicksTemplateIds(userId, templateIds);
+    }
+
+    private void lockActor(UUID userId) {
+        userRepository.findByIdForLifecycle(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
     }
 
     private void assertCommentIsVisibleTo(UUID viewerId, Comment comment) {

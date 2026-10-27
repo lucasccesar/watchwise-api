@@ -13,7 +13,7 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
-public interface LikeRepository extends JpaRepository<Like, UUID> {
+public interface LikeRepository extends JpaRepository<Like, UUID>, LikeAccountDeletionOperations {
 
     @Modifying
     @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.comment.id = :commentId")
