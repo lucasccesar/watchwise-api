@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
+import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,9 +39,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -59,6 +62,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -66,6 +71,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -99,7 +105,7 @@ class UserListControllerIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private UserListRepository userListRepository;
 
     @Autowired
@@ -107,6 +113,12 @@ class UserListControllerIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Autowired
     private UserListItemRepository userListItemRepository;
@@ -1448,6 +1460,99 @@ class UserListControllerIntegrationTest {
                 .map(UserList::getRank)
                 .sorted()
                 .toList()).containsExactly(1, 2, 3, 4);
+    }
+
+    @Test
+    @DisplayName("[updateUserList] Should Preserve Compacted Rank - When Metadata Patch Overlaps Deletion")
+    void shouldPreserveCompactedRankWhenMetadataPatchOverlapsDeletion() throws Exception {
+        RegisteredUser user = registerUser("metadatapatchrankrace");
+        mockMvc.perform(createRequest(user, creationBody("A", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("B", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("C", null, null))).andExpect(status().isCreated());
+        UserList middleList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("B"))
+                .findFirst()
+                .orElseThrow();
+        UserList lastList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("C"))
+                .findFirst()
+                .orElseThrow();
+
+        CountDownLatch patchPausedBeforeFlush = new CountDownLatch(1);
+        CountDownLatch resumePatch = new CountDownLatch(1);
+        CountDownLatch deleteBackendKnown = new CountDownLatch(1);
+        AtomicBoolean pausePatchOnce = new AtomicBoolean(true);
+        AtomicInteger deleteBackendPid = new AtomicInteger();
+
+        doAnswer(invocation -> {
+            UserList list = invocation.getArgument(0);
+            if (lastList.getId().equals(list.getId()) && pausePatchOnce.compareAndSet(true, false)) {
+                patchPausedBeforeFlush.countDown();
+                if (!resumePatch.await(20, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to resume metadata PATCH");
+                }
+            }
+            UserList merged = entityManager.merge(list);
+            entityManager.flush();
+            return merged;
+        }).when(userListRepository).saveAndFlush(any(UserList.class));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> patch = executor.submit(() -> {
+                mockMvc.perform(updateRequest(user, lastList.getId(), patchBody("Renamed C", null, null)))
+                        .andExpect(status().isOk());
+                return null;
+            });
+            assertThat(patchPausedBeforeFlush.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> delete = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    deleteBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    deleteBackendKnown.countDown();
+                    userListService.deleteUserList(user.id(), middleList.getId());
+                });
+                return null;
+            });
+            assertThat(deleteBackendKnown.await(10, TimeUnit.SECONDS)).isTrue();
+            boolean deleteWaitedForPatch = awaitBackendLockWaitOrCompletion(delete, deleteBackendPid.get());
+
+            if (!deleteWaitedForPatch) {
+                delete.get(20, TimeUnit.SECONDS);
+            }
+            resumePatch.countDown();
+            patch.get(20, TimeUnit.SECONDS);
+            delete.get(20, TimeUnit.SECONDS);
+            assertThat(deleteWaitedForPatch).isTrue();
+        } finally {
+            resumePatch.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(userListRepository.findByUserId(user.id()).stream()
+                .map(UserList::getRank)
+                .sorted()
+                .toList()).containsExactly(1, 2);
+    }
+
+    private boolean awaitBackendLockWaitOrCompletion(Future<?> operation, int backendPid) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (operation.isDone()) {
+                return false;
+            }
+            Boolean waitingForLock = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                        WHERE pid = ? AND wait_event_type = 'Lock'
+                    )
+                    """, Boolean.class, backendPid);
+            if (Boolean.TRUE.equals(waitingForLock)) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Delete transaction neither waited on the owner lock nor completed");
     }
 
     private void runRankMutationAtBarrier(CountDownLatch ready, CountDownLatch start, Runnable operation) {

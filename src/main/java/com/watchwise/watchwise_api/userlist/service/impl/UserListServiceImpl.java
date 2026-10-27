@@ -524,9 +524,7 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public UserListResponseDTO updateUserList(UUID userId, UUID listId, UserListPatchDTO userListPatchDTO) {
-        if (userListPatchDTO.rank() != null) {
-            lockUserForListMutation(userId);
-        }
+        lockUserForListMutation(userId);
         UserList userList = findOwnedList(userId, listId);
 
         applyPatch(userList, userListPatchDTO);

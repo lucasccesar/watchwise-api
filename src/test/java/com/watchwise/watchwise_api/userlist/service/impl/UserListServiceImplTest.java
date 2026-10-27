@@ -2227,6 +2227,22 @@ class UserListServiceImplTest {
         inOrder.verify(userListRepository).findById(existing.getId());
     }
 
+    @Test
+    @DisplayName("[updateUserList] Should Lock The Owner Before Reading The List - When Changing Metadata")
+    void shouldLockOwnerBeforeReadingListWhenChangingMetadata() {
+        UserList existing = buildList(lucas, "Old name", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(userListRepository.saveAndFlush(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO("New name", null, null));
+
+        InOrder inOrder = inOrder(userRepository, userListRepository);
+        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        inOrder.verify(userListRepository).findById(existing.getId());
+    }
+
     // ---------- deleteUserList ----------
 
     @Test
