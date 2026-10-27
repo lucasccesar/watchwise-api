@@ -13,7 +13,9 @@ target/
 /.obsidian/
 /.testcontainers.properties
 graphify-out/
-# .superpowers/
+/docs/
+/AGENTS.md
+/.superpowers/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
