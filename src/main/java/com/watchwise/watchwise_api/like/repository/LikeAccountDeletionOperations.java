@@ -18,8 +18,10 @@ public interface LikeAccountDeletionOperations {
 
     record Target(TargetType type, UUID id) {}
 
-    List<Target> findAccountLikeTargets(UUID actorId);
+    /** Targets still present after the actor's user cascade, including creator-owned templates. */
+    List<Target> findSurvivingAccountLikeTargets(UUID actorId);
     void lockLikeTarget(TargetType type, UUID targetId);
     void lockAccountLikeTargets(List<Target> targets);
-    void deleteAccountLikesAndReconcile(UUID actorId);
+    /** Delete all actor likes, reconciling actual removed rows only for the locked survivors. */
+    void deleteAccountLikesAndReconcile(UUID actorId, List<Target> survivingTargets);
 }

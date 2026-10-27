@@ -100,7 +100,8 @@ public class UserAccountDeletionServiceImpl implements UserAccountDeletionServic
         TreeSet<UUID> affectedListIds = new TreeSet<>(ownedListIds);
         affectedListIds.addAll(parentListIds);
         // The actor's exclusive owner/lifecycle lock prevents new owned likes after this capture.
-        List<Target> likeTargets = likeRepository.findAccountLikeTargets(id);
+        // Disposable targets need no social locks/decrements; C06 still locks owned lists below.
+        List<Target> likeTargets = likeRepository.findSurvivingAccountLikeTargets(id);
         // Merge social list targets into the C06 UUID order before locking any list row.
         TreeSet<UUID> listsToLock = new TreeSet<>(affectedListIds);
         likeTargets.stream()
@@ -129,7 +130,7 @@ public class UserAccountDeletionServiceImpl implements UserAccountDeletionServic
                 .filter(target -> target.type() != TargetType.LIST)
                 .toList());
         userListItemService.removeItemsReferencingChildLists(ownedListIds);
-        likeRepository.deleteAccountLikesAndReconcile(id);
+        likeRepository.deleteAccountLikesAndReconcile(id, likeTargets);
 
         reportReporterDeletionService.removeReporterSubmissions(id);
         userRepository.delete(lockedUser);

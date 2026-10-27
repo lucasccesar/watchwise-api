@@ -15,6 +15,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -29,9 +30,42 @@ public class LikeAccountDeletionOperationsImpl implements LikeAccountDeletionOpe
     private final NamedParameterJdbcTemplate jdbc;
 
     @Override
-    public List<Target> findAccountLikeTargets(UUID actorId) {
-        return jdbc.query("SELECT " + TARGET_COLUMNS + " FROM likes WHERE user_id = :actorId",
-                Map.of("actorId", actorId), TARGET_MAPPER);
+    public List<Target> findSurvivingAccountLikeTargets(UUID actorId) {
+        // Follow only ancestors of comments liked by this actor. A foreign-authored reply
+        // also disappears when an ancestor or its social parent is deleted by the cascade.
+        String survivorsQuery = """
+                WITH RECURSIVE comment_ancestors AS (
+                    SELECT c.id AS liked_comment_id, c.id, c.parent_comment_id, c.user_id,
+                           c.list_id, c.diary_entry_id, c.dropped_entry_id, c.pick_id, c.content_review_id
+                    FROM likes l JOIN comments c ON c.id = l.comment_id
+                    WHERE l.user_id = :actorId
+                    UNION
+                    SELECT a.liked_comment_id, p.id, p.parent_comment_id, p.user_id,
+                           p.list_id, p.diary_entry_id, p.dropped_entry_id, p.pick_id, p.content_review_id
+                    FROM comment_ancestors a JOIN comments p ON p.id = a.parent_comment_id
+                ), doomed_liked_comments AS (
+                    SELECT DISTINCT liked_comment_id FROM comment_ancestors
+                    WHERE user_id = :actorId
+                       OR list_id IN (SELECT id FROM user_lists WHERE user_id = :actorId)
+                       OR diary_entry_id IN (SELECT id FROM diary_entries WHERE user_id = :actorId)
+                       OR dropped_entry_id IN (SELECT id FROM dropped_entries WHERE user_id = :actorId)
+                       OR pick_id IN (SELECT id FROM picks WHERE user_id = :actorId)
+                       OR content_review_id IN (SELECT id FROM content_reviews WHERE user_id = :actorId)
+                )
+                SELECT %s FROM likes l
+                WHERE l.user_id = :actorId AND (
+                    (l.comment_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM doomed_liked_comments d WHERE d.liked_comment_id = l.comment_id))
+                    OR l.diary_entry_id IN (SELECT id FROM diary_entries WHERE user_id <> :actorId)
+                    OR l.dropped_entry_id IN (SELECT id FROM dropped_entries WHERE user_id <> :actorId)
+                    OR l.list_id IN (SELECT id FROM user_lists WHERE user_id <> :actorId)
+                    OR l.pick_id IN (SELECT id FROM picks WHERE user_id <> :actorId)
+                    OR l.content_review_id IN (SELECT id FROM content_reviews WHERE user_id <> :actorId)
+                    OR l.picks_template_id IS NOT NULL
+                )
+                """.formatted(TARGET_COLUMNS);
+        // Templates always survive their creator (ON DELETE SET NULL).
+        return jdbc.query(survivorsQuery, Map.of("actorId", actorId), TARGET_MAPPER);
     }
 
     @Override
@@ -57,9 +91,11 @@ public class LikeAccountDeletionOperationsImpl implements LikeAccountDeletionOpe
     }
 
     @Override
-    public void deleteAccountLikesAndReconcile(UUID actorId) {
+    public void deleteAccountLikesAndReconcile(UUID actorId, List<Target> survivingTargets) {
+        Set<Target> survivors = Set.copyOf(survivingTargets);
         List<Target> removed = jdbc.query("DELETE FROM likes WHERE user_id = :actorId RETURNING " + TARGET_COLUMNS,
-                Map.of("actorId", actorId), TARGET_MAPPER);
+                Map.of("actorId", actorId), TARGET_MAPPER).stream()
+                .filter(survivors::contains).toList();
         for (TargetType type : TargetType.values()) {
             // ContentReview uses live counts, not a denormalized column.
             if (type == TargetType.CONTENT_REVIEW) continue;

@@ -55,7 +55,7 @@ class UserAccountDeletionServiceImplTest {
         when(userListRepository.findByUserId(id)).thenReturn(List.of(owned));
         when(userListRepository.findByIdForUpdate(ownedId)).thenReturn(Optional.of(owned));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(accountLikes.findAccountLikeTargets(id)).thenReturn(List.of(comment,
+        when(accountLikes.findSurvivingAccountLikeTargets(id)).thenReturn(List.of(comment,
                 new Target(listType, last),
                 new Target(listType, first)));
 
@@ -63,14 +63,15 @@ class UserAccountDeletionServiceImplTest {
 
         var order = inOrder(userRepository, accountLikes, userListRepository, userListItemService);
         order.verify(userRepository).findByIdForListCreation(id);
-        order.verify(accountLikes).findAccountLikeTargets(id);
+        order.verify(accountLikes).findSurvivingAccountLikeTargets(id);
         order.verify(accountLikes).lockLikeTarget(listType, first);
         order.verify(userListRepository).findByIdForUpdate(ownedId);
         order.verify(accountLikes).lockLikeTarget(listType, last);
         order.verify(accountLikes).lockAccountLikeTargets(List.of(comment));
         order.verify(userListItemService).removeItemsReferencingChildLists(anyCollection());
-        order.verify(accountLikes).deleteAccountLikesAndReconcile(id);
+        order.verify(accountLikes).deleteAccountLikesAndReconcile(id, List.of(comment, new Target(listType, last), new Target(listType, first)));
         order.verify(userRepository).delete(savedUser);
+        verify(accountLikes, never()).lockLikeTarget(listType, ownedId);
     }
 
     @Test
@@ -80,7 +81,7 @@ class UserAccountDeletionServiceImplTest {
         when(userRepository.findByIdForListCreation(id)).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         doThrow(new org.springframework.dao.DataIntegrityViolationException("uncovered counter"))
-                .when(accountLikes).deleteAccountLikesAndReconcile(id);
+                .when(accountLikes).deleteAccountLikesAndReconcile(eq(id), anyList());
 
         assertThatThrownBy(() -> userService.deleteAccount(id, new DeleteAccountDTO("Password123")))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
@@ -99,7 +100,7 @@ class UserAccountDeletionServiceImplTest {
         userService.deleteAccount(id, new DeleteAccountDTO("Password123"));
 
         InOrder order = inOrder(accountLikes, userRepository);
-        order.verify(accountLikes).deleteAccountLikesAndReconcile(id);
+        order.verify(accountLikes).deleteAccountLikesAndReconcile(id, List.of());
         order.verify(userRepository).delete(savedUser);
     }
 
