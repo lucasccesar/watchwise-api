@@ -19,6 +19,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SeriesProgressNextEpisodeResolverImplTest {
@@ -75,13 +76,31 @@ class SeriesProgressNextEpisodeResolverImplTest {
     }
 
     @Test
-    void shouldReturnNullWhenEveryRegularEpisodeIsWatched() {
+    void shouldReturnFutureEpisodeInCurrentSeasonWhenAllReleasedEpisodesAreWatched() {
         TmdbTvFullDetails series = seriesWithSeasons(
                 new TmdbSeasonSummary(1, "Season 1", null, "2020-01-01", 2, null));
         when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US"))
                 .thenReturn(new TmdbLookupResult.Found<>(season(1,
                         episode(1, "One", "2020-01-01"),
-                        episode(2, "Two", "2020-01-08"))));
+                        episode(2, "Future", "2099-01-08"))));
+
+        ProgressEpisodeDTO result = resolver.resolveNext(
+                series,
+                "en-US",
+                List.of(new SeasonProgressDTO(1, 1L, 1, 100.0)),
+                Set.of(new WatchedEpisodeCoordinate("1399", 1, 1)),
+                LocalDate.of(2026, 10, 6));
+
+        assertThat(result).isNotNull();
+        assertThat(result.seasonNumber()).isEqualTo(1);
+        assertThat(result.episodeNumber()).isEqualTo(2);
+        assertThat(result.availableToWatch()).isFalse();
+    }
+
+    @Test
+    void shouldReturnNullWhenEveryRegularEpisodeIsWatched() {
+        TmdbTvFullDetails series = seriesWithSeasons(
+                new TmdbSeasonSummary(1, "Season 1", null, "2020-01-01", 2, null));
 
         ProgressEpisodeDTO result = resolver.resolveNext(
                 series,
@@ -93,6 +112,7 @@ class SeriesProgressNextEpisodeResolverImplTest {
                 LocalDate.of(2026, 10, 6));
 
         assertThat(result).isNull();
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test

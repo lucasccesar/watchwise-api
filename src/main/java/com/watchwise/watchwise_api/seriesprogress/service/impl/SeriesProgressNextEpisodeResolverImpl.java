@@ -56,7 +56,7 @@ public class SeriesProgressNextEpisodeResolverImpl implements SeriesProgressNext
 
         for (TmdbSeasonSummary season : regularSeasons) {
             SeasonProgressDTO progress = progressBySeason.get(season.seasonNumber());
-            if (progress != null && isComplete(progress)) {
+            if (progress != null && isComplete(progress) && !hasEpisodesBeyondReleasedCount(season, progress)) {
                 continue;
             }
             ProgressEpisodeDTO next = resolveFromSeason(
@@ -115,6 +115,12 @@ public class SeriesProgressNextEpisodeResolverImpl implements SeriesProgressNext
         return progress.totalEpisodeCount() != null
                 && progress.watchedEpisodeCount() != null
                 && progress.watchedEpisodeCount() >= progress.totalEpisodeCount();
+    }
+
+    private boolean hasEpisodesBeyondReleasedCount(TmdbSeasonSummary season, SeasonProgressDTO progress) {
+        return season.episodeCount() != null
+                && progress.totalEpisodeCount() != null
+                && season.episodeCount() > progress.totalEpisodeCount();
     }
 
     private LocalDate parseDate(String value) {
