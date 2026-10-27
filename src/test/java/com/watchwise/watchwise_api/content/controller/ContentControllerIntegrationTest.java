@@ -29,6 +29,8 @@ import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -95,6 +97,9 @@ class ContentControllerIntegrationTest {
     private UserContentPosterRepository userContentPosterRepository;
 
     @Autowired
+    private UserBlockRepository userBlockRepository;
+
+    @Autowired
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
@@ -114,6 +119,7 @@ class ContentControllerIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        userBlockRepository.deleteAll();
         userContentPosterRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         droppedEntryRepository.deleteAll();
@@ -538,6 +544,43 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.facebook_id").value("thematrixmovie"))
                 .andExpect(jsonPath("$.instagram_id").value("thematrixmovie"))
                 .andExpect(jsonPath("$.twitter_id").value("thematrixmovie"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Hide A Blocked Public Poster Owner Before Poster Or TMDB Lookup")
+    void shouldHideBlockedPublicPosterOwnerBeforePosterOrTmdbLookup() throws Exception {
+        User requester = userRepository.findByUsernameIgnoreCase("contentuser").orElseThrow();
+        User posterOwner = registerUserEntity("publicposterowner", true);
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        userContentPosterRepository.save(UserContentPoster.builder()
+                .user(posterOwner)
+                .content(content)
+                .customPosterUrl("https://image.tmdb.org/t/p/w342/custom-poster.jpg")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        userBlockRepository.saveAndFlush(UserBlock.builder()
+                .blocker(requester)
+                .blocked(posterOwner)
+                .createdAt(LocalDateTime.now())
+                .build());
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/details")
+                        .cookie(accessTokenCookie)
+                        .param("posterUserId", posterOwner.getId().toString()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Resource not found"));
+
+        mockMvc.perform(get("/contents/details")
+                        .cookie(accessTokenCookie)
+                        .param("ids", content.getId().toString())
+                        .param("posterUserId", posterOwner.getId().toString()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Resource not found"));
+
+        verify(tmdbClient, never()).getMovieFullDetails("603", "en-US");
     }
 
     @Test

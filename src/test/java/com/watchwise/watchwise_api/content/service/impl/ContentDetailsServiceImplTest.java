@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
@@ -50,9 +51,11 @@ import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
-import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.UserVisibilityService;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
+import com.watchwise.watchwise_api.userblock.service.impl.UserBlockAccessServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -111,6 +114,12 @@ class ContentDetailsServiceImplTest {
     @Mock
     private UserVisibilityService userVisibilityService;
 
+    @Mock
+    private UserBlockRepository userBlockRepository;
+
+    @Mock
+    private AdvisoryLock advisoryLock;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -123,7 +132,7 @@ class ContentDetailsServiceImplTest {
         contentDetailsService = new ContentDetailsServiceImpl(
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
                 seriesRuntimeAggregateService, calendarScheduleSynchronizer, userContentPosterService,
-                userVisibilityService);
+                userVisibilityService, new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock));
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
@@ -213,6 +222,38 @@ class ContentDetailsServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
+        verifyNoInteractions(contentRepository, tmdbClient, userContentPosterService);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Hide A Blocked Public Poster Owner Before Looking Up Content")
+    void shouldHideABlockedPublicPosterOwnerBeforeLookingUpContent() {
+        UUID contentId = UUID.randomUUID();
+        UUID posterUserId = UUID.randomUUID();
+        when(userBlockRepository.existsEitherDirection(requestingUserId, posterUserId)).thenReturn(true);
+
+        assertThatThrownBy(() -> contentDetailsService.getDetails(contentId, requestingUserId, posterUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Resource not found");
+
+        verify(userBlockRepository).existsEitherDirection(requestingUserId, posterUserId);
+        verify(userVisibilityService, never()).assertCanView(requestingUserId, posterUserId);
+        verifyNoInteractions(contentRepository, tmdbClient, userContentPosterService);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Hide A Blocked Public Poster Owner Before Looking Up Any Content")
+    void shouldHideABlockedPublicPosterOwnerBeforeLookingUpAnyContentInBatch() {
+        List<UUID> contentIds = List.of(UUID.randomUUID(), UUID.randomUUID());
+        UUID posterUserId = UUID.randomUUID();
+        when(userBlockRepository.existsEitherDirection(requestingUserId, posterUserId)).thenReturn(true);
+
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(contentIds, requestingUserId, posterUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Resource not found");
+
+        verify(userBlockRepository).existsEitherDirection(requestingUserId, posterUserId);
+        verify(userVisibilityService, never()).assertCanView(requestingUserId, posterUserId);
         verifyNoInteractions(contentRepository, tmdbClient, userContentPosterService);
     }
 

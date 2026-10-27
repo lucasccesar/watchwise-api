@@ -61,6 +61,7 @@ import com.watchwise.watchwise_api.notification.tracking.ContentChangeDetector;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -106,6 +107,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final CalendarScheduleSynchronizer calendarScheduleSynchronizer;
     private final UserContentPosterService userContentPosterService;
     private final UserVisibilityService userVisibilityService;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
@@ -174,6 +176,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private UUID resolvePosterUserId(UUID requestingUserId, UUID posterUserId) {
         UUID resolvedPosterUserId = posterUserId == null ? requestingUserId : posterUserId;
+        userBlockAccessService.assertContentVisible(requestingUserId, resolvedPosterUserId);
         userVisibilityService.assertCanView(requestingUserId, resolvedPosterUserId);
         return resolvedPosterUserId;
     }
