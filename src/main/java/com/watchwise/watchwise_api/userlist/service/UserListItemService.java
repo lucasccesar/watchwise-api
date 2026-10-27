@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.service;
 
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
@@ -59,6 +60,12 @@ public interface UserListItemService {
     UserListItemsWithState addItemsWithState(
             UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
 
+    UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO,
+            List<ContentRefDTO> resolvedContentRefs);
+
+    List<ContentRefDTO> resolveBulkContentReferences(List<ContentRefCreationDTO> items);
+
     int nextImportedPosition(UUID userId, UUID listId);
 
     ImportedUserListBatchResult appendImportedItems(
@@ -70,5 +77,7 @@ public interface UserListItemService {
     void removeItem(UUID userId, UUID listId, UUID itemId);
 
     void removeItemsReferencingChildList(UUID childListId);
+
+    void removeItemsReferencingChildLists(Collection<UUID> childListIds);
 
 }

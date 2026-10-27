@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
@@ -11,17 +12,23 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,28 +38,37 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -87,8 +103,20 @@ class UserListItemControllerIntegrationTest {
     @Autowired
     private UserListRepository userListRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private UserListItemRepository userListItemRepository;
+
+    @Autowired
+    private UserBlockRepository userBlockRepository;
+
+    @Autowired
+    private UserListItemService userListItemService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private ContentRepository contentRepository;
@@ -643,6 +671,28 @@ class UserListItemControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[addItem] Should Return Forbidden - When Child Owner Has Blocked The Parent Owner")
+    void shouldReturnForbiddenWhenChildOwnerHasBlockedTheParentOwner() throws Exception {
+        RegisteredUser owner = registerUser("blockedchildparentowner");
+        RegisteredUser childOwner = registerUser("blockedchildowner");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList parent = persistList(ownerEntity, "Parent", UserListVisibility.PUBLIC);
+        UserList child = persistList(childOwnerEntity, "Child", UserListVisibility.PUBLIC);
+        userBlockRepository.save(UserBlock.builder()
+                .blocker(childOwnerEntity)
+                .blocked(ownerEntity)
+                .createdAt(LocalDateTime.now())
+                .build());
+
+        mockMvc.perform(addItemRequest(owner, parent.getId(), childListItemBody(child.getId(), null)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This list is private"));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).isEmpty();
+    }
+
+    @Test
     @DisplayName("[addItem] Should Return Conflict - When Content Is Already In The List")
     void shouldReturnConflictWhenContentIsAlreadyInTheList() throws Exception {
         RegisteredUser user = registerUser("additemconflict");
@@ -1060,6 +1110,184 @@ class UserListItemControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[appendImportedItems] Should Recompute The Append Position - When The Caller Position Is Stale")
+    void shouldRecomputeTheAppendPositionWhenTheCallerPositionIsStale() throws Exception {
+        RegisteredUser owner = registerUser("importappendstaleowner");
+        User entity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(entity, "Imported", UserListVisibility.PUBLIC);
+        Content first = persistContent("import-stale-101");
+        Content concurrent = persistContent("import-stale-102");
+        Content imported = persistContent("import-stale-103");
+        persistContentItem(list, first, 1);
+
+        int staleNextPosition = userListItemService.nextImportedPosition(owner.id(), list.getId());
+        persistContentItem(list, concurrent, 2);
+
+        var result = userListItemService.appendImportedItems(
+                owner.id(), list.getId(), List.of(imported.getId()), Map.of(), staleNextPosition);
+
+        List<UserListItem> items = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId());
+        assertThat(items).extracting(UserListItem::getPosition).containsExactly(1, 2, 3);
+        assertThat(items.get(2).getContent().getId()).isEqualTo(imported.getId());
+        assertThat(result.nextPosition()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[removeItem] Should Close The Position Gap - When A Nested Child Item Is Removed")
+    void shouldCloseThePositionGapWhenANestedChildItemIsRemoved() throws Exception {
+        RegisteredUser parentOwner = registerUser("removechildparentowner");
+        RegisteredUser childOwner = registerUser("removechildowner");
+        User parentOwnerEntity = userRepository.findById(parentOwner.id()).orElseThrow();
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList parent = persistList(parentOwnerEntity, "Parent", UserListVisibility.PUBLIC);
+        UserList firstChild = persistList(childOwnerEntity, "First child", UserListVisibility.PUBLIC);
+        UserList middleChild = persistList(childOwnerEntity, "Middle child", UserListVisibility.PUBLIC);
+        UserList lastChild = persistList(childOwnerEntity, "Last child", UserListVisibility.PUBLIC);
+        persistChildListItem(parent, firstChild, 1);
+        UserListItem middleItem = persistChildListItem(parent, middleChild, 2);
+        persistChildListItem(parent, lastChild, 3);
+
+        userListItemService.removeItem(parentOwner.id(), parent.getId(), middleItem.getId());
+
+        List<UserListItem> remaining = userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId());
+        assertThat(remaining).extracting(UserListItem::getPosition).containsExactly(1, 2);
+        assertThat(remaining).extracting(item -> item.getChildList().getId())
+                .containsExactly(firstChild.getId(), lastChild.getId());
+    }
+
+    @Test
+    @DisplayName("[removeItem] Should Keep Positions Contiguous - When Positions Two And Four Are Removed Concurrently")
+    void shouldKeepPositionsContiguousWhenPositionsTwoAndFourAreRemovedConcurrently() throws Exception {
+        RegisteredUser user = registerUser("concurrentlistitemremovals");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Concurrent removals", true);
+        List<UserListItem> items = new java.util.ArrayList<>();
+        for (int position = 1; position <= 5; position++) {
+            items.add(persistContentItem(list, persistContent("list-concurrent-" + position), position));
+        }
+
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        CountDownLatch blockerAcquired = new CountDownLatch(1);
+        CountDownLatch releaseBlocker = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger firstBackendPid = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger secondBackendPid = new java.util.concurrent.atomic.AtomicInteger();
+
+        try {
+            Future<?> blocker = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        jdbcTemplate.queryForObject(
+                                "SELECT id FROM user_list_items WHERE id = ? FOR UPDATE",
+                                UUID.class, items.get(2).getId());
+                        blockerAcquired.countDown();
+                        awaitLatch(releaseBlocker);
+                    }));
+            assertThat(blockerAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> removePositionTwo = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        firstBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        userListItemService.removeItem(user.id(), list.getId(), items.get(1).getId());
+                    }));
+            assertThat(awaitBackendLockWaitOrCompletion(removePositionTwo, firstBackendPid)).isTrue();
+
+            Future<?> removePositionFour = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        secondBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        userListItemService.removeItem(user.id(), list.getId(), items.get(3).getId());
+                    }));
+            assertThat(awaitBackendLockWaitOrCompletion(removePositionFour, secondBackendPid)).isTrue();
+
+            releaseBlocker.countDown();
+            blocker.get(10, TimeUnit.SECONDS);
+            removePositionTwo.get(10, TimeUnit.SECONDS);
+            removePositionFour.get(10, TimeUnit.SECONDS);
+        } finally {
+            releaseBlocker.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        List<UserListItem> remaining = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId());
+        assertThat(remaining).extracting(UserListItem::getPosition).containsExactly(1, 2, 3);
+        assertThat(remaining).extracting(UserListItem::getId)
+                .doesNotContain(items.get(1).getId(), items.get(3).getId());
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Resolve Metadata Before Locking And Revalidate List Scope")
+    void shouldResolveMetadataBeforeLockingAndRevalidateListScope() throws Exception {
+        RegisteredUser owner = registerUser("bulkcontentgraphlockowner");
+        RegisteredUser childOwner = registerUser("bulkcontentgraphlockchild");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList parent = persistList(ownerEntity, "Parent", UserListVisibility.PUBLIC);
+        UserList child = persistList(childOwnerEntity, "Child", UserListVisibility.PUBLIC);
+
+        CountDownLatch metadataResolutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseMetadataResolution = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            metadataResolutionStarted.countDown();
+            awaitLatch(releaseMetadataResolution);
+            return new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        }).when(tmdbClient).getMovieFullDetails(any(), any());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        AtomicInteger childBackendPid = new AtomicInteger();
+        Future<RuntimeException> bulkAdd = null;
+        Future<RuntimeException> childAdd = null;
+        boolean childWaitedForListLock = false;
+        try {
+            bulkAdd = executor.submit(() -> runBulkContentAdd(owner.id(), parent.getId(), new AtomicInteger()));
+            assertThat(metadataResolutionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            childAdd = executor.submit(() -> addChildEdge(owner.id(), parent.getId(), child.getId(), childBackendPid));
+            childWaitedForListLock = awaitBackendLockWaitOrCompletion(childAdd, childBackendPid);
+        } finally {
+            releaseMetadataResolution.countDown();
+            if (bulkAdd != null) bulkAdd.get(10, TimeUnit.SECONDS);
+            if (childAdd != null) childAdd.get(10, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        RuntimeException bulkFailure = bulkAdd.get(10, TimeUnit.SECONDS);
+        RuntimeException childFailure = childAdd.get(10, TimeUnit.SECONDS);
+        assertThat(childWaitedForListLock).isFalse();
+        assertThat(bulkFailure).isInstanceOf(BadRequestException.class);
+        assertThat(childFailure).isNull();
+        List<UserListItem> resultingItems = userListItemRepository
+                .findByUserListIdOrderByPositionAsc(parent.getId());
+        assertThat(resultingItems).hasSize(1);
+        assertThat(resultingItems.get(0).getChildList().getId()).isEqualTo(child.getId());
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Reject A Second Edge - When X To A Races A To B")
+    void shouldRejectASecondEdgeWhenXToARacesAToB() throws Exception {
+        RegisteredUser owner = registerUser("nestingchainrace");
+        User entity = userRepository.findById(owner.id()).orElseThrow();
+        UserList x = persistList(entity, "X", UserListVisibility.PUBLIC);
+        UserList a = persistList(entity, "A", UserListVisibility.PUBLIC);
+        UserList b = persistList(entity, "B", UserListVisibility.PUBLIC);
+
+        assertOnlyOneConcurrentNestingEdge(owner.id(), x.getId(), a.getId(), a.getId(), b.getId(),
+                x.getId(), a.getId(), b.getId());
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Reject A Second Edge - When A To B Races B To A")
+    void shouldRejectASecondEdgeWhenAToBRacesBToA() throws Exception {
+        RegisteredUser owner = registerUser("nestingcyclerace");
+        User entity = userRepository.findById(owner.id()).orElseThrow();
+        UserList a = persistList(entity, "A", UserListVisibility.PUBLIC);
+        UserList b = persistList(entity, "B", UserListVisibility.PUBLIC);
+
+        assertOnlyOneConcurrentNestingEdge(owner.id(), a.getId(), b.getId(), b.getId(), a.getId(),
+                a.getId(), b.getId());
+    }
+
+    @Test
     @DisplayName("[removeItem] Should Return NotFound - When List Does Not Exist")
     void shouldReturnNotFoundWhenListDoesNotExistOnRemove() throws Exception {
         RegisteredUser user = registerUser("removeitemnolist");
@@ -1230,5 +1458,158 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), item.getContent().getId())).isEmpty();
+    }
+
+    private boolean awaitBackendLockWaitOrCompletion(
+            Future<?> operation, java.util.concurrent.atomic.AtomicInteger backendPid) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (backendPid.get() != 0 && operation.isDone()) {
+                return false;
+            }
+            if (backendPid.get() != 0 && Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                        WHERE pid = ? AND wait_event_type = 'Lock'
+                    )
+                    """, Boolean.class, backendPid.get()))) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Operation neither waited on a database lock nor completed");
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for the test to release the database lock");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for the test to release the database lock", exception);
+        }
+    }
+
+    private void assertOnlyOneConcurrentNestingEdge(
+            UUID actorId, UUID firstParentId, UUID firstChildId, UUID secondParentId, UUID secondChildId,
+            UUID... affectedListIds) throws Exception {
+        CountDownLatch firstValidationReached = new CountDownLatch(1);
+        CountDownLatch validationsReached = new CountDownLatch(2);
+        CountDownLatch releaseValidations = new CountDownLatch(1);
+        AtomicBoolean firstValidation = new AtomicBoolean(true);
+        AtomicInteger firstBackendPid = new AtomicInteger();
+        AtomicInteger secondBackendPid = new AtomicInteger();
+
+        doAnswer(invocation -> {
+            UUID childListId = invocation.getArgument(0);
+            boolean hasNestedLists = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM user_list_items
+                        WHERE user_list_id = ? AND child_list_id IS NOT NULL
+                    )
+                    """, Boolean.class, childListId));
+            if (!hasNestedLists && List.of(affectedListIds).contains(childListId)) {
+                validationsReached.countDown();
+                if (firstValidation.compareAndSet(true, false)) {
+                    firstValidationReached.countDown();
+                }
+                awaitLatch(releaseValidations);
+            }
+            return hasNestedLists;
+        }).when(userListItemRepository).existsByUserListIdAndChildListIdIsNotNull(any(UUID.class));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<RuntimeException> first = null;
+        Future<RuntimeException> second = null;
+        boolean secondWaitedForStructureLock = false;
+        try {
+            first = executor.submit(() -> addChildEdge(actorId, firstParentId, firstChildId, firstBackendPid));
+            boolean firstReachedValidation = firstValidationReached.await(5, TimeUnit.SECONDS);
+            if (!firstReachedValidation) {
+                releaseValidations.countDown();
+                RuntimeException firstFailure = first.get(10, TimeUnit.SECONDS);
+                throw new AssertionError("First child insertion failed before the graph-validation barrier", firstFailure);
+            }
+            second = executor.submit(() -> addChildEdge(actorId, secondParentId, secondChildId, secondBackendPid));
+            secondWaitedForStructureLock = awaitGraphLockOrBothValidated(
+                    validationsReached, secondBackendPid, second);
+        } finally {
+            releaseValidations.countDown();
+            if (first != null) first.get(10, TimeUnit.SECONDS);
+            if (second != null) second.get(10, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        RuntimeException firstFailure = first.get(10, TimeUnit.SECONDS);
+        RuntimeException secondFailure = second.get(10, TimeUnit.SECONDS);
+        long edgeCount = java.util.Arrays.stream(affectedListIds)
+                .mapToLong(userListItemRepository::countByUserListId)
+                .sum();
+        assertThat(edgeCount).isEqualTo(1);
+
+        for (UUID parentListId : affectedListIds) {
+            userListItemRepository.findByUserListIdOrderByPositionAsc(parentListId).stream()
+                    .filter(item -> item.getChildList() != null)
+                    .forEach(item -> assertThat(userListItemRepository
+                            .existsByUserListIdAndChildListIdIsNotNull(item.getChildList().getId()))
+                            .as("a nested child must not itself contain a nested list")
+                            .isFalse());
+        }
+
+        assertThat(secondWaitedForStructureLock).isTrue();
+        assertThat(firstFailure == null ^ secondFailure == null).isTrue();
+        RuntimeException rejected = firstFailure == null ? secondFailure : firstFailure;
+        assertThat(rejected).isInstanceOf(BadRequestException.class);
+    }
+
+    private RuntimeException addChildEdge(
+            UUID actorId, UUID parentListId, UUID childListId, AtomicInteger backendPid) {
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                backendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                userListItemService.addItem(actorId, parentListId,
+                        new UserListItemCreationDTO(null, childListId, null, null, null));
+            });
+            return null;
+        } catch (RuntimeException exception) {
+            return exception;
+        }
+    }
+
+    private boolean awaitGraphLockOrBothValidated(
+            CountDownLatch validationsReached, AtomicInteger backendPid, Future<?> operation)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (validationsReached.getCount() == 0 || operation.isDone()) {
+                return false;
+            }
+            if (backendPid.get() != 0 && Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_locks
+                        WHERE pid = ? AND locktype = 'advisory' AND granted = false
+                    )
+                    """, Boolean.class, backendPid.get()))) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Second edge neither reached validation nor waited for the structure lock");
+    }
+
+    private RuntimeException runBulkContentAdd(
+            UUID ownerId, UUID listId, AtomicInteger backendPid) {
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                backendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                userListItemService.addItemsWithState(ownerId, listId, new UserListItemBulkCreationDTO(List.of(
+                        new ContentRefCreationDTO("bulk-race-550", ContentType.MOVIE, null, null, null, null, null))));
+            });
+            return null;
+        } catch (RuntimeException exception) {
+            return exception;
+        }
     }
 }

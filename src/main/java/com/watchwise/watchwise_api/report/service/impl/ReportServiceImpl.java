@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.report.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.ReportTargetLockIdentity;
 import com.watchwise.watchwise_api.report.dto.ReportCreationDTO;
@@ -47,6 +48,8 @@ public class ReportServiceImpl implements ReportService {
 
         ResolvedReportTarget target = reportTargetResolver.resolve(
                 reporterId, request.targetType(), request.targetId());
+        userRepository.findByIdForLifecycle(reporterId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
         advisoryLock.lock(ReportTargetLockIdentity.of(request.targetType(), target.targetId()));
 
         ReportCase reportCase = reportCaseRepository.findActiveForUpdate(request.targetType(), target.targetId())

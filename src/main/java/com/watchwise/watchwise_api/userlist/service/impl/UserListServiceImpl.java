@@ -60,10 +60,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -492,6 +494,8 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public UserListDetailedResponseDTO createUserListWithItems(UUID userId, UserListBulkCreationDTO userListBulkCreationDTO) {
+        List<ContentRefDTO> resolvedContentRefs = userListItemService
+                .resolveBulkContentReferences(userListBulkCreationDTO.items());
         User user = userRepository.findByIdForListCreation(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         LocalDateTime now = LocalDateTime.now();
@@ -509,7 +513,8 @@ public class UserListServiceImpl implements UserListService {
         UserList savedList = userListRepository.save(userList);
 
         UserListItemsWithState itemsWithState = userListItemService.addItemsWithState(
-                userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()));
+                userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()),
+                resolvedContentRefs);
         List<UserListItemResponseDTO> items = itemsWithState.items();
         double watchedPercentage = itemsWithState.watchedPercentage();
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(savedList.getId());
@@ -598,12 +603,11 @@ public class UserListServiceImpl implements UserListService {
     @Transactional
     public void deleteUserList(UUID userId, UUID listId) {
         advisoryLock.lock(UserListStructureLock.IDENTITY);
-        lockUserForListMutation(userId);
-        UserList userList = findOwnedList(userId, listId);
+        UserList userList = lockListAndInboundReferencesForDeletion(userId, listId);
         Integer deletedRank = userList.getRank();
 
         importLedger.markDeletedByTarget(userId, "USER_LIST", listId);
-        userListItemService.removeItemsReferencingChildList(listId);
+        userListItemService.removeItemsReferencingChildLists(List.of(listId));
         userListRepository.delete(userList);
         userListRepository.flush();
 
@@ -618,6 +622,56 @@ public class UserListServiceImpl implements UserListService {
                 nextRank++;
             }
         }
+    }
+
+    private UserList lockListAndInboundReferencesForDeletion(UUID userId, UUID listId) {
+        findOwnedList(userId, listId);
+        Set<UUID> parentListIds = Set.copyOf(
+                userListItemRepository.findDistinctParentListIdsByChildListIdIn(List.of(listId)));
+        List<UserList> parentSnapshots = parentListIds.isEmpty()
+                ? List.of()
+                : userListRepository.findByIdInWithUser(parentListIds);
+
+        Map<UUID, UUID> expectedOwnerByListId = new HashMap<>();
+        expectedOwnerByListId.put(listId, userId);
+        TreeSet<UUID> listIdsToLock = new TreeSet<>(parentListIds);
+        listIdsToLock.add(listId);
+        TreeSet<UUID> ownerIdsToLock = new TreeSet<>();
+        ownerIdsToLock.add(userId);
+        for (UserList parent : parentSnapshots) {
+            UUID parentId = parent.getId();
+            UUID parentOwnerId = parent.getUser().getId();
+            expectedOwnerByListId.put(parentId, parentOwnerId);
+            ownerIdsToLock.add(parentOwnerId);
+        }
+
+        lockOwners(ownerIdsToLock);
+
+        UserList lockedTarget = null;
+        for (UUID affectedListId : listIdsToLock) {
+            UserList affectedList = userListRepository.findByIdForUpdate(affectedListId)
+                    .orElseThrow(() -> new NotFoundException("List not found"));
+            UUID expectedOwnerId = expectedOwnerByListId.get(affectedListId);
+            if (expectedOwnerId == null || !expectedOwnerId.equals(affectedList.getUser().getId())) {
+                throw new ConflictException("List ownership changed while preparing list deletion");
+            }
+            if (affectedListId.equals(listId)) {
+                if (!userId.equals(affectedList.getUser().getId())) {
+                    throw new NotFoundException("List not found");
+                }
+                lockedTarget = affectedList;
+            }
+        }
+        for (UUID affectedListId : listIdsToLock) {
+            userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(affectedListId);
+        }
+
+        return Objects.requireNonNull(lockedTarget);
+    }
+
+    private void lockOwners(Collection<UUID> ownerIds) {
+        ownerIds.stream().sorted().forEach(ownerId -> userRepository.findByIdForListCreation(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found")));
     }
 
     private void lockUserForListMutation(UUID userId) {

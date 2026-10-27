@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
@@ -18,6 +19,7 @@ import com.watchwise.watchwise_api.contentposter.service.UserContentPosterServic
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
@@ -57,6 +59,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,6 +70,12 @@ class UserListItemServiceImplTest {
 
     @Mock
     private UserListRepository userListRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private AdvisoryLock advisoryLock;
 
     @Mock
     private ContentRepository contentRepository;
@@ -134,6 +143,18 @@ class UserListItemServiceImplTest {
         listId = UUID.randomUUID();
         scifi = buildUserList(listId, lucas, "Best sci-fi of the 90s", UserListVisibility.PUBLIC);
         fightClub = buildContent("550", ContentType.MOVIE);
+
+        lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(userRepository.findByIdForListCreation(marinaId)).thenReturn(Optional.of(marina));
+        lenient().when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        lenient().when(userListRepository.findByIdForUpdate(any(UUID.class)))
+                .thenAnswer(invocation -> userListRepository.findById(invocation.getArgument(0)));
+
+        lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(userRepository.findByIdForListCreation(marinaId)).thenReturn(Optional.of(marina));
+        lenient().when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        lenient().when(userListRepository.findByIdForUpdate(any(UUID.class)))
+                .thenAnswer(invocation -> userListRepository.findById(invocation.getArgument(0)));
 
         lenient().when(userListContentStateService.resolve(any(), any()))
                 .thenReturn(new UserListContentStateResult(Map.of(), Map.of()));
@@ -751,8 +772,6 @@ class UserListItemServiceImplTest {
         when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of());
-        stubContentResolution(fightClub, ContentType.MOVIE);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
 
         assertThatThrownBy(() -> userListItemService.addItems(lucasId, listId,
                 new UserListItemBulkCreationDTO(List.of(contentRefCreation("550"), episodeRefCreation("1396", 1, 1)))))
@@ -781,8 +800,6 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When CustomPosterUrl Is Provided With ChildListId")
     void shouldThrowBadRequestExceptionWhenCustomPosterUrlIsProvidedWithChildListId() {
-        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
-
         assertThatThrownBy(() -> userListItemService.addItem(lucasId, listId,
                 new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://image.tmdb.org/t/p/w342/poster.png")))
                 .isInstanceOf(BadRequestException.class)
@@ -1029,8 +1046,6 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Both Content And ChildListId Are Provided")
     void shouldThrowBadRequestExceptionWhenBothContentAndChildListIdAreProvided() {
-        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
-
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), UUID.randomUUID(), null, null)))
                 .isInstanceOf(BadRequestException.class)
@@ -1042,8 +1057,6 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Neither Content Nor ChildListId Is Provided")
     void shouldThrowBadRequestExceptionWhenNeitherContentNorChildListIdIsProvided() {
-        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
-
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(null, null, null, null)))
                 .isInstanceOf(BadRequestException.class)
@@ -1053,7 +1066,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExist() {
-        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.empty());
+        when(userListRepository.findById(listId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
@@ -1066,8 +1079,6 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw NotFoundException - When List Belongs To A Different User")
     void shouldThrowNotFoundExceptionWhenListBelongsToADifferentUser() {
-        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
-
         assertThatThrownBy(() -> userListItemService.addItem(
                 marinaId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
                 .isInstanceOf(NotFoundException.class)
@@ -1224,7 +1235,8 @@ class UserListItemServiceImplTest {
         when(contentRepository.getReferenceById(contentB.getId())).thenReturn(contentB);
 
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
-        when(userListItemRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> List.copyOf((java.util.Collection<UserListItem>) invocation.getArgument(0)))
+                .when(userListItemRepository).saveAll(anyCollection());
         when(userListItemMapper.userListItemToResponseDto(any(UserListItem.class))).thenAnswer(invocation -> {
             UserListItem item = invocation.getArgument(0);
             return new UserListItemResponseDTO(UUID.randomUUID(), null, null, item.getPosition(), null, LocalDateTime.now(), LocalDateTime.now());
@@ -1241,6 +1253,52 @@ class UserListItemServiceImplTest {
         ArgumentCaptor<List<UserListItem>> savedItemsCaptor = ArgumentCaptor.forClass(List.class);
         verify(userListItemRepository).saveAll(savedItemsCaptor.capture());
         assertThat(savedItemsCaptor.getValue()).extracting(UserListItem::getContent).containsExactly(contentA, contentB);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Resolve Content Before Locking The Owner - When Metadata Is Needed")
+    void shouldResolveContentBeforeLockingTheOwnerWhenMetadataIsNeeded() {
+        ContentRefDTO contentRef = buildContentRefDto(fightClub);
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(contentService.getOrCreateReference(contentRefCreation("550"))).thenReturn(contentRef);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
+        when(userListItemRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.addItemsWithState(lucasId, listId,
+                new UserListItemBulkCreationDTO(List.of(contentRefCreation("550"))));
+
+        var lockOrder = inOrder(contentService, userRepository, userListRepository);
+        lockOrder.verify(contentService).getOrCreateReference(contentRefCreation("550"));
+        lockOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        lockOrder.verify(userListRepository).findByIdForUpdate(listId);
+    }
+
+    @Test
+    @DisplayName("[appendImportedItems] Should Recompute The Position - When The Supplied Next Position Is Stale")
+    void shouldRecomputeThePositionWhenTheSuppliedNextPositionIsStale() {
+        UUID importedContentId = UUID.randomUUID();
+        Content imported = buildContent("777", ContentType.MOVIE);
+        imported.setId(importedContentId);
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
+        when(contentRepository.findAllById(List.of(importedContentId))).thenReturn(List.of(imported));
+        when(contentRepository.getReferenceById(importedContentId)).thenReturn(imported);
+        when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of(ContentType.MOVIE));
+        when(userListItemRepository.findByUserListIdAndContentIdInWithContent(listId, List.of(importedContentId)))
+                .thenReturn(List.of());
+        when(userListItemRepository.findMaxPositionByUserListId(listId)).thenReturn(2);
+        doAnswer(invocation -> List.copyOf((java.util.Collection<UserListItem>) invocation.getArgument(0)))
+                .when(userListItemRepository).saveAll(anyCollection());
+
+        userListItemService.appendImportedItems(lucasId, listId, List.of(importedContentId), Map.of(), 2);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<UserListItem>> savedItemsCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(userListItemRepository).saveAll(savedItemsCaptor.capture());
+        List<Integer> positions = new ArrayList<>();
+        savedItemsCaptor.getValue().forEach(item -> positions.add(item.getPosition()));
+        assertThat(positions).containsExactly(3);
     }
 
     @Test
@@ -1615,6 +1673,22 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[removeItem] Should Lock Owner Before List - When Closing A Position Gap")
+    void shouldLockOwnerBeforeListWhenClosingAPositionGap() {
+        UserListItem removed = buildContentItem(scifi, fightClub, 2);
+        when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(removed.getId())).thenReturn(Optional.of(removed));
+
+        userListItemService.removeItem(lucasId, listId, removed.getId());
+
+        var lockOrder = inOrder(userRepository, userListRepository, userListItemRepository);
+        lockOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        lockOrder.verify(userListRepository).findByIdForUpdate(listId);
+    }
+
+    @Test
     @DisplayName("[removeItem] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnRemove() {
         when(userListRepository.findById(listId)).thenReturn(Optional.empty());
@@ -1672,7 +1746,8 @@ class UserListItemServiceImplTest {
     void shouldDeleteTheReferencingItemAndCloseTheGapWhenOneParentListReferencesIt() {
         UUID nestedListId = UUID.randomUUID();
         UserListItem referencingItem = buildChildListItem(scifi, buildUserList(nestedListId, lucas, "Nested", UserListVisibility.PUBLIC), 2);
-        when(userListItemRepository.findByChildListId(nestedListId)).thenReturn(List.of(referencingItem));
+        when(userListItemRepository.findByChildListIdInForUpdateOrderByParentAndPositionDesc(List.of(nestedListId)))
+                .thenReturn(List.of(referencingItem));
 
         userListItemService.removeItemsReferencingChildList(nestedListId);
 
@@ -1691,7 +1766,7 @@ class UserListItemServiceImplTest {
         UserList marinasList = buildUserList(UUID.randomUUID(), marina, "Marina's list", UserListVisibility.PUBLIC);
         UserListItem itemInScifi = buildChildListItem(scifi, nested, 1);
         UserListItem itemInMarinasList = buildChildListItem(marinasList, nested, 1);
-        when(userListItemRepository.findByChildListId(nestedListId))
+        when(userListItemRepository.findByChildListIdInForUpdateOrderByParentAndPositionDesc(List.of(nestedListId)))
                 .thenReturn(List.of(itemInScifi, itemInMarinasList));
 
         userListItemService.removeItemsReferencingChildList(nestedListId);
@@ -1708,7 +1783,8 @@ class UserListItemServiceImplTest {
     @DisplayName("[removeItemsReferencingChildList] Should Do Nothing - When No Item References It")
     void shouldDoNothingWhenNoItemReferencesIt() {
         UUID nestedListId = UUID.randomUUID();
-        when(userListItemRepository.findByChildListId(nestedListId)).thenReturn(List.of());
+        when(userListItemRepository.findByChildListIdInForUpdateOrderByParentAndPositionDesc(List.of(nestedListId)))
+                .thenReturn(List.of());
 
         userListItemService.removeItemsReferencingChildList(nestedListId);
 

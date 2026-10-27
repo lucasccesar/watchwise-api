@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -38,7 +39,18 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -77,6 +89,15 @@ class Top5EntryControllerIntegrationTest {
 
     @Autowired
     private Top5EntryRepository top5EntryRepository;
+
+    @Autowired
+    private Top5EntryService top5EntryService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private UserContentPosterRepository userContentPosterRepository;
@@ -562,6 +583,65 @@ class Top5EntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[removeEntry] Should Keep Positions Contiguous - When Positions Two And Four Are Removed Concurrently")
+    void shouldKeepPositionsContiguousWhenPositionsTwoAndFourAreRemovedConcurrently() throws Exception {
+        RegisteredUser user = registerUser("concurrenttop5removals");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        List<Top5Entry> entries = new java.util.ArrayList<>();
+        for (int position = 1; position <= 5; position++) {
+            entries.add(persistEntry(entity, persistContent("concurrent-" + position, ContentType.MOVIE),
+                    ContentType.MOVIE, position));
+        }
+
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        CountDownLatch blockerAcquired = new CountDownLatch(1);
+        CountDownLatch releaseBlocker = new CountDownLatch(1);
+        AtomicInteger firstBackendPid = new AtomicInteger();
+        AtomicInteger secondBackendPid = new AtomicInteger();
+
+        try {
+            Future<?> blocker = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        jdbcTemplate.queryForObject(
+                                "SELECT id FROM top5_entries WHERE id = ? FOR UPDATE",
+                                UUID.class, entries.get(2).getId());
+                        blockerAcquired.countDown();
+                        awaitLatch(releaseBlocker);
+                    }));
+            assertThat(blockerAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> removePositionTwo = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        firstBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        top5EntryService.removeEntry(user.id(), ContentType.MOVIE, entries.get(1).getId());
+                    }));
+            assertThat(awaitBackendLockWaitOrCompletion(removePositionTwo, firstBackendPid)).isTrue();
+
+            Future<?> removePositionFour = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        secondBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        top5EntryService.removeEntry(user.id(), ContentType.MOVIE, entries.get(3).getId());
+                    }));
+            assertThat(awaitBackendLockWaitOrCompletion(removePositionFour, secondBackendPid)).isTrue();
+
+            releaseBlocker.countDown();
+            blocker.get(10, TimeUnit.SECONDS);
+            removePositionTwo.get(10, TimeUnit.SECONDS);
+            removePositionFour.get(10, TimeUnit.SECONDS);
+        } finally {
+            releaseBlocker.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        List<Top5Entry> remaining = top5EntryRepository
+                .findByUserIdAndTypeOrderByPositionAsc(user.id(), ContentType.MOVIE);
+        assertThat(remaining).extracting(Top5Entry::getPosition).containsExactly(1, 2, 3);
+        assertThat(remaining).extracting(Top5Entry::getId)
+                .doesNotContain(entries.get(1).getId(), entries.get(3).getId());
+    }
+
+    @Test
     @DisplayName("[removeEntry] Should Return NotFound - When Entry Does Not Exist")
     void shouldReturnNotFoundWhenEntryDoesNotExist() throws Exception {
         RegisteredUser user = registerUser("removetop5notfound");
@@ -663,6 +743,36 @@ class Top5EntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
 
         assertThat(userContentPosterRepository.findByUserIdAndContentId(intruder.id(), entry.getContent().getId())).isEmpty();
+    }
+
+    private boolean awaitBackendLockWaitOrCompletion(Future<?> operation, AtomicInteger backendPid) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (backendPid.get() != 0 && operation.isDone()) {
+                return false;
+            }
+            if (backendPid.get() != 0 && Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                        WHERE pid = ? AND wait_event_type = 'Lock'
+                    )
+                    """, Boolean.class, backendPid.get()))) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Operation neither waited on a database lock nor completed");
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for the test to release the database lock");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for the test to release the database lock", exception);
+        }
     }
 
     @Test

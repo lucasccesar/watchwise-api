@@ -93,6 +93,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
                 top5EntryCreationDTO.tmdbId(), type, null, null, null, null, null);
         ContentRefDTO contentRef = contentService.getOrCreateReference(contentRefCreation);
 
+        lockUserForTop5Mutation(userId);
         List<Top5Entry> existing = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type);
         int finalPosition = resolvePosition(top5EntryCreationDTO.position(), existing.size());
 
@@ -130,6 +131,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     public void removeEntry(UUID userId, ContentType type, UUID top5EntryId) {
         validateType(type);
 
+        lockUserForTop5Mutation(userId);
         Top5Entry entry = findOwnedEntry(userId, type, top5EntryId);
 
         int removedPosition = entry.getPosition();
@@ -212,6 +214,11 @@ public class Top5EntryServiceImpl implements Top5EntryService {
         }
 
         return entry;
+    }
+
+    private void lockUserForTop5Mutation(UUID userId) {
+        userRepository.findByIdForListCreation(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
     }
 
     private int resolvePosition(Integer requestedPosition, int currentCount) {

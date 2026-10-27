@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -29,6 +30,9 @@ import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaServi
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
@@ -68,6 +72,18 @@ class UserServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private UserListRepository userListRepository;
+
+    @Mock
+    private UserListItemRepository userListItemRepository;
+
+    @Mock
+    private UserListItemService userListItemService;
+
+    @Mock
+    private AdvisoryLock advisoryLock;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -1469,6 +1485,8 @@ class UserServiceImplTest {
         UUID id = savedUser.getId();
         DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.findByIdForListCreation(id)).thenReturn(Optional.of(savedUser));
+        when(userListRepository.findByUserId(id)).thenReturn(List.of());
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
 
         userService.deleteAccount(id, deleteAccountDTO);
@@ -1476,6 +1494,11 @@ class UserServiceImplTest {
         verify(importUploadQuotaService).prepareAccountDeletion(id);
         verify(userRepository).delete(savedUser);
         verify(reportReporterDeletionService).removeReporterSubmissions(id);
+        InOrder inOrder = inOrder(advisoryLock, importUploadQuotaService, userRepository, reportReporterDeletionService);
+        inOrder.verify(advisoryLock).lock(com.watchwise.watchwise_api.common.transaction.UserListStructureLock.IDENTITY);
+        inOrder.verify(importUploadQuotaService).prepareAccountDeletion(id);
+        inOrder.verify(userRepository).findByIdForListCreation(id);
+        inOrder.verify(reportReporterDeletionService).removeReporterSubmissions(id);
     }
 
     @Test

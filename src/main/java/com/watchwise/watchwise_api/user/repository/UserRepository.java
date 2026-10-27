@@ -21,6 +21,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForFollowStatus(@Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForLifecycle(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForListCreation(@Param("id") UUID id);

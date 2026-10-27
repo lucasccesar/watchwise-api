@@ -3,7 +3,9 @@ package com.watchwise.watchwise_api.userlist.repository;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -87,6 +89,10 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT item FROM UserListItem item WHERE item.userList.id = :userListId ORDER BY item.position ASC, item.id ASC")
+    List<UserListItem> findByUserListIdForUpdateOrderByPositionAsc(@Param("userListId") UUID userListId);
+
     @Query("""
             SELECT uli FROM UserListItem uli
             JOIN FETCH uli.userList
@@ -99,6 +105,18 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
 
     List<UserListItem> findByChildListId(UUID childListId);
+
+    @Query("SELECT DISTINCT item.userList.id FROM UserListItem item WHERE item.childList.id IN :childListIds")
+    List<UUID> findDistinctParentListIdsByChildListIdIn(@Param("childListIds") Collection<UUID> childListIds);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT item FROM UserListItem item
+            WHERE item.childList.id IN :childListIds
+            ORDER BY item.userList.id ASC, item.position DESC, item.id ASC
+            """)
+    List<UserListItem> findByChildListIdInForUpdateOrderByParentAndPositionDesc(
+            @Param("childListIds") Collection<UUID> childListIds);
 
     @Query("""
             SELECT uli FROM UserListItem uli

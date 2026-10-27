@@ -181,6 +181,8 @@ class UserListServiceImplTest {
 
         lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
         lenient().when(userRepository.findByIdForListCreation(marinaId)).thenReturn(Optional.of(marina));
+        lenient().when(userListRepository.findByIdForUpdate(any(UUID.class)))
+                .thenAnswer(invocation -> userListRepository.findById(invocation.getArgument(0)));
 
         lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
         lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
@@ -1833,8 +1835,12 @@ class UserListServiceImplTest {
         ContentRefCreationDTO seriesRef = buildContentRef("200", ContentType.SERIES);
         UserListItemResponseDTO movieItem = buildItemResponseDto(movieRef);
         UserListItemResponseDTO seriesItem = buildItemResponseDto(seriesRef);
+        List<ContentRefDTO> resolvedContentRefs = List.of(movieItem.content(), seriesItem.content());
 
-        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        when(userListItemService.resolveBulkContentReferences(List.of(movieRef, seriesRef)))
+                .thenReturn(resolvedContentRefs);
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class),
+                any(UserListItemBulkCreationDTO.class), anyList()))
                 .thenReturn(new UserListItemsWithState(List.of(movieItem, seriesItem), 0.0));
         when(userListItemService.getTotalRuntimeMinutes(any(UUID.class))).thenReturn(270L);
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(),
@@ -1844,14 +1850,20 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO result = userListService.createUserListWithItems(
                 lucasId, new UserListBulkCreationDTO("Best sci-fi of the 90s", "A curated list", UserListVisibility.PRIVATE, List.of(movieRef, seriesRef)));
 
-        verify(userRepository).findByIdForListCreation(lucasId);
+        InOrder lockOrder = inOrder(userListItemService, userRepository, userListRepository);
+        lockOrder.verify(userListItemService).resolveBulkContentReferences(List.of(movieRef, seriesRef));
+        lockOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        lockOrder.verify(userListRepository).save(any(UserList.class));
+        lockOrder.verify(userListItemService).addItemsWithState(
+                eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class), eq(resolvedContentRefs));
         assertThat(result.name()).isEqualTo("Best sci-fi of the 90s");
         assertThat(result.items()).containsExactly(movieItem, seriesItem);
 
         verify(userListRepository).save(listCaptor.capture());
         assertThat(listCaptor.getValue().getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
 
-        verify(userListItemService).addItemsWithState(eq(lucasId), any(UUID.class), itemsCaptor.capture());
+        verify(userListItemService).addItemsWithState(
+                eq(lucasId), any(UUID.class), itemsCaptor.capture(), eq(resolvedContentRefs));
         assertThat(itemsCaptor.getValue().items()).containsExactly(movieRef, seriesRef);
         verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(),
                 eq(2L), eq(0L), eq(270L), any(), eq(1), eq(2), eq(2L), eq(1), eq(false));
@@ -1867,7 +1879,10 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        ContentRefDTO resolvedRef = buildItemResponseDto(movieRef).content();
+        when(userListItemService.resolveBulkContentReferences(List.of(movieRef))).thenReturn(List.of(resolvedRef));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class),
+                any(UserListItemBulkCreationDTO.class), anyList()))
                 .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 100.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any(),
                 anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
@@ -1890,7 +1905,10 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        ContentRefDTO resolvedRef = buildItemResponseDto(movieRef).content();
+        when(userListItemService.resolveBulkContentReferences(List.of(movieRef))).thenReturn(List.of(resolvedRef));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class),
+                any(UserListItemBulkCreationDTO.class), anyList()))
                 .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 0.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(),
                 anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
@@ -1912,7 +1930,11 @@ class UserListServiceImplTest {
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
         ContentRefCreationDTO duplicateRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        ContentRefDTO resolvedRef = buildItemResponseDto(movieRef).content();
+        when(userListItemService.resolveBulkContentReferences(List.of(movieRef, duplicateRef)))
+                .thenReturn(List.of(resolvedRef, resolvedRef));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class),
+                any(UserListItemBulkCreationDTO.class), anyList()))
                 .thenThrow(new ConflictException("This content is already in the list"));
 
         assertThatThrownBy(() -> userListService.createUserListWithItems(
@@ -2262,6 +2284,7 @@ class UserListServiceImplTest {
     void shouldLockOwnerAndCompactLaterRanksInOrderWhenDeleting() {
         UserList deletedList = buildList(lucas, "Deleted", null, UserListVisibility.PUBLIC);
         deletedList.setRank(2);
+        when(userListRepository.findByIdForUpdate(deletedList.getId())).thenReturn(Optional.of(deletedList));
         UserList laterList = buildList(lucas, "Later", null, UserListVisibility.PUBLIC);
         laterList.setRank(3);
         UserList lastList = buildList(lucas, "Last", null, UserListVisibility.PUBLIC);
@@ -2274,11 +2297,13 @@ class UserListServiceImplTest {
 
         assertThat(laterList.getRank()).isEqualTo(2);
         assertThat(lastList.getRank()).isEqualTo(3);
-        InOrder inOrder = inOrder(advisoryLock, userRepository, userListRepository, userListItemService);
+        InOrder inOrder = inOrder(advisoryLock, userRepository, userListRepository, userListItemRepository, userListItemService);
         inOrder.verify(advisoryLock).lock(UserListStructureLock.IDENTITY);
-        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
         inOrder.verify(userListRepository).findById(deletedList.getId());
-        inOrder.verify(userListItemService).removeItemsReferencingChildList(deletedList.getId());
+        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        inOrder.verify(userListRepository).findByIdForUpdate(deletedList.getId());
+        inOrder.verify(userListItemRepository).findByUserListIdForUpdateOrderByPositionAsc(deletedList.getId());
+        inOrder.verify(userListItemService).removeItemsReferencingChildLists(List.of(deletedList.getId()));
         inOrder.verify(userListRepository).delete(deletedList);
         inOrder.verify(userListRepository).flush();
         inOrder.verify(userListRepository).findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 2);
@@ -2295,7 +2320,7 @@ class UserListServiceImplTest {
         userListService.deleteUserList(lucasId, list.getId());
 
         InOrder inOrder = inOrder(userListItemService, userListRepository);
-        inOrder.verify(userListItemService).removeItemsReferencingChildList(list.getId());
+        inOrder.verify(userListItemService).removeItemsReferencingChildLists(List.of(list.getId()));
         inOrder.verify(userListRepository).delete(list);
     }
 

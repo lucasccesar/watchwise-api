@@ -113,6 +113,7 @@ class Top5EntryServiceImplTest {
 
         lenient().when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
                 .thenReturn(List.of());
+        lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
     }
 
     // ---------- getTop5 ----------
@@ -665,6 +666,22 @@ class Top5EntryServiceImplTest {
         assertThat(saved.get(1)).isEqualTo(pos4);
         assertThat(saved.get(1).getPosition()).isEqualTo(3);
         verify(top5EntryRepository, times(3)).flush();
+    }
+
+    @Test
+    @DisplayName("[removeEntry] Should Lock The Owner Before Reading Ordered Entries - When Entry Exists")
+    void shouldLockOwnerBeforeReadingOrderedEntriesWhenEntryExists() {
+        Top5Entry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
+        when(top5EntryRepository.findById(toRemove.getId())).thenReturn(Optional.of(toRemove));
+        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of());
+
+        top5EntryService.removeEntry(lucasId, ContentType.MOVIE, toRemove.getId());
+
+        var lockOrder = inOrder(userRepository, top5EntryRepository);
+        lockOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        lockOrder.verify(top5EntryRepository).findById(toRemove.getId());
     }
 
     @Test

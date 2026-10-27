@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.report.service.impl.ReportServiceImpl;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -56,6 +57,8 @@ class ReportServiceImplTest {
                 .thenReturn(new ResolvedReportTarget(targetId, ownerId, "{\"targetType\":\"USER\"}"));
         when(reportTargetResolver.resolve(reporterB, ReportTargetType.USER, targetId))
                 .thenReturn(new ResolvedReportTarget(targetId, ownerId, "{\"targetType\":\"USER\"}"));
+        when(userRepository.findByIdForLifecycle(reporterA)).thenReturn(Optional.of(user(reporterA)));
+        when(userRepository.findByIdForLifecycle(reporterB)).thenReturn(Optional.of(user(reporterB)));
         when(reportCaseRepository.findActiveForUpdate(ReportTargetType.USER, targetId))
                 .thenReturn(Optional.empty(), Optional.of(active));
         when(reportCaseRepository.saveAndFlush(any(ReportCase.class)))
@@ -79,6 +82,11 @@ class ReportServiceImplTest {
         verify(reportCaseRepository, times(1)).saveAndFlush(any(ReportCase.class));
         verify(reportSubmissionRepository, times(2)).saveAndFlush(any(ReportSubmission.class));
         verify(advisoryLock, times(2)).lock(ReportTargetLockIdentity.of(ReportTargetType.USER, targetId));
+        InOrder lockOrder = org.mockito.Mockito.inOrder(userRepository, advisoryLock);
+        lockOrder.verify(userRepository).findByIdForLifecycle(reporterA);
+        lockOrder.verify(advisoryLock).lock(ReportTargetLockIdentity.of(ReportTargetType.USER, targetId));
+        lockOrder.verify(userRepository).findByIdForLifecycle(reporterB);
+        lockOrder.verify(advisoryLock).lock(ReportTargetLockIdentity.of(ReportTargetType.USER, targetId));
     }
 
     @Test
@@ -93,6 +101,7 @@ class ReportServiceImplTest {
                 .reason(ReportReason.SPAM_OR_MISLEADING).createdAt(submittedAt).build();
         when(reportTargetResolver.resolve(reporterId, ReportTargetType.COMMENT, targetId))
                 .thenReturn(new ResolvedReportTarget(targetId, UUID.randomUUID(), "{}"));
+        when(userRepository.findByIdForLifecycle(reporterId)).thenReturn(Optional.of(user(reporterId)));
         when(reportCaseRepository.findActiveForUpdate(ReportTargetType.COMMENT, targetId))
                 .thenReturn(Optional.of(active));
         when(reportSubmissionRepository.findByReportCaseIdAndReporterId(active.getId(), reporterId))

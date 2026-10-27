@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
@@ -32,6 +34,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,11 +45,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -65,6 +70,8 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final UserContentPosterService userContentPosterService;
     private final UserBlockAccessService userBlockAccessService;
     private final ImportLedger importLedger;
+    private final UserRepository userRepository;
+    private final AdvisoryLock advisoryLock;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -282,8 +289,26 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO) {
-        UserList userList = findOwnedListForUpdate(userId, listId);
         validateExactlyOneTarget(userListItemCreationDTO);
+
+        findOwnedList(userId, listId);
+
+        if (userListItemCreationDTO.content() != null) {
+            assertListIsNotLockedAsListOfLists(listId);
+            assertContentTypeGroupMatches(
+                    resolveExistingContentScope(listId), userListItemCreationDTO.content().type());
+        } else {
+            assertListIsNotLockedAsContentList(listId);
+        }
+
+        ContentRefDTO resolvedContent = userListItemCreationDTO.content() == null
+                ? null
+                : contentService.getOrCreateReference(userListItemCreationDTO.content());
+
+        UserList userList = userListItemCreationDTO.childListId() == null
+                ? findOwnedListForUpdate(userId, listId)
+                : lockParentAndChildForStructure(userId, listId, userListItemCreationDTO.childListId());
+        lockListItemRows(listId);
 
         LocalDateTime now = LocalDateTime.now();
         UserListItem.UserListItemBuilder builder = UserListItem.builder()
@@ -295,8 +320,7 @@ public class UserListItemServiceImpl implements UserListItemService {
         if (userListItemCreationDTO.content() != null) {
             assertListIsNotLockedAsListOfLists(listId);
             assertContentTypeGroupMatches(resolveExistingContentScope(listId), userListItemCreationDTO.content().type());
-            ContentRefDTO contentRef = contentService.getOrCreateReference(userListItemCreationDTO.content());
-            builder.content(contentRepository.getReferenceById(contentRef.id()));
+            builder.content(contentRepository.getReferenceById(resolvedContent.id()));
         } else {
             assertListIsNotLockedAsContentList(listId);
             builder.childList(resolveChildList(userId, listId, userListItemCreationDTO.childListId()));
@@ -326,7 +350,67 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Transactional
     public UserListItemsWithState addItemsWithState(
             UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
+        findOwnedList(userId, listId);
+        assertListIsNotLockedAsListOfLists(listId);
+        UserListItemScope preflightScope = resolveExistingContentScope(listId);
+        List<ContentRefDTO> resolvedContentRefs = resolveBulkContentReferences(
+                userListItemBulkCreationDTO.items(), preflightScope);
+        return addResolvedItemsWithState(userId, listId, userListItemBulkCreationDTO,
+                resolvedContentRefs, preflightScope);
+    }
+
+    @Override
+    @Transactional
+    public UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO,
+            List<ContentRefDTO> resolvedContentRefs) {
+        findOwnedList(userId, listId);
+        assertListIsNotLockedAsListOfLists(listId);
+        UserListItemScope preflightScope = resolveExistingContentScope(listId);
+        return addResolvedItemsWithState(userId, listId, userListItemBulkCreationDTO,
+                resolvedContentRefs, preflightScope);
+    }
+
+    @Override
+    @Transactional
+    public List<ContentRefDTO> resolveBulkContentReferences(List<ContentRefCreationDTO> items) {
+        return resolveBulkContentReferences(items, null);
+    }
+
+    private List<ContentRefDTO> resolveBulkContentReferences(
+            List<ContentRefCreationDTO> items, UserListItemScope initialScope) {
+        List<ContentRefDTO> resolvedContentRefs = new ArrayList<>(items.size());
+        UserListItemScope scope = initialScope;
+        for (ContentRefCreationDTO content : items) {
+            assertContentTypeGroupMatches(scope, content.type());
+            if (scope == null) {
+                scope = UserListItemScope.forContentType(content.type());
+            }
+            resolvedContentRefs.add(contentService.getOrCreateReference(content));
+        }
+        return List.copyOf(resolvedContentRefs);
+    }
+
+    private UserListItemsWithState addResolvedItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO,
+            List<ContentRefDTO> resolvedContentRefs, UserListItemScope preflightScope) {
+        if (resolvedContentRefs == null || resolvedContentRefs.size() != userListItemBulkCreationDTO.items().size()) {
+            throw new BadRequestException("Content references could not be resolved for all list items");
+        }
+        UserListItemScope resolvedScope = preflightScope;
+        for (int index = 0; index < resolvedContentRefs.size(); index++) {
+            ContentRefCreationDTO requested = userListItemBulkCreationDTO.items().get(index);
+            assertContentTypeGroupMatches(resolvedScope, requested.type());
+            if (resolvedScope == null) {
+                resolvedScope = UserListItemScope.forContentType(requested.type());
+            }
+            if (resolvedContentRefs.get(index).type() != requested.type()) {
+                throw new BadRequestException("Resolved content type does not match requested content type");
+            }
+        }
+
         UserList userList = findOwnedListForUpdate(userId, listId);
+        lockListItemRows(listId);
         assertListIsNotLockedAsListOfLists(listId);
         UserListItemScope lockedScope = resolveExistingContentScope(listId);
 
@@ -334,12 +418,13 @@ public class UserListItemServiceImpl implements UserListItemService {
         LocalDateTime now = LocalDateTime.now();
 
         List<UserListItem> newItems = new ArrayList<>();
-        for (ContentRefCreationDTO content : userListItemBulkCreationDTO.items()) {
+        for (int index = 0; index < userListItemBulkCreationDTO.items().size(); index++) {
+            ContentRefCreationDTO content = userListItemBulkCreationDTO.items().get(index);
             assertContentTypeGroupMatches(lockedScope, content.type());
             if (lockedScope == null) {
                 lockedScope = UserListItemScope.forContentType(content.type());
             }
-            ContentRefDTO contentRef = contentService.getOrCreateReference(content);
+            ContentRefDTO contentRef = resolvedContentRefs.get(index);
             newItems.add(UserListItem.builder()
                     .userList(userList)
                     .content(contentRepository.getReferenceById(contentRef.id()))
@@ -388,6 +473,7 @@ public class UserListItemServiceImpl implements UserListItemService {
             throw new BadRequestException("Imported list item description cannot exceed 400 characters");
         }
         UserList userList = findOwnedListForUpdate(userId, listId);
+        lockListItemRows(listId);
         assertListIsNotLockedAsListOfLists(listId);
 
         List<UUID> distinctIds = contentIds.stream().distinct().toList();
@@ -409,7 +495,8 @@ public class UserListItemServiceImpl implements UserListItemService {
                 .collect(Collectors.toMap(item -> item.getContent().getId(), item -> item));
         LocalDateTime now = LocalDateTime.now();
         Map<UUID, UserListItem> pendingByContentId = new LinkedHashMap<>();
-        int positionCursor = nextPosition;
+        int nextLockedPosition = Math.addExact(userListItemRepository.findMaxPositionByUserListId(listId), 1);
+        int positionCursor = nextLockedPosition;
         for (UUID contentId : distinctIds) {
             if (existingByContentId.containsKey(contentId)) continue;
             pendingByContentId.put(contentId, UserListItem.builder()
@@ -442,7 +529,7 @@ public class UserListItemServiceImpl implements UserListItemService {
             }
             int insertedCount = Math.toIntExact(saved.size());
             return new com.watchwise.watchwise_api.userlist.service.ImportedUserListBatchResult(
-                    results, Math.addExact(nextPosition, insertedCount));
+                    results, Math.addExact(nextLockedPosition, insertedCount));
         } catch (DataIntegrityViolationException exception) {
             throw mapUniqueConstraintViolation(exception);
         }
@@ -451,7 +538,8 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO) {
-        findOwnedList(userId, listId);
+        findOwnedListForUpdate(userId, listId);
+        lockListItemRows(listId);
         UserListItem item = findOwnedItem(listId, itemId);
 
         if (userListItemPatchDTO.customPosterUrl() != null && item.getChildList() != null) {
@@ -552,6 +640,16 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Transactional
     public void removeItem(UUID userId, UUID listId, UUID itemId) {
         findOwnedList(userId, listId);
+        UserListItem preflightItem = userListItemRepository.findById(itemId).orElse(null);
+        boolean removesChildEdge = preflightItem != null
+                && preflightItem.getUserList().getId().equals(listId)
+                && preflightItem.getChildList() != null;
+        if (removesChildEdge) {
+            lockParentAndChildForStructure(userId, listId, preflightItem.getChildList().getId());
+        } else {
+            findOwnedListForUpdate(userId, listId);
+        }
+        lockListItemRows(listId);
 
         UserListItem item = findOwnedItem(listId, itemId);
 
@@ -561,7 +659,18 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public void removeItemsReferencingChildList(UUID childListId) {
-        userListItemRepository.findByChildListId(childListId).forEach(this::deleteAndCloseGap);
+        removeItemsReferencingChildLists(List.of(childListId));
+    }
+
+    @Override
+    @Transactional
+    public void removeItemsReferencingChildLists(Collection<UUID> childListIds) {
+        if (childListIds == null || childListIds.isEmpty()) {
+            return;
+        }
+
+        userListItemRepository.findByChildListIdInForUpdateOrderByParentAndPositionDesc(childListIds)
+                .forEach(this::deleteAndCloseGap);
     }
 
     private UserListItem findOwnedItem(UUID listId, UUID itemId) {
@@ -686,6 +795,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     private UserList findOwnedListForUpdate(UUID userId, UUID listId) {
+        lockOwners(List.of(userId));
         UserList userList = userListRepository.findByIdForUpdate(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
@@ -694,6 +804,51 @@ public class UserListItemServiceImpl implements UserListItemService {
         }
 
         return userList;
+    }
+
+    private UserList lockParentAndChildForStructure(UUID userId, UUID parentListId, UUID childListId) {
+        advisoryLock.lock(UserListStructureLock.IDENTITY);
+
+        UserList parentSnapshot = userListRepository.findById(parentListId)
+                .orElseThrow(() -> new NotFoundException("List not found"));
+        if (!parentSnapshot.getUser().getId().equals(userId)) {
+            throw new NotFoundException("List not found");
+        }
+        UserList childSnapshot = userListRepository.findById(childListId)
+                .orElseThrow(() -> new NotFoundException("List not found"));
+
+        lockOwners(List.of(parentSnapshot.getUser().getId(), childSnapshot.getUser().getId()));
+
+        TreeSet<UUID> listIds = new TreeSet<>();
+        listIds.add(parentListId);
+        listIds.add(childListId);
+        Map<UUID, UserList> lockedLists = new HashMap<>();
+        for (UUID id : listIds) {
+            UserList lockedList = userListRepository.findByIdForUpdate(id)
+                    .orElseThrow(() -> new NotFoundException("List not found"));
+            lockedLists.put(id, lockedList);
+        }
+
+        UserList parent = lockedLists.get(parentListId);
+        UserList child = lockedLists.get(childListId);
+        if (!parent.getUser().getId().equals(userId)
+                || !child.getUser().getId().equals(childSnapshot.getUser().getId())) {
+            throw new NotFoundException("List not found");
+        }
+
+        for (UUID id : listIds) {
+            lockListItemRows(id);
+        }
+        return parent;
+    }
+
+    private void lockOwners(Collection<UUID> ownerIds) {
+        new TreeSet<>(ownerIds).forEach(ownerId -> userRepository.findByIdForListCreation(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found")));
+    }
+
+    private void lockListItemRows(UUID listId) {
+        userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(listId);
     }
 
     private ConflictException mapUniqueConstraintViolation(DataIntegrityViolationException e) {

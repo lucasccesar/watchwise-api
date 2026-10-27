@@ -21,6 +21,11 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
+import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -104,9 +109,17 @@ class UserControllerIntegrationTest {
     @Autowired
     private UserBlockRepository userBlockRepository;
 
+    @Autowired
+    private UserListRepository userListRepository;
+
+    @Autowired
+    private UserListItemRepository userListItemRepository;
+
     @BeforeEach
     void setUp() {
         userBlockRepository.deleteAll();
+        userListItemRepository.deleteAll();
+        userListRepository.deleteAll();
         watchCompanionRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
@@ -672,6 +685,75 @@ class UserControllerIntegrationTest {
         Optional<User> deletedUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("deleteuser", "deleteuser");
         assertThat(deletedUser).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Close Parent List Position Gaps - When Account Owns Nested Child Lists")
+    void shouldCloseParentListPositionGapsWhenAccountOwnsNestedChildLists() throws Exception {
+        MvcResult parentOwnerRegistration = mockMvc.perform(registerRequest("nestedparentowner", "nestedparentowner@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        User parentOwner = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("nestedparentowner", "nestedparentowner")
+                .orElseThrow();
+
+        MvcResult deletingOwnerRegistration = mockMvc.perform(registerRequest("nestedchildowner", "nestedchildowner@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        User deletingOwner = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("nestedchildowner", "nestedchildowner")
+                .orElseThrow();
+
+        LocalDateTime now = LocalDateTime.now();
+        UserList parent = userListRepository.save(UserList.builder()
+                .user(parentOwner)
+                .name("Parent")
+                .visibility(UserListVisibility.PUBLIC)
+                .rank(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        UserList firstChild = saveChildList(deletingOwner, "First child", now);
+        UserList middleChild = saveChildList(deletingOwner, "Middle child", now);
+        UserList lastChild = saveChildList(deletingOwner, "Last child", now);
+        persistNestedListItem(parent, firstChild, 1, now);
+        persistNestedListItem(parent, middleChild, 2, now);
+        persistNestedListItem(parent, lastChild, 3, now);
+
+        Cookie accessTokenCookie = deletingOwnerRegistration.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = deletingOwnerRegistration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent());
+
+        assertThat(userListRepository.findById(firstChild.getId())).isEmpty();
+        assertThat(userListRepository.findById(middleChild.getId())).isEmpty();
+        assertThat(userListRepository.findById(lastChild.getId())).isEmpty();
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId()))
+                .extracting(item -> item.getChildList().getId(), UserListItem::getPosition)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(firstChild.getId(), 1),
+                        org.assertj.core.groups.Tuple.tuple(lastChild.getId(), 2));
+    }
+
+    private UserList saveChildList(User owner, String name, LocalDateTime now) {
+        return userListRepository.save(UserList.builder()
+                .user(owner)
+                .name(name)
+                .visibility(UserListVisibility.PUBLIC)
+                .rank(null)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private void persistNestedListItem(UserList parent, UserList child, int position, LocalDateTime now) {
+        userListItemRepository.save(UserListItem.builder()
+                .userList(parent)
+                .childList(child)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
     }
 
     @Test
