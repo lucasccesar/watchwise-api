@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
@@ -26,9 +27,11 @@ import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -100,7 +103,7 @@ class UserListItemControllerIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private UserListRepository userListRepository;
 
     @MockitoSpyBean
@@ -111,6 +114,9 @@ class UserListItemControllerIntegrationTest {
 
     @Autowired
     private UserListItemService userListItemService;
+
+    @Autowired
+    private UserListService userListService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -668,6 +674,61 @@ class UserListItemControllerIntegrationTest {
         mockMvc.perform(addItemRequest(owner, parent.getId(), childListItemBody(otherPrivateList.getId(), null)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("This list is private"));
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Revalidate Child Visibility - When It Changes After Preflight")
+    void shouldRevalidateChildVisibilityWhenItChangesAfterPreflight() throws Exception {
+        RegisteredUser owner = registerUser("visibilityraceparent");
+        RegisteredUser childOwner = registerUser("visibilityracechild");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList parent = persistList(ownerEntity, "Parent", UserListVisibility.PUBLIC);
+        UserList child = persistList(childOwnerEntity, "Child", UserListVisibility.PUBLIC);
+
+        CountDownLatch childPreflightLoaded = new CountDownLatch(1);
+        CountDownLatch resumeAdd = new CountDownLatch(1);
+        AtomicBoolean pauseChildPreflightOnce = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            if (child.getId().equals(invocation.getArgument(0))
+                    && pauseChildPreflightOnce.compareAndSet(true, false)) {
+                childPreflightLoaded.countDown();
+                if (!resumeAdd.await(10, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to resume nested-list insertion");
+                }
+            }
+            return result;
+        }).when(userListRepository).findById(child.getId());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<RuntimeException> add = executor.submit(() -> {
+            try {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                        userListItemService.addItem(owner.id(), parent.getId(),
+                                new UserListItemCreationDTO(null, child.getId(), null, null)));
+                return null;
+            } catch (RuntimeException exception) {
+                return exception;
+            }
+        });
+        try {
+            assertThat(childPreflightLoaded.await(10, TimeUnit.SECONDS)).isTrue();
+
+            userListService.updateUserList(childOwner.id(), child.getId(),
+                    new UserListPatchDTO(null, null, UserListVisibility.PRIVATE));
+
+            resumeAdd.countDown();
+            RuntimeException failure = add.get(20, TimeUnit.SECONDS);
+            assertThat(failure).isInstanceOf(ForbiddenException.class)
+                    .hasMessage("This list is private");
+        } finally {
+            resumeAdd.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).isEmpty();
     }
 
     @Test

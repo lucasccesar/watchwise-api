@@ -50,6 +50,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -91,6 +92,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserContentPosterService userContentPosterService;
     private final UserBlockAccessService userBlockAccessService;
     private final ImportLedger importLedger;
+    private final EntityManager entityManager;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final int USER_LIST_PAGE_SIZE = 10;
@@ -651,6 +653,7 @@ public class UserListServiceImpl implements UserListService {
         for (UUID affectedListId : listIdsToLock) {
             UserList affectedList = userListRepository.findByIdForUpdate(affectedListId)
                     .orElseThrow(() -> new NotFoundException("List not found"));
+            entityManager.refresh(affectedList);
             UUID expectedOwnerId = expectedOwnerByListId.get(affectedListId);
             if (expectedOwnerId == null || !expectedOwnerId.equals(affectedList.getUser().getId())) {
                 throw new ConflictException("List ownership changed while preparing list deletion");

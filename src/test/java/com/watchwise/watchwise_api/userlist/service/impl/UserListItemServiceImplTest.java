@@ -36,6 +36,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -100,6 +101,9 @@ class UserListItemServiceImplTest {
 
     @Mock
     private ImportLedger importLedger;
+
+    @Mock
+    private EntityManager entityManager;
 
     @InjectMocks
     private UserListItemServiceImpl userListItemService;
@@ -897,6 +901,33 @@ class UserListItemServiceImplTest {
 
         verify(userListItemRepository).save(itemCaptor.capture());
         assertThat(itemCaptor.getValue().getChildList()).isEqualTo(childList);
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Revalidate Child Visibility After Locking The Owner And List")
+    void shouldRevalidateChildVisibilityAfterLockingTheOwnerAndList() {
+        UUID childListId = UUID.randomUUID();
+        UserList childList = buildUserList(childListId, marina, "Recently private", UserListVisibility.PUBLIC);
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
+        when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
+        lenient().when(userListItemRepository.save(any(UserListItem.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> {
+            UserList refreshed = invocation.getArgument(0);
+            if (childListId.equals(refreshed.getId())) {
+                refreshed.setVisibility(UserListVisibility.PRIVATE);
+            }
+            return null;
+        }).when(entityManager).refresh(any(UserList.class));
+
+        assertThatThrownBy(() -> userListItemService.addItem(
+                lucasId, listId, new UserListItemCreationDTO(null, childListId, null, null)))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This list is private");
+
+        verify(entityManager).refresh(childList);
+        verify(userListItemRepository, never()).save(any(UserListItem.class));
     }
 
     @Test

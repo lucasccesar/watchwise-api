@@ -51,6 +51,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.impl.UserListItemPageReaderImpl;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,9 @@ class UserListServiceImplTest {
 
     @Mock
     private UserListRepository userListRepository;
+
+    @Mock
+    private EntityManager entityManager;
 
     @Mock
     private AdvisoryLock advisoryLock;
@@ -2309,6 +2313,27 @@ class UserListServiceImplTest {
         inOrder.verify(userListRepository).findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 2);
         inOrder.verify(userListRepository).saveAndFlush(laterList);
         inOrder.verify(userListRepository).saveAndFlush(lastList);
+    }
+
+    @Test
+    @DisplayName("[deleteUserList] Should Use The Rank Refreshed After The Owner Lock")
+    void shouldUseTheRankRefreshedAfterTheOwnerLockWhenDeleting() {
+        UserList deletedList = buildList(lucas, "Deleted", null, UserListVisibility.PUBLIC);
+        deletedList.setRank(2);
+        when(userListRepository.findById(deletedList.getId())).thenReturn(Optional.of(deletedList));
+        when(userListRepository.findByIdForUpdate(deletedList.getId())).thenReturn(Optional.of(deletedList));
+        doAnswer(invocation -> {
+            ((UserList) invocation.getArgument(0)).setRank(4);
+            return null;
+        }).when(entityManager).refresh(deletedList);
+
+        userListService.deleteUserList(lucasId, deletedList.getId());
+
+        verify(userListRepository).findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 4);
+        InOrder inOrder = inOrder(userRepository, userListRepository, entityManager);
+        inOrder.verify(userRepository).findByIdForListCreation(lucasId);
+        inOrder.verify(userListRepository).findByIdForUpdate(deletedList.getId());
+        inOrder.verify(entityManager).refresh(deletedList);
     }
 
     @Test

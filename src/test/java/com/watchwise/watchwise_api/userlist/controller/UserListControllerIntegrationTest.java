@@ -1463,6 +1463,57 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[deleteUserList] Should Compact From The Current Rank - When Rank Changes After Preflight")
+    void shouldCompactFromTheCurrentRankWhenRankChangesAfterDeletePreflight() throws Exception {
+        RegisteredUser user = registerUser("deletecurrentrankafterpreflight");
+        mockMvc.perform(createRequest(user, creationBody("A", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("B", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("C", null, null))).andExpect(status().isCreated());
+        mockMvc.perform(createRequest(user, creationBody("D", null, null))).andExpect(status().isCreated());
+        UserList deletedList = userListRepository.findByUserId(user.id()).stream()
+                .filter(list -> list.getName().equals("B"))
+                .findFirst()
+                .orElseThrow();
+
+        CountDownLatch deletePreflightLoaded = new CountDownLatch(1);
+        CountDownLatch resumeDelete = new CountDownLatch(1);
+        AtomicBoolean pauseDeleteOnce = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            if (deletedList.getId().equals(invocation.getArgument(0))
+                    && pauseDeleteOnce.compareAndSet(true, false)) {
+                deletePreflightLoaded.countDown();
+                if (!resumeDelete.await(10, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to resume list deletion");
+                }
+            }
+            return result;
+        }).when(userListRepository).findById(deletedList.getId());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> deletion = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> userListService.deleteUserList(user.id(), deletedList.getId())));
+            assertThat(deletePreflightLoaded.await(10, TimeUnit.SECONDS)).isTrue();
+
+            userListService.updateUserList(user.id(), deletedList.getId(),
+                    new UserListPatchDTO(null, null, null, 4));
+
+            resumeDelete.countDown();
+            deletion.get(20, TimeUnit.SECONDS);
+        } finally {
+            resumeDelete.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(userListRepository.findByUserId(user.id()).stream()
+                .map(UserList::getRank)
+                .sorted()
+                .toList()).containsExactly(1, 2, 3);
+    }
+
+    @Test
     @DisplayName("[updateUserList] Should Preserve Compacted Rank - When Metadata Patch Overlaps Deletion")
     void shouldPreserveCompactedRankWhenMetadataPatchOverlapsDeletion() throws Exception {
         RegisteredUser user = registerUser("metadatapatchrankrace");

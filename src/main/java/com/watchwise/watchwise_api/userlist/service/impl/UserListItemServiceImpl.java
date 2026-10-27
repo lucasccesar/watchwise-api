@@ -36,6 +36,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -72,6 +73,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final ImportLedger importLedger;
     private final UserRepository userRepository;
     private final AdvisoryLock advisoryLock;
+    private final EntityManager entityManager;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -826,6 +828,7 @@ public class UserListItemServiceImpl implements UserListItemService {
         for (UUID id : listIds) {
             UserList lockedList = userListRepository.findByIdForUpdate(id)
                     .orElseThrow(() -> new NotFoundException("List not found"));
+            entityManager.refresh(lockedList);
             lockedLists.put(id, lockedList);
         }
 
