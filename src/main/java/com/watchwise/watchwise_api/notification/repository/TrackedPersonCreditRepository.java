@@ -9,7 +9,4 @@ import java.util.UUID;
 public interface TrackedPersonCreditRepository extends JpaRepository<TrackedPersonCredit, UUID> {
 
     List<TrackedPersonCredit> findByTrackedPersonStateId(UUID trackedPersonStateId);
-
-    boolean existsByTrackedPersonStateIdAndCreditTmdbId(UUID trackedPersonStateId, String creditTmdbId);
-
 }

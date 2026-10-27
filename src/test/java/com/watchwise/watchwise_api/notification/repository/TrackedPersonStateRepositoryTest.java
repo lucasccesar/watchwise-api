@@ -91,14 +91,14 @@ class TrackedPersonStateRepositoryTest {
     }
 
     @Test
-    @DisplayName("[existsByTrackedPersonStateIdAndCreditTmdbId] Should Return False - When Credit Is New")
-    void shouldReturnFalseWhenCreditIsNew() {
+    @DisplayName("[findByTrackedPersonStateId] Should Return No Rows - When The Person Has No Tracked Credits")
+    void shouldReturnNoRowsWhenThePersonHasNoTrackedCredits() {
         TrackedPersonState brad = trackedPersonStateRepository.saveAndFlush(buildState("6193"));
         entityManager.clear();
 
-        boolean result = trackedPersonCreditRepository.existsByTrackedPersonStateIdAndCreditTmdbId(brad.getId(), "603");
+        List<TrackedPersonCredit> result = trackedPersonCreditRepository.findByTrackedPersonStateId(brad.getId());
 
-        assertThat(result).isFalse();
+        assertThat(result).isEmpty();
     }
 
     @Test
