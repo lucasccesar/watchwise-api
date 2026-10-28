@@ -1565,6 +1565,61 @@ class DiaryEntryRepositoryTest {
                 new WatchedEpisodeCoordinate("1399", 1, 2));
     }
 
+    @Test
+    @DisplayName("[findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId] Should Aggregate Latest Public Scores Without Rewatches")
+    void shouldAggregateLatestPublicEpisodeRatingsWithoutRewatch() {
+        Content regularEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content unscoredEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content seasonZeroEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
+        User privateUser = userRepository.save(User.builder()
+                .username("private")
+                .name("private")
+                .email("private@email.com")
+                .password("hashed_password")
+                .profilePicture("https://example.com/photo.png")
+                .isProfilePublic(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+
+        DiaryEntry lucasFirstWatch = buildEntry(lucas, regularEpisode, 1);
+        lucasFirstWatch.setScore(4);
+        DiaryEntry lucasRewatch = buildEntry(lucas, regularEpisode, 2);
+        lucasRewatch.setScore(8);
+        DiaryEntry marinaWatch = buildEntry(marina, regularEpisode, 1);
+        marinaWatch.setScore(6);
+        DiaryEntry privateWatch = buildEntry(privateUser, regularEpisode, 1);
+        privateWatch.setScore(10);
+        DiaryEntry seasonZeroWatch = buildEntry(marina, seasonZeroEpisode, 1);
+        seasonZeroWatch.setScore(7);
+        DiaryEntry unscoredWatch = buildEntry(marina, unscoredEpisode, 1);
+
+        diaryEntryRepository.saveAll(List.of(
+                lucasFirstWatch, lucasRewatch, marinaWatch, privateWatch, seasonZeroWatch, unscoredWatch));
+        entityManager.flush();
+        entityManager.clear();
+
+        List<DiaryEntryRepository.LatestPublicEpisodeRatingAggregate> publicResult =
+                diaryEntryRepository.findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399");
+        List<DiaryEntryRepository.LatestUserEpisodeScore> personalResult =
+                diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucas.getId(), "1399");
+
+        assertThat(publicResult)
+                .extracting(
+                        DiaryEntryRepository.LatestPublicEpisodeRatingAggregate::getSeriesTmdbId,
+                        DiaryEntryRepository.LatestPublicEpisodeRatingAggregate::getSeasonNumber,
+                        DiaryEntryRepository.LatestPublicEpisodeRatingAggregate::getEpisodeNumber,
+                        DiaryEntryRepository.LatestPublicEpisodeRatingAggregate::getScoreSum,
+                        DiaryEntryRepository.LatestPublicEpisodeRatingAggregate::getScoreCount)
+                .containsExactly(tuple("1399", 1, 1, 14L, 2L));
+        assertThat(personalResult)
+                .extracting(
+                        DiaryEntryRepository.LatestUserEpisodeScore::getSeasonNumber,
+                        DiaryEntryRepository.LatestUserEpisodeScore::getEpisodeNumber,
+                        DiaryEntryRepository.LatestUserEpisodeScore::getScore)
+                .containsExactly(tuple(1, 1, 8));
+    }
+
     private DiaryEntry withWatchedDate(DiaryEntry entry, LocalDate watchedDate) {
         entry.setWatchedDate(watchedDate);
         return entry;

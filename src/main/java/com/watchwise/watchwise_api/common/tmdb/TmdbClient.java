@@ -77,6 +77,7 @@ public class TmdbClient {
 
     private final Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbTvDisplayDetails>> tmdbTvDisplayDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache;
@@ -294,6 +295,17 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbTvContentRatings.class),
                         "tv content ratings " + tmdbId));
+    }
+
+    public TmdbLookupResult<TmdbTvDisplayDetails> getTvDisplayDetails(String tmdbId, String language) {
+        return cachedLookup(tmdbTvDisplayDetailsCache, tmdbId + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder.path("/tv/{id}")
+                                        .queryParam("language", language)
+                                        .build(tmdbId))
+                                .retrieve()
+                                .body(TmdbTvDisplayDetails.class),
+                        "tv display details " + tmdbId));
     }
 
     public Optional<TmdbMovieDetails> getMovieDetails(String tmdbId) {

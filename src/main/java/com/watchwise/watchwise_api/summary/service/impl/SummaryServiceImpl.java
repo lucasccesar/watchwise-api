@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
@@ -61,6 +62,8 @@ import com.watchwise.watchwise_api.summary.dto.YearCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryReader;
 import com.watchwise.watchwise_api.summary.service.AllTimeStatsReader;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
 import com.watchwise.watchwise_api.summary.service.SummaryService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -78,7 +81,9 @@ import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,6 +96,8 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class SummaryServiceImpl implements SummaryService {
 
+    private static final int EPISODE_RATINGS_MAP_DEFAULT_PAGE_SIZE = 12;
+    private static final int EPISODE_RATINGS_MAP_MAX_PAGE_SIZE = 100;
     private static final int WATCH_TIME_WINDOW_DAYS = 30;
     private static final int HOME_NEXT_EPISODES_LIMIT = 4;
     private static final int HOME_UPCOMING_RELEASES_LIMIT = 6;
@@ -136,6 +143,9 @@ public class SummaryServiceImpl implements SummaryService {
     private final AllTimeStatsReader allTimeStatsReader;
     private final CurrentRatingSummaryReader currentRatingSummaryReader;
     private final UserBlockAccessService userBlockAccessService;
+    private final EpisodeRatingsMetadataService episodeRatingsMetadataService;
+    private final EpisodeRatingsReleasedEpisodes episodeRatingsReleasedEpisodes;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -606,59 +616,208 @@ public class SummaryServiceImpl implements SummaryService {
             throw new BadRequestException("seriesTmdbId must be provided");
         }
 
-        List<DiaryEntry> entries = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId);
+        String language = resolveViewerPreferredLanguage(viewerId, userId, target);
+        EpisodeRatingsMetadata metadata = episodeRatingsMetadataService.resolve(seriesTmdbId, language);
+        LocalDate today = LocalDate.now();
+        SeriesProgressMetadataRefreshService.Snapshot snapshot = seriesProgressMetadataRefreshService
+                .getSnapshotsForRead(List.of(seriesTmdbId), today)
+                .get(seriesTmdbId);
+        if (snapshot == null || snapshot.series() == null) {
+            throw new TmdbUnavailableException("TMDB is currently unavailable");
+        }
 
-        Map<List<Integer>, DiaryEntry> latestPerEpisode = new LinkedHashMap<>();
-        for (DiaryEntry entry : entries) {
-            List<Integer> key = List.of(entry.getContent().getSeasonNumber(), entry.getContent().getEpisodeNumber());
-            DiaryEntry current = latestPerEpisode.get(key);
-            if (current == null || entry.getWatchNumber() > current.getWatchNumber()) {
-                latestPerEpisode.put(key, entry);
+        Set<EpisodeCoordinate> releasedCoordinates = new LinkedHashSet<>();
+        episodeRatingsReleasedEpisodes.load(seriesTmdbId, metadata.regularSeasonNumbers(), today)
+                .forEach((seasonNumber, episodeNumbers) -> episodeNumbers.forEach(episodeNumber ->
+                        releasedCoordinates.add(new EpisodeCoordinate(seasonNumber, episodeNumber))));
+
+        Map<EpisodeCoordinate, Integer> personalScores = new HashMap<>();
+        for (DiaryEntryRepository.LatestUserEpisodeScore score : diaryEntryRepository
+                .findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(userId, seriesTmdbId)) {
+            if (score.getSeasonNumber() == null || score.getEpisodeNumber() == null) {
+                continue;
+            }
+            EpisodeCoordinate coordinate = new EpisodeCoordinate(score.getSeasonNumber(), score.getEpisodeNumber());
+            if (releasedCoordinates.contains(coordinate)) {
+                personalScores.put(coordinate, score.getScore());
             }
         }
 
-        List<EpisodeScoreDTO> episodes = latestPerEpisode.values().stream()
-                .sorted(Comparator.comparing((DiaryEntry d) -> d.getContent().getSeasonNumber())
-                        .thenComparing(d -> d.getContent().getEpisodeNumber()))
-                .map(d -> new EpisodeScoreDTO(d.getContent().getSeasonNumber(), d.getContent().getEpisodeNumber(), d.getScore()))
+        Map<EpisodeCoordinate, EpisodeRatingAggregate> publicRatings = new HashMap<>();
+        long overallScoreSum = 0L;
+        long overallRatingCount = 0L;
+        for (DiaryEntryRepository.LatestPublicEpisodeRatingAggregate rating : diaryEntryRepository
+                .findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId(seriesTmdbId)) {
+            if (!seriesTmdbId.equals(rating.getSeriesTmdbId())
+                    || rating.getSeasonNumber() == null
+                    || rating.getEpisodeNumber() == null
+                    || rating.getScoreSum() == null
+                    || rating.getScoreCount() == null
+                    || rating.getScoreCount() <= 0L) {
+                continue;
+            }
+            EpisodeCoordinate coordinate = new EpisodeCoordinate(rating.getSeasonNumber(), rating.getEpisodeNumber());
+            if (releasedCoordinates.contains(coordinate)) {
+                publicRatings.put(coordinate, new EpisodeRatingAggregate(rating.getScoreSum(), rating.getScoreCount()));
+                overallScoreSum += rating.getScoreSum();
+                overallRatingCount += rating.getScoreCount();
+            }
+        }
+
+        List<EpisodeScoreDTO> episodes = releasedCoordinates.stream()
+                .sorted(Comparator.comparingInt(EpisodeCoordinate::seasonNumber)
+                        .thenComparingInt(EpisodeCoordinate::episodeNumber))
+                .map(coordinate -> {
+                    EpisodeRatingAggregate rating = publicRatings.get(coordinate);
+                    Double averageScore = rating == null
+                            ? null
+                            : (double) rating.scoreSum() / rating.ratingCount();
+                    return new EpisodeScoreDTO(
+                            coordinate.seasonNumber(),
+                            coordinate.episodeNumber(),
+                            personalScores.get(coordinate),
+                            averageScore,
+                            rating == null ? 0L : rating.ratingCount());
+                })
                 .toList();
 
         Map<String, String> customPosterBySeries = loadSeriesPosters(userId, List.of(seriesTmdbId));
-        return new EpisodeRatingsGridResponseDTO(seriesTmdbId, episodes, customPosterBySeries.get(seriesTmdbId));
+        Double overallAverageScore = overallRatingCount == 0L
+                ? null
+                : (double) overallScoreSum / overallRatingCount;
+        return new EpisodeRatingsGridResponseDTO(
+                seriesTmdbId,
+                episodes,
+                customPosterBySeries.get(seriesTmdbId),
+                metadata.title(),
+                metadata.releaseYear(),
+                metadata.posterPath(),
+                metadata.backdropPath(),
+                overallAverageScore,
+                overallRatingCount);
     }
 
     @Override
-    public EpisodeRatingsMapResponseDTO getEpisodeRatingsMap(UUID viewerId, UUID userId) {
+    public EpisodeRatingsMapResponseDTO getEpisodeRatingsMap(UUID viewerId, UUID userId, Integer page, Integer size) {
+        PageRequest pageRequest = buildEpisodeRatingsMapPageRequest(page, size);
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewSummary(viewerId, userId, target);
+        String language = resolveViewerPreferredLanguage(viewerId, userId, target);
 
         List<DiaryEntryRepository.SeriesEpisodeCount> counts = diaryEntryRepository
                 .findEpisodeSeriesCountsByUserId(userId);
-        if (counts.isEmpty()) {
-            return new EpisodeRatingsMapResponseDTO(List.of());
-        }
-
         List<String> seriesTmdbIds = counts.stream()
                 .map(DiaryEntryRepository.SeriesEpisodeCount::getSeriesTmdbId)
                 .toList();
-        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots =
-                seriesProgressMetadataRefreshService.getSnapshotsForRead(seriesTmdbIds, LocalDate.now());
-        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, seriesTmdbIds);
+        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = seriesTmdbIds.isEmpty()
+                ? Map.of()
+                : seriesProgressMetadataRefreshService.getSnapshotsForRead(seriesTmdbIds, LocalDate.now());
 
-        List<EpisodeRatingsMapItemDTO> series = counts.stream()
+        List<EpisodeRatingsMapEntry> rankedSeries = counts.stream()
                 .map(row -> {
                     SeriesProgressMetadataRefreshService.Snapshot snapshot = snapshots.get(row.getSeriesTmdbId());
                     Integer totalEpisodeCount = snapshot == null || snapshot.series() == null
                             ? null
                             : snapshot.series().regularReleasedEpisodeCount();
+                    return new EpisodeRatingsMapEntry(
+                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount);
+                })
+                .sorted(Comparator.comparing(EpisodeRatingsMapEntry::watchedRatio,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(EpisodeRatingsMapEntry::watchedEpisodeCount,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(EpisodeRatingsMapEntry::seriesTmdbId))
+                .toList();
+
+        long totalWatchedEpisodeCount = rankedSeries.stream()
+                .map(EpisodeRatingsMapEntry::watchedEpisodeCount)
+                .filter(java.util.Objects::nonNull)
+                .mapToLong(Long::longValue)
+                .sum();
+        boolean allSeriesTotalsKnown = rankedSeries.stream()
+                .allMatch(entry -> entry.totalEpisodeCount() != null);
+        Integer totalEpisodeCount = allSeriesTotalsKnown
+                ? rankedSeries.stream().mapToInt(entry -> entry.totalEpisodeCount()).sum()
+                : null;
+
+        long pageOffset = Math.min(pageRequest.getOffset(), rankedSeries.size());
+        int fromIndex = Math.toIntExact(pageOffset);
+        int toIndex = (int) Math.min((long) fromIndex + pageRequest.getPageSize(), rankedSeries.size());
+        List<EpisodeRatingsMapEntry> pageEntries = rankedSeries.subList(fromIndex, toIndex);
+        List<String> pageSeriesTmdbIds = pageEntries.stream()
+                .map(EpisodeRatingsMapEntry::seriesTmdbId)
+                .toList();
+
+        Map<String, EpisodeRatingsMetadata> metadataBySeriesId = pageSeriesTmdbIds.isEmpty()
+                ? Map.of()
+                : episodeRatingsMetadataService.resolve(pageSeriesTmdbIds, language);
+        if (metadataBySeriesId == null) {
+            metadataBySeriesId = Map.of();
+        }
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, pageSeriesTmdbIds);
+        Map<String, EpisodeRatingsMetadata> resolvedMetadata = metadataBySeriesId;
+
+        List<EpisodeRatingsMapItemDTO> series = pageEntries.stream()
+                .map(entry -> {
+                    EpisodeRatingsMetadata metadata = resolvedMetadata.get(entry.seriesTmdbId());
                     return new EpisodeRatingsMapItemDTO(
-                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount,
-                            customPosterBySeries.get(row.getSeriesTmdbId()));
+                            entry.seriesTmdbId(), entry.watchedEpisodeCount(), entry.totalEpisodeCount(),
+                            customPosterBySeries.get(entry.seriesTmdbId()),
+                            metadata == null ? null : metadata.title(),
+                            metadata == null ? null : metadata.releaseYear(),
+                            metadata == null ? null : metadata.posterPath());
                 })
                 .toList();
 
-        return new EpisodeRatingsMapResponseDTO(series);
+        int totalPages = rankedSeries.isEmpty()
+                ? 0
+                : (int) ((rankedSeries.size() + (long) pageRequest.getPageSize() - 1)
+                        / pageRequest.getPageSize());
+        boolean hasNext = pageRequest.getOffset() + pageRequest.getPageSize() < rankedSeries.size();
+        return new EpisodeRatingsMapResponseDTO(series, pageRequest.getPageNumber() + 1,
+                pageRequest.getPageSize(), rankedSeries.size(), totalPages, hasNext,
+                totalWatchedEpisodeCount, totalEpisodeCount);
+    }
+
+    private PageRequest buildEpisodeRatingsMapPageRequest(Integer page, Integer size) {
+        if (page != null && page == 0) {
+            throw new BadRequestException("Page number must be greater than 0");
+        }
+        if (size != null && size > EPISODE_RATINGS_MAP_MAX_PAGE_SIZE) {
+            throw new BadRequestException("Page size must not exceed " + EPISODE_RATINGS_MAP_MAX_PAGE_SIZE);
+        }
+        int pageNumber = page == null ? 1 : page;
+        int pageSize = size == null ? EPISODE_RATINGS_MAP_DEFAULT_PAGE_SIZE : size;
+        return pageRequestFactory.build(pageNumber, pageSize, EPISODE_RATINGS_MAP_MAX_PAGE_SIZE);
+    }
+
+    private String resolveViewerPreferredLanguage(UUID viewerId, UUID userId, User target) {
+        if (viewerId.equals(userId)) {
+            return target.getPreferredLanguage();
+        }
+        return userRepository.findById(viewerId)
+                .map(User::getPreferredLanguage)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+    }
+
+    private record EpisodeRatingsMapEntry(
+            String seriesTmdbId,
+            Long watchedEpisodeCount,
+            Integer totalEpisodeCount) {
+
+        private Double watchedRatio() {
+            if (watchedEpisodeCount == null || totalEpisodeCount == null || totalEpisodeCount <= 0) {
+                return null;
+            }
+            return (double) watchedEpisodeCount / totalEpisodeCount;
+        }
+    }
+
+    private record EpisodeCoordinate(int seasonNumber, int episodeNumber) {
+    }
+
+    private record EpisodeRatingAggregate(long scoreSum, long ratingCount) {
     }
 
     private Map<String, String> loadSeriesPosters(UUID userId, List<String> seriesTmdbIds) {

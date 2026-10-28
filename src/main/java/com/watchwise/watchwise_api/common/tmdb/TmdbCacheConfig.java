@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -23,6 +24,8 @@ public class TmdbCacheConfig {
     private static final int HOME_NEXT_EPISODE_THREAD_POOL_SIZE = 4;
     private static final int CONTENT_CARD_METADATA_RESOLUTION_THREAD_POOL_SIZE = 8;
     private static final int CONTENT_CARD_METADATA_RESOLUTION_QUEUE_CAPACITY = 50;
+    private static final int EPISODE_RATINGS_METADATA_THREAD_POOL_SIZE = 4;
+    private static final int EPISODE_RATINGS_METADATA_QUEUE_SIZE = 100;
 
     @Bean
     public Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache(
@@ -40,6 +43,13 @@ public class TmdbCacheConfig {
 
     @Bean
     public Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.details-cache-maximum-size:10000}") long maximumSize) {
+        return newCache(ttlHours, maximumSize);
+    }
+
+    @Bean
+    public Cache<String, TmdbLookupResult<TmdbTvDisplayDetails>> tmdbTvDisplayDetailsCache(
             @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
             @Value("${app.tmdb.details-cache-maximum-size:10000}") long maximumSize) {
         return newCache(ttlHours, maximumSize);
@@ -219,5 +229,28 @@ public class TmdbCacheConfig {
                 TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(CONTENT_CARD_METADATA_RESOLUTION_QUEUE_CAPACITY),
                 new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService episodeRatingsMetadataExecutor() {
+        return new ThreadPoolExecutor(
+                EPISODE_RATINGS_METADATA_THREAD_POOL_SIZE,
+                EPISODE_RATINGS_METADATA_THREAD_POOL_SIZE,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(EPISODE_RATINGS_METADATA_QUEUE_SIZE),
+                (task, executor) -> {
+                    try {
+                        while (!executor.isShutdown()) {
+                            if (executor.getQueue().offer(task, 100, TimeUnit.MILLISECONDS)) {
+                                return;
+                            }
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new RejectedExecutionException(
+                                "Interrupted while waiting to submit episode ratings metadata", interrupted);
+                    }
+                    throw new RejectedExecutionException("Episode ratings metadata executor is shut down");
+                });
     }
 }

@@ -29,6 +29,6 @@ public interface SummaryService {
 
     EpisodeRatingsGridResponseDTO getEpisodeRatingsGrid(UUID viewerId, UUID userId, String seriesTmdbId);
 
-    EpisodeRatingsMapResponseDTO getEpisodeRatingsMap(UUID viewerId, UUID userId);
+    EpisodeRatingsMapResponseDTO getEpisodeRatingsMap(UUID viewerId, UUID userId, Integer page, Integer size);
 
 }
