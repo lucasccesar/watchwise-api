@@ -175,7 +175,9 @@ public class CalendarServiceImpl implements CalendarService {
             if (lookup instanceof CalendarScheduleLookup.Unavailable) {
                 boolean hasUsableSnapshot = snapshotsForKey.stream()
                         .anyMatch(snapshot -> Boolean.TRUE.equals(snapshot.getPresentInLastTmdbSnapshot()));
-                if (key.type() == ContentType.SERIES || !hasUsableSnapshot) {
+                boolean hasCompleteSeriesSnapshot = key.type() != ContentType.SERIES
+                        || completeness.completeSeriesKeys().contains(key);
+                if (!hasUsableSnapshot || !hasCompleteSeriesSnapshot) {
                     throw new TmdbUnavailableException("TMDB is currently unavailable");
                 }
                 continue;

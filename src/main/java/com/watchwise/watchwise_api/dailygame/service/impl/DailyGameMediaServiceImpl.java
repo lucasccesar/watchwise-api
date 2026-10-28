@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
@@ -29,15 +30,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -51,18 +46,18 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
     private final TmdbClient tmdbClient;
     private final DailyChallengeRepository challenges;
     private final Clock clock;
-    private final SecureRandom random = new SecureRandom();
-    private final Cache<String, Grant> grants = Caffeine.newBuilder()
-            .maximumSize(10_000).expireAfterWrite(GRANT_LIFETIME).build();
+    private final DailyGameMediaGrantCodec grants;
     private final Cache<MediaKey, DailyGameMediaResponseDTO> transformed = Caffeine.newBuilder()
             .maximumWeight(50L * 1024 * 1024)
             .weigher((MediaKey key, DailyGameMediaResponseDTO value) -> value.body().length)
             .expireAfterWrite(Duration.ofMinutes(10)).build();
 
-    public DailyGameMediaServiceImpl(TmdbClient tmdbClient, DailyChallengeRepository challenges, Clock clock) {
+    public DailyGameMediaServiceImpl(TmdbClient tmdbClient, DailyChallengeRepository challenges, Clock clock,
+                                     @Value("${app.jwt.secret}") String jwtSecret) {
         this.tmdbClient = tmdbClient;
         this.challenges = challenges;
         this.clock = clock;
+        this.grants = new DailyGameMediaGrantCodec(jwtSecret);
     }
 
     @Override
@@ -72,18 +67,15 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
             throw new BadRequestException("Incomplete daily game media grant");
         }
         String path = TmdbClient.normalizeImagePath(storedImagePath);
-        byte[] tokenBytes = new byte[32];
-        random.nextBytes(tokenBytes);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
-        grants.put(token, new Grant(userId, challengeId, slot, variant, path,
-                fingerprint(path), clock.instant().plus(GRANT_LIFETIME)));
+        String token = grants.encode(userId, challengeId, slot, variant, path,
+                clock.instant().plus(GRANT_LIFETIME));
         return new DailyGameMediaRefDTO(slot, "/games/play/media/" + token, variant,
                 variant == DailyGameImageVariant.ORIGINAL);
     }
 
     @Override
     public DailyGameMediaResponseDTO fetch(UUID userId, String grantToken) {
-        Grant grant = grantToken == null ? null : grants.getIfPresent(grantToken);
+        DailyGameMediaGrantCodec.Grant grant = grants.decode(grantToken);
         if (grant == null || !grant.userId().equals(userId) || !clock.instant().isBefore(grant.expiresAt())
                 || !matchesCurrentSource(grant)) {
             throw new NotFoundException("Daily game media grant not found");
@@ -93,7 +85,7 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
         return new DailyGameMediaResponseDTO(response.body().clone(), response.mediaType());
     }
 
-    private boolean matchesCurrentSource(Grant grant) {
+    private boolean matchesCurrentSource(DailyGameMediaGrantCodec.Grant grant) {
         DailyChallenge challenge = challenges.findById(grant.challengeId()).orElse(null);
         if (challenge == null) {
             return false;
@@ -105,7 +97,8 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
                     framePath(challenge.getDisplaySnapshot(), grant.slot());
         };
         try {
-            return fingerprint(TmdbClient.normalizeImagePath(currentPath)).equals(grant.sourceFingerprint());
+            return DailyGameMediaGrantCodec.fingerprint(TmdbClient.normalizeImagePath(currentPath))
+                    .equals(grant.sourceFingerprint());
         } catch (BadRequestException invalidSource) {
             return false;
         }
@@ -129,7 +122,7 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
         return path instanceof String text ? text : null;
     }
 
-    private DailyGameMediaResponseDTO load(Grant grant) {
+    private DailyGameMediaResponseDTO load(DailyGameMediaGrantCodec.Grant grant) {
         TmdbLookupResult<TmdbImageBytes> result = tmdbClient.getImageBytes(grant.sourcePath());
         if (result instanceof TmdbLookupResult.Unavailable<TmdbImageBytes>) {
             throw new TmdbUnavailableException("TMDB is temporarily unavailable");
@@ -243,17 +236,6 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
         }
     }
 
-    private static String fingerprint(String path) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(path.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    }
-
-    private record Grant(UUID userId, UUID challengeId, DailyGameMediaSlot slot, DailyGameImageVariant variant,
-                         String sourcePath, String sourceFingerprint, Instant expiresAt) {}
     private record MediaKey(UUID challengeId, DailyGameMediaSlot slot, DailyGameImageVariant variant,
                             String sourceFingerprint) {}
 }

@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
@@ -52,6 +53,15 @@ import java.util.stream.Collectors;
 
 @Service
 public class DailyGameServiceImpl implements DailyGameService {
+
+    private static final List<DailyGameImageVariant> BLURS = List.of(
+            DailyGameImageVariant.BLUR_26, DailyGameImageVariant.BLUR_20,
+            DailyGameImageVariant.BLUR_14, DailyGameImageVariant.BLUR_9,
+            DailyGameImageVariant.BLUR_5, DailyGameImageVariant.BLUR_2);
+    private static final DailyGameMediaSlot[] FRAME_SLOTS = {
+            DailyGameMediaSlot.FRAME_0, DailyGameMediaSlot.FRAME_1,
+            DailyGameMediaSlot.FRAME_2, DailyGameMediaSlot.FRAME_3,
+            DailyGameMediaSlot.FRAME_4, DailyGameMediaSlot.FRAME_5};
 
     private final DailyChallengeRepository challengeRepository;
     private final DailyChallengeHintRepository hintRepository;
@@ -122,7 +132,13 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .stream()
                 .collect(Collectors.groupingBy(hint -> hint.getDailyChallenge().getId()));
 
-        return responseAssembler.toTodayResponse(challengeDate, LocalDate.now(clock), challenges, results, hints);
+        List<DailyGameStateDTO> games = challenges.stream()
+                .map(challenge -> secureMedia(userId, challenge, results.get(challenge.getId()),
+                        responseAssembler.toState(challenge, results.get(challenge.getId()),
+                                hints.getOrDefault(challenge.getId(), List.of()),
+                                challengeDate.equals(LocalDate.now(clock)))))
+                .toList();
+        return new DailyGameTodayResponseDTO(challengeDate, games);
     }
 
     @Override
@@ -138,8 +154,8 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .findFirst()
                 .orElse(null);
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
-        return responseAssembler.toState(
-                challenge, result, hints, challengeDate.equals(LocalDate.now(clock)), majorRoles);
+        return secureMedia(userId, challenge, result, responseAssembler.toState(
+                challenge, result, hints, challengeDate.equals(LocalDate.now(clock)), majorRoles));
     }
 
     @Override
@@ -169,7 +185,8 @@ public class DailyGameServiceImpl implements DailyGameService {
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
             boolean majorRoles) {
-        return toRawAttemptResponse(mutateAttempt(userId, challengeDate, gameType, request, majorRoles, false), majorRoles);
+        return toRawAttemptResponse(userId,
+                mutateAttempt(userId, challengeDate, gameType, request, majorRoles, false), majorRoles);
     }
 
     MutationResult mutateAttempt(UUID userId, LocalDate challengeDate, DailyGameType gameType,
@@ -249,7 +266,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     @Override
     @Transactional
     public DailyGameAttemptResponseDTO giveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
-        return toRawAttemptResponse(mutateGiveUp(userId, challengeDate, gameType), true);
+        return toRawAttemptResponse(userId, mutateGiveUp(userId, challengeDate, gameType), true);
     }
 
     MutationResult mutateGiveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
@@ -277,12 +294,97 @@ public class DailyGameServiceImpl implements DailyGameService {
         });
     }
 
-    private DailyGameAttemptResponseDTO toRawAttemptResponse(MutationResult mutation, boolean majorRoles) {
+    private DailyGameAttemptResponseDTO toRawAttemptResponse(
+            UUID userId, MutationResult mutation, boolean majorRoles) {
         DailyChallenge challenge = mutation.challenge();
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
-        return responseAssembler.toAttemptResponse(challenge, mutation.result(), hints,
+        DailyGameAttemptResponseDTO response = responseAssembler.toAttemptResponse(
+                challenge, mutation.result(), hints,
                 mutation.feedback(), challenge.getChallengeDate().equals(LocalDate.now(clock)),
                 majorRoles, mutation.currentAttempt());
+        ProjectedMedia media = projectMedia(userId, challenge, mutation.result(),
+                response.imageUrl(), response.visibleImageUrls(), response.imageUrls(), response.answer());
+        return new DailyGameAttemptResponseDTO(response.gameType(), response.targetKind(), response.maxAttempts(),
+                response.attemptsUsed(), response.attemptsRemaining(), response.status(), media.imageUrl(),
+                response.hints(), response.score(), response.completedAt(), media.answer(), media.visibleImageUrls(),
+                media.imageUrls(), response.attempts(), response.currentAttempt(), response.filmography(),
+                response.guessFeedback(), response.shareOnCompletion(), response.sharedToFeed());
+    }
+
+    private DailyGameStateDTO secureMedia(
+            UUID userId, DailyChallenge challenge, UserDailyGameResult result, DailyGameStateDTO response) {
+        ProjectedMedia media = projectMedia(userId, challenge, result, response.imageUrl(),
+                response.visibleImageUrls(), response.imageUrls(), response.answer());
+        return new DailyGameStateDTO(response.gameType(), response.targetKind(), response.maxAttempts(),
+                response.attemptsUsed(), response.attemptsRemaining(), response.status(), media.imageUrl(),
+                response.hints(), response.score(), response.completedAt(), media.answer(), media.visibleImageUrls(),
+                media.imageUrls(), response.attempts(), response.filmography(), response.shareOnCompletion(),
+                response.sharedToFeed());
+    }
+
+    private ProjectedMedia projectMedia(
+            UUID userId, DailyChallenge challenge, UserDailyGameResult result, String imageUrl,
+            List<String> visibleImageUrls, List<String> imageUrls, DailyGameAnswerDTO answer) {
+        boolean terminal = result != null && result.getStatus() != DailyGameResultStatus.IN_PROGRESS;
+        int attemptsUsed = result == null ? 0 : result.getAttemptsUsed();
+        if (hidesImageUntilTerminal(challenge.getGameType()) && !terminal) {
+            return new ProjectedMedia(null, List.of(), null, null);
+        }
+
+        if (challenge.getGameType() != DailyGameType.EPISODE_BY_FRAME) {
+            DailyGameImageVariant variant = hidesImageUntilTerminal(challenge.getGameType()) || terminal
+                    ? DailyGameImageVariant.ORIGINAL
+                    : BLURS.get(Math.min(attemptsUsed, BLURS.size() - 1));
+            String clueUrl = mediaService.issue(userId, challenge.getId(), DailyGameMediaSlot.CLUE,
+                    variant, challenge.getImagePath()).url();
+            DailyGameAnswerDTO projectedAnswer = answer == null ? null : new DailyGameAnswerDTO(
+                    answer.targetKind(), answer.tmdbId(), answer.personTmdbId(), answer.seriesTmdbId(),
+                    answer.seasonNumber(), answer.episodeNumber(), answer.title(), clueUrl,
+                    answer.seriesName(), null, answer.seriesYear());
+            return new ProjectedMedia(imageUrl == null ? null : clueUrl,
+                    visibleImageUrls == null ? null : visibleImageUrls.isEmpty() ? List.of() : List.of(clueUrl),
+                    imageUrls, projectedAnswer);
+        }
+
+        List<String> paths = DailyGameFramePaths.select(challenge.getDisplaySnapshot());
+        if (paths.size() != FRAME_SLOTS.length) {
+            throw new DailyGamesUnavailableException();
+        }
+        int visibleCount = terminal ? paths.size() : Math.min(paths.size(), Math.max(1, attemptsUsed + 1));
+        List<String> frameUrls = new java.util.ArrayList<>(visibleCount);
+        for (int index = 0; index < visibleCount; index++) {
+            frameUrls.add(mediaService.issue(userId, challenge.getId(), FRAME_SLOTS[index],
+                    DailyGameImageVariant.ORIGINAL, paths.get(index)).url());
+        }
+        String currentUrl = imageUrl == null ? null : frameUrls.get(Math.min(attemptsUsed, frameUrls.size() - 1));
+        List<String> allImageUrls = imageUrls == null ? null : List.copyOf(frameUrls);
+        DailyGameAnswerDTO projectedAnswer = answer;
+        if (answer != null) {
+            String posterPath = answerSeriesPosterPath(challenge);
+            String posterUrl = posterPath == null ? null : mediaService.issue(userId, challenge.getId(),
+                    DailyGameMediaSlot.SERIES_POSTER, DailyGameImageVariant.ORIGINAL, posterPath).url();
+            projectedAnswer = new DailyGameAnswerDTO(answer.targetKind(), answer.tmdbId(), answer.personTmdbId(),
+                    answer.seriesTmdbId(), answer.seasonNumber(), answer.episodeNumber(), answer.title(),
+                    frameUrls.getFirst(), answer.seriesName(), posterUrl, answer.seriesYear());
+        }
+        return new ProjectedMedia(currentUrl, frameUrls, allImageUrls, projectedAnswer);
+    }
+
+    private boolean hidesImageUntilTerminal(DailyGameType gameType) {
+        return gameType == DailyGameType.MOVIE_BY_INFO
+                || gameType == DailyGameType.SERIES_BY_INFO
+                || gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+    }
+
+    private String answerSeriesPosterPath(DailyChallenge challenge) {
+        Object path = challenge.getAnswerSnapshot() == null
+                ? null : challenge.getAnswerSnapshot().get("seriesPosterPath");
+        return path instanceof String value && !value.isBlank() ? value : null;
+    }
+
+    private record ProjectedMedia(
+            String imageUrl, List<String> visibleImageUrls, List<String> imageUrls, DailyGameAnswerDTO answer) {
     }
 
     record MutationResult(DailyChallenge challenge, UserDailyGameResult result,

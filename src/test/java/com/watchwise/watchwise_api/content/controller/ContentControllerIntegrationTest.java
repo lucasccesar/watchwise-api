@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import jakarta.servlet.http.Cookie;
@@ -111,6 +112,9 @@ class ContentControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
     @MockitoBean
     private TmdbClient tmdbClient;
 
@@ -127,12 +131,21 @@ class ContentControllerIntegrationTest {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+        emailConfirmationSender.clear();
 
         MvcResult registerResult = mockMvc.perform(registerRequest("contentuser", "contentuser@email.com"))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
 
-        accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie registrationProof = registerResult.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        MvcResult confirmation = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor("contentuser@email.com") + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+
+        accessTokenCookie = confirmation.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         assertThat(csrfCookie).isNotNull();
@@ -975,8 +988,16 @@ class ContentControllerIntegrationTest {
     }
 
     private User registerUserEntity(String username, boolean isProfilePublic) throws Exception {
-        mockMvc.perform(registerRequest(username, username + "@email.com"))
-                .andExpect(status().isCreated());
+        String email = username + "@email.com";
+        MvcResult registration = mockMvc.perform(registerRequest(username, email))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        Cookie registrationProof = registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor(email) + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent());
         User user = userRepository.findByUsernameIgnoreCase(username).orElseThrow();
         user.setIsProfilePublic(isProfilePublic);
         return userRepository.save(user);

@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -30,9 +31,12 @@ import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -61,17 +65,23 @@ class ContentReleaseDateSnapshotServiceImplTest {
     @Mock
     private ExecutorService snapshotRefreshExecutor;
 
+    @Mock
+    private RefreshGenerationSequence refreshGenerationSequence;
+
     private BoundedTrackingExecutor snapshotResolutionExecutor;
     private ContentReleaseDateSnapshotServiceImpl snapshotService;
+    private final AtomicLong generation = new AtomicLong();
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         snapshotResolutionExecutor = new BoundedTrackingExecutor(4);
+        generation.set(0);
+        lenient().when(refreshGenerationSequence.next()).thenAnswer(invocation -> generation.incrementAndGet());
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
         snapshotService = new ContentReleaseDateSnapshotServiceImpl(
                 snapshotRepository, tmdbClient, newTransactionExecutor,
-                snapshotRefreshExecutor, snapshotResolutionExecutor);
+                snapshotRefreshExecutor, snapshotResolutionExecutor, refreshGenerationSequence);
     }
 
     @AfterEach
@@ -129,6 +139,96 @@ class ContentReleaseDateSnapshotServiceImplTest {
 
         assertThat(result.releaseDates()).containsEntry(entry.getId(), java.time.LocalDate.of(2027, 3, 10));
         verify(tmdbClient).getTvFullDetails("1396", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void expiredRefreshLeaseCannotPersistAfterNewClaimantCompletes() throws Exception {
+        UUID snapshotId = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(snapshotId)
+                .tmdbId("550")
+                .type(ContentType.MOVIE)
+                .region("BR")
+                .releaseDate(java.time.LocalDate.of(2027, 1, 1))
+                .status(ContentReleaseDateSnapshot.Status.FOUND)
+                .lastCheckedAt(now.minusDays(2))
+                .nextCheckAt(now.minusMinutes(1))
+                .build();
+        CountDownLatch staleFetchStarted = new CountDownLatch(1);
+        CountDownLatch releaseStaleFetch = new CountDownLatch(1);
+        when(snapshotRepository.findByNextCheckAtBefore(any())).thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshotId), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenAnswer(invocation -> {
+                    UUID claimId = invocation.getArgument(1);
+                    Long refreshGeneration = invocation.getArgument(2);
+                    LocalDateTime claimAt = invocation.getArgument(3);
+                    LocalDateTime leaseUntil = invocation.getArgument(4);
+                    synchronized (snapshot) {
+                        if (snapshot.getNextCheckAt().isAfter(claimAt)) {
+                            return 0;
+                        }
+                        snapshot.setNextCheckAt(leaseUntil);
+                        snapshot.setRefreshClaimId(claimId);
+                        snapshot.setRefreshGeneration(refreshGeneration);
+                        return 1;
+                    }
+                });
+        when(snapshotRepository.persistClaimed(eq(snapshotId), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    UUID claimId = invocation.getArgument(1);
+                    Long refreshGeneration = invocation.getArgument(2);
+                    LocalDateTime leaseUntil = invocation.getArgument(3);
+                    LocalDateTime persistAt = invocation.getArgument(4);
+                    synchronized (snapshot) {
+                        if (!claimId.equals(snapshot.getRefreshClaimId())
+                                || !refreshGeneration.equals(snapshot.getRefreshGeneration())
+                                || !leaseUntil.equals(snapshot.getNextCheckAt())
+                                || !snapshot.getNextCheckAt().isAfter(persistAt)) return 0;
+                        snapshot.update(invocation.getArgument(5), invocation.getArgument(6),
+                                invocation.getArgument(7), invocation.getArgument(8));
+                        snapshot.setRefreshClaimId(null);
+                        return 1;
+                    }
+                });
+        when(snapshotRepository.findById(snapshotId)).thenAnswer(invocation -> Optional.of(snapshot));
+        TmdbMovieFullDetails newerDetails = new TmdbMovieFullDetails("550", "Movie",
+                new TmdbMovieReleaseDates("550", List.of(new TmdbRegionReleaseDates("BR", List.of(
+                        new TmdbMovieReleaseDate(null, null, "2027-02-03", null, 3))))));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenAnswer(invocation -> {
+                    if (Thread.currentThread().getName().equals("stale-snapshot-refresh")) {
+                        staleFetchStarted.countDown();
+                        assertThat(releaseStaleFetch.await(5, TimeUnit.SECONDS)).isTrue();
+                        return new TmdbLookupResult.NotFound<>();
+                    }
+                    return new TmdbLookupResult.Found<>(newerDetails);
+                });
+        ContentReleaseDateSnapshotServiceImpl anotherInstance = new ContentReleaseDateSnapshotServiceImpl(
+                snapshotRepository, tmdbClient, newTransactionExecutor,
+                snapshotRefreshExecutor, snapshotResolutionExecutor, refreshGenerationSequence);
+        ExecutorService staleWorker = Executors.newSingleThreadExecutor(
+                task -> new Thread(task, "stale-snapshot-refresh"));
+        try {
+            Future<?> stale = staleWorker.submit(snapshotService::refreshDue);
+            assertThat(staleFetchStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            snapshot.setNextCheckAt(LocalDateTime.now().minusMinutes(1));
+
+            anotherInstance.refreshDue();
+            assertThat(snapshot.getStatus()).isEqualTo(ContentReleaseDateSnapshot.Status.FOUND);
+            assertThat(snapshot.getReleaseDate()).isEqualTo(java.time.LocalDate.of(2027, 2, 3));
+
+            releaseStaleFetch.countDown();
+            stale.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseStaleFetch.countDown();
+            staleWorker.shutdownNow();
+        }
+
+        assertThat(snapshot.getStatus()).isEqualTo(ContentReleaseDateSnapshot.Status.FOUND);
+        assertThat(snapshot.getReleaseDate()).isEqualTo(java.time.LocalDate.of(2027, 2, 3));
     }
 
     @Test
@@ -256,7 +356,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
-        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(1);
 
         var result = snapshotService.resolve(owner, List.of(entry));
@@ -283,13 +384,15 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
-        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(1);
 
         snapshotService.resolve(owner, List.of(entry));
 
         verify(snapshotRepository).claimDue(
-                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
+                eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class));
         verify(snapshotRefreshExecutor).execute(any(Runnable.class));
     }
 
@@ -310,7 +413,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
-        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(1);
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
@@ -382,7 +486,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
-        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(1);
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
@@ -396,7 +501,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         assertThat(result.releaseDates()).containsEntry(entry.getId(), java.time.LocalDate.of(2027, 2, 3));
         assertThat(snapshot.getReleaseDate()).isEqualTo(java.time.LocalDate.of(2027, 2, 3));
         verify(snapshotRepository).rescheduleClaimed(
-                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
+                eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class), any(LocalDateTime.class));
     }
 
     @Test
@@ -411,7 +517,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
                 .build();
         when(snapshotRepository.findByNextCheckAtBefore(any(LocalDateTime.class)))
                 .thenReturn(List.of(snapshot));
-        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(1);
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenThrow(new IllegalStateException("unexpected TMDB client failure"));
@@ -419,6 +526,7 @@ class ContentReleaseDateSnapshotServiceImplTest {
         snapshotService.refreshDue();
 
         verify(snapshotRepository).rescheduleClaimed(
-                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
+                eq(snapshot.getId()), any(UUID.class), any(Long.class),
+                any(LocalDateTime.class), any(LocalDateTime.class), any(LocalDateTime.class));
     }
 }

@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,6 +65,9 @@ class FollowedPersonControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
+    @Autowired
     private FollowedPersonRepository followedPersonRepository;
 
     @Autowired
@@ -93,17 +98,10 @@ class FollowedPersonControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username, boolean isProfilePublic) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username, isProfilePublic))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(accessTokenCookie).isNotNull();
-        assertThat(csrfCookie).isNotNull();
-
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessTokenCookie, csrfCookie);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", isProfilePublic);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private MockHttpServletRequestBuilder registerRequest(String username, boolean isProfilePublic) {

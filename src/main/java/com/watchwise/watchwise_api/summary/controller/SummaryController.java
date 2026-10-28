@@ -99,8 +99,15 @@ public class SummaryController {
         if (month == null) {
             return null;
         }
+        if (!month.matches("\\d{4}-\\d{2}")) {
+            throw new BadRequestException("month must be in YYYY-MM format");
+        }
         try {
-            return YearMonth.parse(month);
+            YearMonth parsedMonth = YearMonth.parse(month);
+            if (parsedMonth.getYear() < 1 || parsedMonth.getYear() > 9999) {
+                throw new BadRequestException("month must be in YYYY-MM format");
+            }
+            return parsedMonth;
         } catch (DateTimeException e) {
             throw new BadRequestException("month must be in YYYY-MM format");
         }

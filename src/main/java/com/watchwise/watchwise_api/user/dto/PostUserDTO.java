@@ -3,15 +3,16 @@ package com.watchwise.watchwise_api.user.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Pattern;
+import com.watchwise.watchwise_api.common.validation.Utf8ByteLength;
 import org.hibernate.validator.constraints.URL;
 
 public record PostUserDTO(
-        @Size(max=60, min = 3) @NotEmpty String username,
+        @Size(max=60, min = 3) @NotEmpty @Pattern(regexp = "^[^@]+$", message = "Username must not contain @") String username,
         @Size(max=120) @NotBlank String name,
-        @Size(max=60, min=11) @NotEmpty @Email String email,
-        @Size(max=255, min=8)
+        @Size(max=60) @NotEmpty @Email String email,
+        @Size(min=8) @Utf8ByteLength(max=72, message = "Password must not exceed 72 UTF-8 bytes")
         @NotEmpty
         @Pattern(
                 regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+$",

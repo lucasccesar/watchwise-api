@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeCalculator;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,6 +39,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Stream;
 
@@ -59,6 +61,7 @@ class SeriesRuntimeAggregateServiceImplTest {
     @Mock private TmdbClient tmdbClient;
     @Mock private ContentRepository contentRepository;
     @Mock private NewTransactionExecutor newTransactionExecutor;
+    @Mock private RefreshGenerationSequence refreshGenerationSequence;
 
     private ExecutorService seasonExecutor;
     private SeriesRuntimeAggregateServiceImpl service;
@@ -66,10 +69,14 @@ class SeriesRuntimeAggregateServiceImplTest {
     @BeforeEach
     void setUp() {
         seasonExecutor = Executors.newFixedThreadPool(2);
+        AtomicLong generations = new AtomicLong(1);
+        org.mockito.Mockito.lenient().when(refreshGenerationSequence.next())
+                .thenAnswer(invocation -> generations.getAndIncrement());
         org.mockito.Mockito.lenient().when(newTransactionExecutor.runInNewTransaction(any())).thenAnswer(invocation ->
                 ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         service = new SeriesRuntimeAggregateServiceImpl(
-                tmdbClient, contentRepository, new SeriesRuntimeCalculator(), seasonExecutor, newTransactionExecutor);
+                tmdbClient, contentRepository, new SeriesRuntimeCalculator(), seasonExecutor,
+                newTransactionExecutor, refreshGenerationSequence);
     }
 
     @AfterEach
@@ -187,6 +194,77 @@ class SeriesRuntimeAggregateServiceImplTest {
     }
 
     @Test
+    void ignoresEpisodeDetailsWhenTheParentObservationBecameStaleDuringFetch() throws Exception {
+        Content parentSnapshot = baselineContent(LocalDateTime.now().minusHours(1));
+        parentSnapshot.setRefreshGeneration(10L);
+        Content newerStored = baselineContent(LocalDateTime.now().minusHours(1));
+        newerStored.setId(parentSnapshot.getId());
+        newerStored.setTotalRuntimeMinutes(4_850);
+        newerStored.setRuntimeMinutesEpisodeCount(101);
+        newerStored.setRuntimeReportedEpisodeCount(101);
+        newerStored.setRefreshGeneration(10L);
+        java.util.concurrent.atomic.AtomicReference<Content> stored =
+                new java.util.concurrent.atomic.AtomicReference<>(newerStored);
+        CountDownLatch episodeFetchStarted = new CountDownLatch(1);
+        CountDownLatch releaseEpisodeFetch = new CountDownLatch(1);
+        org.mockito.Mockito.lenient().when(refreshGenerationSequence.next()).thenReturn(12L);
+        when(contentRepository.findByIdForUpdate(parentSnapshot.getId()))
+                .thenAnswer(invocation -> Optional.of(stored.get()));
+        when(tmdbClient.getEpisodeFullDetails("1399", 2, 1, "en-US")).thenAnswer(invocation -> {
+            episodeFetchStarted.countDown();
+            assertThat(releaseEpisodeFetch.await(5, TimeUnit.SECONDS)).isTrue();
+            return foundEpisode(50);
+        });
+
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> staleObservation = worker.submit(() ->
+                    service.incrementForNewEpisode(parentSnapshot, 2, 1, 102, 10L));
+            assertThat(episodeFetchStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Content newerObservation = baselineContent(LocalDateTime.now().minusHours(1));
+            newerObservation.setId(parentSnapshot.getId());
+            newerObservation.setTotalRuntimeMinutes(4_850);
+            newerObservation.setRuntimeMinutesEpisodeCount(101);
+            newerObservation.setRuntimeReportedEpisodeCount(101);
+            newerObservation.setRefreshGeneration(11L);
+            stored.set(newerObservation);
+
+            releaseEpisodeFetch.countDown();
+            staleObservation.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseEpisodeFetch.countDown();
+            worker.shutdownNow();
+        }
+
+        assertThat(stored.get().getTotalRuntimeMinutes()).isEqualTo(4_850);
+        assertThat(stored.get().getRuntimeReportedEpisodeCount()).isEqualTo(101);
+        assertThat(stored.get().getRefreshGeneration()).isEqualTo(11L);
+        verify(tmdbClient).getEpisodeFullDetails("1399", 2, 1, "en-US");
+        verify(contentRepository, never()).save(any());
+    }
+
+    @Test
+    void appliesConsecutiveEpisodeUpdatesWithTheSameParentGeneration() {
+        Content content = baselineContent(LocalDateTime.now().minusHours(1));
+        content.setRefreshGeneration(9L);
+        when(tmdbClient.getEpisodeFullDetails("1399", 2, 1, "en-US"))
+                .thenReturn(foundEpisode(50));
+        when(tmdbClient.getEpisodeFullDetails("1399", 2, 2, "en-US"))
+                .thenReturn(foundEpisode(60));
+        when(contentRepository.findByIdForUpdate(content.getId())).thenReturn(Optional.of(content));
+
+        service.incrementForNewEpisode(content, 2, 1, 101, 10L);
+        service.incrementForNewEpisode(content, 2, 2, 102, 10L);
+
+        assertThat(content.getTotalRuntimeMinutes()).isEqualTo(4_910);
+        assertThat(content.getRuntimeMinutesEpisodeCount()).isEqualTo(102);
+        assertThat(content.getRuntimeReportedEpisodeCount()).isEqualTo(102);
+        assertThat(content.getRefreshGeneration()).isEqualTo(10L);
+        verify(contentRepository, times(2)).save(content);
+    }
+
+    @Test
     @DisplayName("[incrementForNewEpisode] Uses The Locked Database Baseline Instead Of The Caller Snapshot")
     void shouldUseLockedDatabaseBaselineInsteadOfCallerSnapshot() {
         Content callerSnapshot = baselineContent(LocalDateTime.now().minusHours(1));
@@ -298,6 +376,52 @@ class SeriesRuntimeAggregateServiceImplTest {
             releaseSeasonFetch.countDown();
             callers.shutdownNow();
         }
+    }
+
+    @Test
+    void staleReconciliationWithSameEpisodeCountCannotOverwriteNewerRuntime() throws Exception {
+        Content initial = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        java.util.concurrent.atomic.AtomicReference<Content> stored = new java.util.concurrent.atomic.AtomicReference<>(initial);
+        CountDownLatch olderSeasonStarted = new CountDownLatch(1);
+        CountDownLatch releaseOlderSeason = new CountDownLatch(1);
+        when(contentRepository.findByIdForUpdate(initial.getId()))
+                .thenAnswer(invocation -> Optional.of(stored.get()));
+        doAnswer(invocation -> {
+            stored.set(invocation.getArgument(0));
+            return invocation.getArgument(0);
+        }).when(contentRepository).save(any());
+        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenAnswer(invocation -> {
+                    olderSeasonStarted.countDown();
+                    assertThat(releaseOlderSeason.await(5, TimeUnit.SECONDS)).isTrue();
+                    return found(season(1, 40, 50));
+                });
+        when(tmdbClient.getSeasonFullDetails("1399", 2, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(season(2, 60, 70)));
+        SeriesRuntimeAggregateServiceImpl anotherInstance = new SeriesRuntimeAggregateServiceImpl(
+                tmdbClient, contentRepository, new SeriesRuntimeCalculator(), seasonExecutor,
+                newTransactionExecutor, refreshGenerationSequence);
+
+        ExecutorService olderCall = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> stale = olderCall.submit(() -> service.reconcileBeforeFreezing(initial,
+                    new TmdbTvDetails("1399", "Returning Series", null, List.of(summary(1, 2)))));
+            assertThat(olderSeasonStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            anotherInstance.reconcileBeforeFreezing(initial,
+                    new TmdbTvDetails("1399", "Returning Series", null, List.of(summary(2, 2))));
+            assertThat(stored.get().getRuntimeReportedEpisodeCount()).isEqualTo(2);
+            assertThat(stored.get().getTotalRuntimeMinutes()).isEqualTo(130);
+
+            releaseOlderSeason.countDown();
+            stale.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseOlderSeason.countDown();
+            olderCall.shutdownNow();
+        }
+
+        assertThat(stored.get().getRuntimeReportedEpisodeCount()).isEqualTo(2);
+        assertThat(stored.get().getTotalRuntimeMinutes()).isEqualTo(130);
     }
 
     @Test

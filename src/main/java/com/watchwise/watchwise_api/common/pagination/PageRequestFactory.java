@@ -54,6 +54,11 @@ public class PageRequestFactory {
             queryPageSize = pageSize;
         }
 
+        long offset = (long) queryPageNumber * queryPageSize;
+        if (offset > Integer.MAX_VALUE) {
+            throw new BadRequestException("Requested page offset exceeds the supported maximum of 2147483647");
+        }
+
         if (sortBy == null) {
             return PageRequest.of(queryPageNumber, queryPageSize);
         }

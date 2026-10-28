@@ -8,9 +8,9 @@
   "properties": {
     "schemaVersion": {"const": 1},
     "title": {"$ref": "#/$defs/name"},
-    "description": {"type": "string"},
+    "description": {"type": "string", "maxLength": 5000},
     "coverImage": {"type": "string", "maxLength": 2048, "format": "uri", "pattern": "^https?://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]+)?(?:[/?#][^\\s]*)?$"},
-    "instructions": {"type": "string"},
+    "instructions": {"type": "string", "maxLength": 10000},
     "eligibility": {
       "type": "object", "additionalProperties": false,
       "required": ["start", "end"],
@@ -20,7 +20,7 @@
       },
       "$comment": "JSON Schema 2020-12 cannot compare sibling date strings. The Java parser enforces start <= end."
     },
-    "categories": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"oneOf": [
+    "categories": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"oneOf": [
       {"$ref": "#/$defs/movieCategory"}, {"$ref": "#/$defs/seriesCategory"},
       {"$ref": "#/$defs/episodeCategory"}, {"$ref": "#/$defs/personCategory"}
     ]}}
@@ -35,29 +35,29 @@
     "mediaCategory": {
       "type": "object", "additionalProperties": false, "required": ["name", "type"],
       "properties": {
-        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string", "maxLength": 5000},
         "type": {"type": "string"}, "group": {"$ref": "#/$defs/group"},
-        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 100,
           "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/mediaNominee"}]}}
       }
     },
     "episodeCategory": {
       "type": "object", "additionalProperties": false, "required": ["name", "type"],
       "properties": {
-        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string", "maxLength": 5000},
         "type": {"type": "string", "pattern": "^\\s*[eE][pP][iI][sS][oO][dD][eE]\\s*$"},
         "group": {"$ref": "#/$defs/group"},
-        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 100,
           "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/episodeNominee"}]}}
       }
     },
     "personCategory": {
       "type": "object", "additionalProperties": false, "required": ["name", "type"],
       "properties": {
-        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string"},
+        "name": {"$ref": "#/$defs/name"}, "description": {"type": "string", "maxLength": 5000},
         "type": {"type": "string", "pattern": "^\\s*[pP][eE][rR][sS][oO][nN]\\s*$"},
         "group": {"$ref": "#/$defs/group"},
-        "nominees": {"type": "array", "minItems": 1, "maxItems": 500,
+        "nominees": {"type": "array", "minItems": 1, "maxItems": 100,
           "items": {"oneOf": [{"$ref": "#/$defs/query"}, {"$ref": "#/$defs/personNominee"}]}}
       }
     },
@@ -97,5 +97,5 @@
           "episodeNumber": {"type": "integer", "minimum": 1, "maximum": 2147483647}}}
     ]}
   },
-  "$comment": "The parser also enforces total nominees <= 5000, upload byte/depth limits, duplicate keys, trailing tokens, and chronological eligibility."
+  "$comment": "The parser also enforces total options <= 200, upload byte/depth limits, duplicate keys, trailing tokens, and chronological eligibility."
 }

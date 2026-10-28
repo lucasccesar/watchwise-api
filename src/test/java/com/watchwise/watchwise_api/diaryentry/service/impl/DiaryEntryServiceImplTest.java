@@ -1003,6 +1003,21 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDiaryEntries] Should Reject Year Above 9999")
+    void shouldRejectYearAboveSupportedMaximum() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdWithFilters(
+                any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(Page.empty());
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, 10_000, 1, 10,
+                null, null, null, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("year must be between 1 and 9999");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Use Default Page - When Page Number Is Null")
     void shouldUseDefaultPageWhenPageNumberIsNull() {
         stubEmptyDiaryPage();

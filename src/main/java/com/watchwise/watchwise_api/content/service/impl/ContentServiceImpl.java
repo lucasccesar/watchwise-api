@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.PreparedContentReference;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -48,20 +49,36 @@ public class ContentServiceImpl implements ContentService {
 
     @Override
     public ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO, boolean trustedRuntimeMinutes) {
+        return persistPreparedReference(prepareReference(contentRefCreationDTO, trustedRuntimeMinutes), trustedRuntimeMinutes);
+    }
+
+    @Override
+    public PreparedContentReference prepareReference(ContentRefCreationDTO contentRefCreationDTO, boolean trustedRuntimeMinutes) {
         ContentRefCreationDTO normalized = normalize(contentRefCreationDTO);
         validate(normalized, trustedRuntimeMinutes);
 
         Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
             ContentRefCreationDTO enriched = backfillMissingTmdbMetadata(normalized, existing.get());
-            return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), enriched, trustedRuntimeMinutes));
+            return new PreparedContentReference(enriched, null);
         }
 
         ResolvedContentReference resolved = resolveNewContentMetadata(normalized, trustedRuntimeMinutes);
-        if (resolved.parentSeries() != null) {
-            ensureSeriesReference(resolved.parentSeries());
+        return new PreparedContentReference(resolved.content(), resolved.parentSeries());
+    }
+
+    @Override
+    public ContentRefDTO persistPreparedReference(PreparedContentReference prepared, boolean trustedRuntimeMinutes) {
+        ContentRefCreationDTO enriched = normalize(prepared.content());
+        validate(new ContentRefCreationDTO(enriched.tmdbId(), enriched.type(), enriched.seriesTmdbId(),
+                enriched.seasonNumber(), enriched.episodeNumber(), enriched.isSeasonFinale(), enriched.isSeriesFinale()), false);
+        if (prepared.parentSeries() != null) {
+            ensureSeriesReference(prepared.parentSeries());
         }
-        ContentRefCreationDTO enriched = resolved.content();
+        Optional<Content> existing = findExisting(enriched);
+        if (existing.isPresent()) {
+            return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), enriched, trustedRuntimeMinutes));
+        }
 
         try {
             Content saved = newTransactionExecutor.runInNewTransaction(() -> {

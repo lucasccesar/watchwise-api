@@ -62,6 +62,7 @@ class ReportControllerIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired UserRepository userRepository;
+    @Autowired com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender emailConfirmationSender;
     @Autowired ReportCaseRepository reportCaseRepository;
     @Autowired ReportSubmissionRepository reportSubmissionRepository;
     @Autowired CommentRepository commentRepository;
@@ -192,12 +193,10 @@ class ReportControllerIntegrationTest {
     private record Registered(UUID id, Cookie access, Cookie csrf) { }
 
     private Registered register(String username, boolean isPublic) throws Exception {
-        MvcResult result = mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
-                {"username":"%s","name":"%s","email":"%s@email.com","password":"Password123","isProfilePublic":%s}
-                """.formatted(username, username, username, isPublic))).andExpect(status().isCreated()).andReturn();
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new Registered(user.getId(), result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE),
-                result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE));
+        var user = com.watchwise.watchwise_api.user.service.TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", isPublic);
+        return new Registered(user.id(), user.accessToken(), user.csrfToken());
     }
 
     private MockHttpServletRequestBuilder reportRequest(Registered reporter, String json) {

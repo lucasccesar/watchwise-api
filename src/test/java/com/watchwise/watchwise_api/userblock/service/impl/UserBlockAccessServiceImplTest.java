@@ -19,6 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class UserBlockAccessServiceImplTest {
@@ -80,6 +82,27 @@ class UserBlockAccessServiceImplTest {
                 .isInstanceOf(ForbiddenException.class);
 
         verify(advisoryLock).lock(UserPairLockIdentity.of(actorId, targetId));
+    }
+
+    @Test void shouldLockBeforeCheckingContentVisibilityAndHideBlockedContent() {
+        UUID actorId = UUID.randomUUID();
+        UUID creatorId = UUID.randomUUID();
+        when(userBlockRepository.existsEitherDirection(actorId, creatorId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.lockAndAssertContentVisible(actorId, creatorId))
+                .isInstanceOf(NotFoundException.class);
+
+        var order = inOrder(advisoryLock, userBlockRepository);
+        order.verify(advisoryLock).lock(UserPairLockIdentity.of(actorId, creatorId));
+        order.verify(userBlockRepository).existsEitherDirection(actorId, creatorId);
+    }
+
+    @Test void shouldAllowSelfWithoutTakingAPairLock() {
+        UUID actorId = UUID.randomUUID();
+
+        service.lockAndAssertContentVisible(actorId, actorId);
+
+        verifyNoInteractions(advisoryLock, userBlockRepository);
     }
 
     private static UserBlockRepository.PairDirection direction(UUID blockerId, UUID blockedId) {

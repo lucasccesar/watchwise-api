@@ -22,7 +22,7 @@ public record ContentRefCreationDTO(
         Boolean isSeriesFinale,
         @Positive @Max(1200) Integer runtimeMinutes,
         @Valid List<@NotBlank @Size(max = 50) String> genres,
-        @Min(1870) @Max(2100) Integer releaseYear,
+        @Min(1) @Max(9999) Integer releaseYear,
         @Valid List<@NotBlank @Size(min = 2, max = 2) String> countries
 ) {
     public ContentRefCreationDTO(String tmdbId, ContentType type, String seriesTmdbId, Integer seasonNumber,

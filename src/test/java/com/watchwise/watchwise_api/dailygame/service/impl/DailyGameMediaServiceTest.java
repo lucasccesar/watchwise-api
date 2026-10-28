@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class DailyGameMediaServiceTest {
+    private static final String TEST_JWT_SECRET = "daily-game-media-test-jwt-secret-32-bytes-minimum";
     private final UUID user = UUID.randomUUID();
     private final UUID challenge = UUID.randomUUID();
     private final TmdbClient tmdb = mock(TmdbClient.class);
@@ -48,7 +49,7 @@ class DailyGameMediaServiceTest {
     @BeforeEach
     void setUp() {
         when(challenges.findById(challenge)).thenAnswer(ignored -> Optional.ofNullable(currentChallenge.get()));
-        service = new DailyGameMediaServiceImpl(tmdb, challenges, clock);
+        service = new DailyGameMediaServiceImpl(tmdb, challenges, clock, TEST_JWT_SECRET);
     }
 
     @Test
@@ -63,6 +64,53 @@ class DailyGameMediaServiceTest {
         byte[] transformed = service.fetch(user, token(ref)).body();
         assertNotEquals(java.util.Arrays.toString(source), java.util.Arrays.toString(transformed));
         assertNotNull(ImageIO.read(new java.io.ByteArrayInputStream(transformed)));
+    }
+
+    @Test
+    void grantIssuedByOneInstanceCanBeFetchedByAnother() throws Exception {
+        byte[] source = image(80, 80, "png");
+        when(tmdb.getImageBytes("/clue.png")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
+        DailyGameMediaRefDTO ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_9, "/clue.png");
+        DailyGameMediaServiceImpl anotherInstance = new DailyGameMediaServiceImpl(
+                tmdb, challenges, clock, TEST_JWT_SECRET);
+
+        assertNotNull(anotherInstance.fetch(user, token(ref)));
+        verify(tmdb).getImageBytes("/clue.png");
+    }
+
+    @Test
+    void grantDoesNotExposeTheOriginalImagePath() {
+        String originalPath = "/t/p/original/private-answer-poster.png";
+
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, originalPath);
+
+        assertFalse(ref.url().contains(originalPath));
+        assertFalse(ref.url().contains("private-answer-poster"));
+    }
+
+    @Test
+    void identicalGrantsReceiveDifferentTokensAndOversizedPathsAreRejected() {
+        var first = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/same.png");
+        var second = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/same.png");
+
+        assertNotEquals(token(first), token(second));
+        assertThrows(BadRequestException.class, () -> service.issue(user, challenge,
+                DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/" + "a".repeat(2048)));
+    }
+
+    @Test
+    void alteredAndMalformedGrantTokensHaveTheSameNotFoundBehavior() {
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.ORIGINAL, "/clue.png");
+        String token = token(ref);
+        int changedIndex = token.length() / 2;
+        char replacement = token.charAt(changedIndex) == 'A' ? 'B' : 'A';
+        String altered = token.substring(0, changedIndex) + replacement + token.substring(changedIndex + 1);
+
+        assertThrows(NotFoundException.class, () -> service.fetch(user, altered));
+        assertThrows(NotFoundException.class, () -> service.fetch(user, "not-a-valid-grant"));
+        assertThrows(NotFoundException.class, () -> service.fetch(user, "A".repeat(4097)));
+        verifyNoInteractions(tmdb);
     }
 
     @Test

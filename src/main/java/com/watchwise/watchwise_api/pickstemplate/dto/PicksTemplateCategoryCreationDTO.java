@@ -11,8 +11,8 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 public record PicksTemplateCategoryCreationDTO(@NotBlank @Size(max = 120) String name,
-                                                String description, @NotNull PickCategoryGroup group,
+                                                @Size(max = 5000) String description, @NotNull PickCategoryGroup group,
                                                 @NotNull @Positive Integer displayOrder,
                                                 @NotNull PickAllowedType allowedType,
                                                 @NotNull PickCategoryOptionMode optionMode,
-                                                List<@NotNull @Valid PicksTemplateOptionCreationDTO> options) { }
+                                                @Size(max = 100) List<@NotNull @Valid PicksTemplateOptionCreationDTO> options) { }

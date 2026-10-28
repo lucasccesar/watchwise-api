@@ -92,4 +92,8 @@ public class Content {
     @Column(name = "updated_at", nullable = false)
     @Setter
     private LocalDateTime updatedAt;
+
+    @Column(name = "refresh_generation", nullable = false)
+    @Setter
+    private long refreshGeneration;
 }

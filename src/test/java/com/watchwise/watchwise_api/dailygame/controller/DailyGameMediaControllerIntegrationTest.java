@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
 import com.watchwise.watchwise_api.dailygame.service.impl.DailyGameMediaServiceImpl;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,7 @@ class DailyGameMediaControllerIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
+    @Autowired private TestEmailConfirmationSender emailConfirmationSender;
     @Autowired private DailyChallengeRepository challengeRepository;
     @Autowired private DailyGameMediaService realMediaService;
     @MockitoBean private TmdbClient tmdbClient;
@@ -77,6 +79,7 @@ class DailyGameMediaControllerIntegrationTest {
     @AfterEach void clear() {
         SecurityContextHolder.clearContext();
         challengeRepository.deleteAll();
+        emailConfirmationSender.clear();
     }
 
     @Test
@@ -105,7 +108,8 @@ class DailyGameMediaControllerIntegrationTest {
         DailyChallengeRepository challenges = mock(DailyChallengeRepository.class);
         when(challenges.findById(challengeId)).thenReturn(Optional.of(
                 DailyChallenge.builder().id(challengeId).imagePath("/clue.png").build()));
-        var service = new DailyGameMediaServiceImpl(tmdbClient, challenges, Clock.systemUTC());
+        var service = new DailyGameMediaServiceImpl(tmdbClient, challenges, Clock.systemUTC(),
+                "test-daily-game-media-jwt-key-at-least-32-bytes");
         String url = service.issue(user, challengeId, DailyGameMediaSlot.CLUE,
                 DailyGameImageVariant.BLUR_26, "/clue.png").url();
         var mvc = MockMvcBuilders.standaloneSetup(new DailyGameMediaController(
@@ -157,8 +161,17 @@ class DailyGameMediaControllerIntegrationTest {
                         .content("""
                                 {"username":"%s","name":"%s","email":"%s@email.com","password":"Password123"}
                                 """.formatted(username, username, username)))
-                .andExpect(status().isCreated()).andReturn();
-        return result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+                .andExpect(status().isAccepted()).andReturn();
+        String email = username + "@email.com";
+        Cookie registrationProof = result.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        org.assertj.core.api.Assertions.assertThat(registrationProof).isNotNull();
+        var confirmation = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor(email) + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+        return confirmation.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
     }
 
     private static byte[] png() throws Exception {

@@ -12,10 +12,14 @@ import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
+import com.watchwise.watchwise_api.user.dto.ConfirmEmailDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthLoginDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
+import com.watchwise.watchwise_api.user.dto.ResendEmailConfirmationDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
+import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import com.watchwise.watchwise_api.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -54,6 +58,7 @@ public class AuthController {
     private final GoogleTokenVerifier googleTokenVerifier;
     private final AttemptLockout attemptLockout;
     private final RequestThrottler requestThrottler;
+    private final EmailConfirmationService emailConfirmationService;
 
     @Value("${app.rate-limit.login.max-attempts}")
     private int loginMaxAttempts;
@@ -83,7 +88,7 @@ public class AuthController {
     private long refreshWindowMinutes;
 
     @PostMapping("/register")
-    public ResponseEntity<UserResponseDTO> register(
+    public ResponseEntity<Void> register(
             @Valid @RequestBody PostUserDTO postUserDTO,
             HttpServletRequest request,
             HttpServletResponse response
@@ -94,13 +99,46 @@ public class AuthController {
 
         requestThrottler.checkAllowed(throttleKey("register", request), registerMaxRequests, Duration.ofMinutes(registerWindowMinutes));
 
-        UserResponseDTO user = userService.saveNewUser(postUserDTO);
+        String registrationProof = userService.startRegistration(postUserDTO);
+        cookieUtil.addCookie(response, cookieUtil.buildRegistrationProofCookie(registrationProof));
 
-        rotateCsrfToken(request, response);
-        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
-        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+        return ResponseEntity.accepted().build();
+    }
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(user);
+    @PostMapping("/confirm-email")
+    public ResponseEntity<Void> confirmEmail(
+            @Valid @RequestBody ConfirmEmailDTO request,
+            @CookieValue(name = CookieUtil.REGISTRATION_PROOF_COOKIE, required = false) String registrationProof,
+            HttpServletRequest servletRequest,
+            HttpServletResponse response
+    ) {
+        EmailConfirmationService.ConfirmationResult result =
+                emailConfirmationService.confirm(request.token(), registrationProof);
+        cookieUtil.addCookie(response, cookieUtil.clearRegistrationProofCookie());
+        if (result.registrationConfirmation()) {
+            UserResponseDTO user = userService.getCurrentUser(result.userId());
+            long authVersion = userService.getAuthVersion(user.id());
+            rotateCsrfToken(servletRequest, response);
+            cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authVersion));
+            cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authVersion));
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/confirm-email/resend")
+    public ResponseEntity<Void> resendEmailConfirmation(
+            @Valid @RequestBody ResendEmailConfirmationDTO confirmation,
+            @CookieValue(name = CookieUtil.REGISTRATION_PROOF_COOKIE, required = false) String registrationProof,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        requestThrottler.checkAllowed(throttleKey("email-confirmation", request),
+                registerMaxRequests, Duration.ofMinutes(registerWindowMinutes));
+        boolean registrationProofRenewalAllowed = emailConfirmationService.resend(
+                confirmation.email(), registrationProof);
+        if (registrationProofRenewalAllowed) {
+            cookieUtil.addCookie(response, cookieUtil.buildRegistrationProofCookie(registrationProof));
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/login")
@@ -118,18 +156,19 @@ public class AuthController {
         String lockoutKey = buildLockoutKey(loginUserDTO.identifier());
         attemptLockout.checkAllowed(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginWindowMinutes));
 
-        UserResponseDTO user;
+        AuthenticatedUser authenticatedUser;
         try {
-            user = userService.login(loginUserDTO);
+            authenticatedUser = userService.loginForAuthentication(loginUserDTO);
         } catch (UnauthorizedException e) {
             attemptLockout.recordFailure(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginBlockMinutes));
             throw e;
         }
         attemptLockout.recordSuccess(lockoutKey);
+        UserResponseDTO user = authenticatedUser.user();
 
         rotateCsrfToken(request, response);
-        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
-        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+        cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authenticatedUser.authVersion()));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authenticatedUser.authVersion()));
 
         return ResponseEntity.ok(user);
     }
@@ -151,16 +190,17 @@ public class AuthController {
             case GOOGLE -> googleTokenVerifier.verify(oAuthLoginDTO.token());
         };
 
-        Optional<UserResponseDTO> existingUser = userService.findByEmail(verifiedEmail);
+        Optional<AuthenticatedUser> existingUser = userService.findByEmailForAuthentication(verifiedEmail);
         if (existingUser.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new OAuthAccountNotFoundDTO(verifiedEmail));
         }
 
-        UserResponseDTO user = existingUser.get();
+        AuthenticatedUser authenticatedUser = existingUser.get();
+        UserResponseDTO user = authenticatedUser.user();
 
         rotateCsrfToken(request, response);
-        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
-        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+        cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authenticatedUser.authVersion()));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authenticatedUser.authVersion()));
 
         return ResponseEntity.ok(user);
     }
@@ -234,13 +274,13 @@ public class AuthController {
         }
     }
 
-    private ResponseCookie buildAccessTokenCookie(UserResponseDTO user) {
-        String token = jwtService.generateToken(user.id(), TokenType.ACCESS);
+    private ResponseCookie buildAccessTokenCookie(UUID userId, long authVersion) {
+        String token = jwtService.generateToken(userId, authVersion, TokenType.ACCESS);
         return cookieUtil.buildAccessTokenCookie(token);
     }
 
-    private ResponseCookie buildRefreshTokenCookie(UserResponseDTO user) {
-        String token = refreshTokenService.issueRefreshToken(user.id());
+    private ResponseCookie buildRefreshTokenCookie(UUID userId, long authVersion) {
+        String token = refreshTokenService.issueRefreshToken(userId, authVersion);
         return cookieUtil.buildRefreshTokenCookie(token);
     }
 }

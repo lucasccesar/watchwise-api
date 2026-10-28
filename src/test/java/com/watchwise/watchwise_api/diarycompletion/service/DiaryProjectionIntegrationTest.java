@@ -18,6 +18,8 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,6 +77,9 @@ class DiaryProjectionIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Autowired
     private ContentRepository contentRepository;
@@ -312,22 +317,10 @@ class DiaryProjectionIntegrationTest {
 
     private RegisteredUser registerUser() throws Exception {
         String username = "projection" + UUID.randomUUID().toString().replace("-", "");
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "username": "%s",
-                                  "name": "Diary Projection",
-                                  "email": "%s@example.com",
-                                  "password": "Password123",
-                                  "isProfilePublic": true
-                                }
-                                """.formatted(username, username)))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, "Diary Projection", username + "@example.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken());
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken) {

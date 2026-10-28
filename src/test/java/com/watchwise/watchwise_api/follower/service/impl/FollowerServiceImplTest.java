@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
 import org.hibernate.exception.ConstraintViolationException;
@@ -34,6 +35,7 @@ import org.springframework.data.domain.PageRequest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,6 +52,9 @@ class FollowerServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private UserBlockRepository userBlockRepository;
 
     @Mock
     private UserMapper userMapper;
@@ -379,6 +384,27 @@ class FollowerServiceImplTest {
     }
 
     @Test
+    void shouldHideBiographyForBlockedFollowerInAnotherUsersFollowersPage() {
+        UUID viewerId = UUID.randomUUID();
+        followedUser.setIsProfilePublic(true);
+        Follower follow = buildFollow(FollowStatus.ACCEPTED);
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(follow)));
+        when(userMapper.userToPublicUserDto(followerUser)).thenReturn(publicUserDTO);
+        when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(viewerId, List.of(followerId)))
+                .thenReturn(Set.of(followerId));
+
+        Page<PublicUserDTO> result = followerService.getFollowers(viewerId, followedId, 1, 10);
+
+        assertThat(result.getContent()).singleElement().satisfies(user -> {
+            assertThat(user.id()).isEqualTo(followerId);
+            assertThat(user.description()).isNull();
+            assertThat(user.profilePicture()).isEqualTo(publicUserDTO.profilePicture());
+        });
+    }
+
+    @Test
     @DisplayName("[getFollowers] Should Return Empty Page - When Target Has No Accepted Followers")
     void shouldReturnEmptyPageWhenTargetHasNoAcceptedFollowers() {
         followedUser.setIsProfilePublic(true);
@@ -578,6 +604,33 @@ class FollowerServiceImplTest {
         Page<PublicUserDTO> result = followerService.getFollowing(UUID.randomUUID(), followedId, 1, 10);
 
         assertThat(result.getContent()).containsExactly(followedPublicDto);
+    }
+
+    @Test
+    void shouldHideBiographyForBlockedFollowedUserInAnotherUsersFollowingPage() {
+        UUID viewerId = UUID.randomUUID();
+        followedUser.setIsProfilePublic(true);
+        Follower follow = Follower.builder()
+                .id(UUID.randomUUID())
+                .follower(followedUser)
+                .followed(followerUser)
+                .status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(follow)));
+        when(userMapper.userToPublicUserDto(followerUser)).thenReturn(publicUserDTO);
+        when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(viewerId, List.of(followerId)))
+                .thenReturn(Set.of(followerId));
+
+        Page<PublicUserDTO> result = followerService.getFollowing(viewerId, followedId, 1, 10);
+
+        assertThat(result.getContent()).singleElement().satisfies(user -> {
+            assertThat(user.id()).isEqualTo(followerId);
+            assertThat(user.description()).isNull();
+            assertThat(user.profilePicture()).isEqualTo(publicUserDTO.profilePicture());
+        });
     }
 
     @Test

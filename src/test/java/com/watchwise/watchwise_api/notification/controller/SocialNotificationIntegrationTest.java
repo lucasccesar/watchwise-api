@@ -17,6 +17,8 @@ import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -66,6 +68,9 @@ class SocialNotificationIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Autowired
     private ContentRepository contentRepository;
@@ -216,28 +221,10 @@ class SocialNotificationIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        String body = """
-                {
-                    "username": "%s",
-                    "name": "%s",
-                    "email": "%s@email.com",
-                    "password": "Password123"
-                }
-                """.formatted(username, username, username);
-
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(accessTokenCookie).isNotNull();
-        assertThat(csrfCookie).isNotNull();
-
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessTokenCookie, csrfCookie);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private DiaryEntry persistReview(UUID ownerId) {

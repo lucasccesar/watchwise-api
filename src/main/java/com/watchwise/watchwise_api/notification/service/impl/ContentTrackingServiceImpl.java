@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -55,6 +57,8 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
     private final ContentChangeDetector contentChangeDetector;
     private final SeriesRuntimeAggregateService seriesRuntimeAggregateService;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final AdvisoryLock advisoryLock;
+    private final RefreshGenerationSequence refreshGenerationSequence;
 
     @Override
     public void trackContentChanges() {
@@ -109,42 +113,55 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
     }
 
     private void processMovie(Content content) {
+        long refreshGeneration = refreshGenerationSequence.next();
         Optional<TmdbMovieDetails> fresh = tmdbClient.getMovieDetails(content.getTmdbId());
         if (fresh.isEmpty()) {
             return;
         }
 
         newTransactionExecutor.runInNewTransaction(() -> {
+            advisoryLock.lock(trackingLockId(content.getId()));
             TrackedContentState previous = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
+            if (isStale(previous, refreshGeneration)) {
+                return null;
+            }
             Optional<ContentChangeEvent> event = contentChangeDetector.detectMovieChange(previous, fresh.get(), LocalDate.now());
 
             event.ifPresent(e -> notifyWatchers(content, e));
-            saveMovieState(content, previous, fresh.get());
+            saveMovieState(content, previous, fresh.get(), refreshGeneration);
             return null;
         });
     }
 
     private void processSeries(Content content) {
+        long refreshGeneration = refreshGenerationSequence.next();
         Optional<TmdbTvDetails> fresh = tmdbClient.getTvDetails(content.getTmdbId());
         if (fresh.isEmpty()) {
             return;
         }
 
         SeriesTrackingResult trackingResult = newTransactionExecutor.runInNewTransaction(() -> {
+            advisoryLock.lock(trackingLockId(content.getId()));
             TrackedContentState state = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
             String status = state != null ? state.getLastKnownStatus() : null;
+            if (isStale(state, refreshGeneration)) {
+                return new SeriesTrackingResult(status, List.of(), false);
+            }
             List<ContentChangeEvent> events = deduplicateEpisodeEvents(
                     contentChangeDetector.detectTvChange(state, fresh.get(), LocalDate.now()));
 
             events.forEach(e -> notifyWatchers(content, e));
-            saveSeriesState(content, state, fresh.get());
-            return new SeriesTrackingResult(status, events);
+            saveSeriesState(content, state, fresh.get(), refreshGeneration);
+            return new SeriesTrackingResult(status, events, true);
         });
 
+        if (!trackingResult.applied()) {
+            return;
+        }
         if (isTransitioningToTerminal(trackingResult.previousStatus(), fresh.get().status())) {
-            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh.get());
+            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh.get(), refreshGeneration);
         } else {
-            synchronizeRuntimeForNewEpisodes(content, fresh.get(), trackingResult.events());
+            synchronizeRuntimeForNewEpisodes(content, fresh.get(), trackingResult.events(), refreshGeneration);
         }
     }
 
@@ -153,13 +170,13 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
     }
 
     private void synchronizeRuntimeForNewEpisodes(Content content, TmdbTvDetails fresh,
-            List<ContentChangeEvent> events) {
+            List<ContentChangeEvent> events, long refreshGeneration) {
         List<ContentChangeEvent> newEpisodeEvents = events.stream()
                 .filter(event -> event.type() == NotificationType.NEW_EPISODE)
                 .toList();
 
         if (!hasRuntimeBaseline(content)) {
-            seriesRuntimeAggregateService.initializeIfMissing(content, fresh);
+            seriesRuntimeAggregateService.initializeIfMissing(content, fresh, refreshGeneration);
             return;
         }
 
@@ -167,7 +184,7 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         if (newEpisodeEvents.isEmpty()) {
             if (reportedEpisodeCount != null
                     && !Objects.equals(reportedEpisodeCount, content.getRuntimeReportedEpisodeCount())) {
-                seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh);
+                seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh, refreshGeneration);
             }
             return;
         }
@@ -175,12 +192,12 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         boolean requiresFullReconciliation = reportedEpisodeCount == null
                 || newEpisodeEvents.stream().anyMatch(event -> event.seasonNumber() == null || event.episodeNumber() == null);
         if (requiresFullReconciliation) {
-            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh);
+            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh, refreshGeneration);
             return;
         }
 
         newEpisodeEvents.forEach(event -> seriesRuntimeAggregateService.incrementForNewEpisode(
-                content, event.seasonNumber(), event.episodeNumber(), reportedEpisodeCount));
+                content, event.seasonNumber(), event.episodeNumber(), reportedEpisodeCount, refreshGeneration));
     }
 
     private List<ContentChangeEvent> deduplicateEpisodeEvents(List<ContentChangeEvent> events) {
@@ -215,25 +232,29 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                 && content.getRuntimeAggregateVerifiedAt() != null;
     }
 
-    private record SeriesTrackingResult(String previousStatus, List<ContentChangeEvent> events) {
+    private record SeriesTrackingResult(String previousStatus, List<ContentChangeEvent> events, boolean applied) {
     }
 
     @Override
     public void reactivateAfterRevival(Content content, String freshStatus) {
+        reactivateAfterRevival(content, freshStatus, refreshGenerationSequence.next());
+    }
+
+    @Override
+    public void reactivateAfterRevival(Content content, String freshStatus, long refreshGeneration) {
         if (isTerminal(ContentType.SERIES, freshStatus)) {
             return;
         }
-        String previousStatus = trackedContentStateRepository.findLastKnownStatusByContentId(content.getId()).orElse(null);
-        if (!isTerminal(ContentType.SERIES, previousStatus)) {
-            return;
-        }
         newTransactionExecutor.runInNewTransaction(() -> {
+            advisoryLock.lock(trackingLockId(content.getId()));
             TrackedContentState state = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
-            if (state == null) {
+            if (state == null || isStale(state, refreshGeneration)
+                    || !isTerminal(ContentType.SERIES, state.getLastKnownStatus())) {
                 return null;
             }
             state.setLastKnownStatus(freshStatus);
             state.setLastCheckedAt(LocalDateTime.now());
+            state.setRefreshGeneration(refreshGeneration);
             trackedContentStateRepository.save(state);
             notifyWatchers(content, new ContentChangeEvent(NotificationType.RENEWED, null, null, null));
             return null;
@@ -280,16 +301,19 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         };
     }
 
-    private void saveMovieState(Content content, TrackedContentState previous, TmdbMovieDetails fresh) {
+    private void saveMovieState(Content content, TrackedContentState previous, TmdbMovieDetails fresh,
+            long refreshGeneration) {
         LocalDate releaseDate = TmdbDateParser.parseDate(fresh.releaseDate());
         TrackedContentState state = previous != null ? previous : TrackedContentState.builder().content(content).build();
         state.setLastKnownReleaseDate(releaseDate);
         state.setLastKnownStatus(fresh.status());
         state.setLastCheckedAt(LocalDateTime.now());
+        state.setRefreshGeneration(refreshGeneration);
         trackedContentStateRepository.save(state);
     }
 
-    private void saveSeriesState(Content content, TrackedContentState previous, TmdbTvDetails fresh) {
+    private void saveSeriesState(Content content, TrackedContentState previous, TmdbTvDetails fresh,
+            long refreshGeneration) {
         TrackedContentState state = previous != null ? previous : TrackedContentState.builder().content(content).build();
         state.setLastKnownStatus(fresh.status());
         if (fresh.nextEpisodeToAir() != null) {
@@ -310,6 +334,15 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             state.setLastKnownSeasonAirDate(null);
         }
         state.setLastCheckedAt(LocalDateTime.now());
+        state.setRefreshGeneration(refreshGeneration);
         trackedContentStateRepository.save(state);
+    }
+
+    private boolean isStale(TrackedContentState state, long refreshGeneration) {
+        return state != null && state.getRefreshGeneration() >= refreshGeneration;
+    }
+
+    private String trackingLockId(UUID contentId) {
+        return "content-tracking:" + contentId;
     }
 }

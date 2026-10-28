@@ -54,6 +54,14 @@ public class UserBlockAccessServiceImpl implements UserBlockAccessService {
     }
 
     @Override
+    public void lockAndAssertContentVisible(UUID viewerId, UUID ownerId) {
+        if (!viewerId.equals(ownerId)) {
+            advisoryLock.lock(UserPairLockIdentity.of(viewerId, ownerId));
+            assertContentVisible(viewerId, ownerId);
+        }
+    }
+
+    @Override
     public void assertInteractionAllowed(UUID actorId, UUID counterpartId) {
         if (isBlockedEitherDirection(actorId, counterpartId)) {
             throw new ForbiddenException("This interaction is not allowed");

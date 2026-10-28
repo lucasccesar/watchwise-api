@@ -8,12 +8,14 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.PreparedContentReference;
 import com.watchwise.watchwise_api.pick.dto.PickContentTargetDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
@@ -30,6 +32,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
 import java.util.Collection;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +42,116 @@ public class PickTargetServiceImpl implements PickTargetService {
     private final ContentRepository contentRepository;
     private final PicksTemplateOptionRepository optionRepository;
     private final TmdbClient tmdbClient;
+    private final NewTransactionExecutor transactions;
+
+    @Override
+    public PreparedPickTarget prepareForCategory(UUID viewerId, PicksTemplate template,
+            PicksTemplateCategory category, PickTargetDTO target) {
+        requireCategory(category);
+        ResolvedPickTarget.TargetKey key = normalize(category, target);
+        FixedOptionReference fixed = category.getOptionMode() == PickCategoryOptionMode.FIXED
+                ? fixedOptions(category.getId()).stream().filter(option -> option.key().equals(key)).findFirst()
+                    .orElseThrow(() -> new BadRequestException("Target is not a fixed option for this category")) : null;
+        LocalDate releaseDate = null;
+        if (key.personTmdbId() != null) {
+            requireFound(tmdbClient.getPersonDetails(key.personTmdbId()), "person");
+            if (key.contextContent() != null) validateContentWithTmdb(key.contextContent());
+        } else {
+            releaseDate = validateContentWithTmdb(key.content());
+            ensureEligible(template, releaseDate);
+        }
+        return new PreparedPickTarget(key,
+                fixed == null && key.content() != null ? prepareContent(key.content()) : null,
+                fixed == null && key.contextContent() != null ? prepareContent(key.contextContent()) : null,
+                fixed == null ? null : fixed.contentId(),
+                fixed == null ? null : fixed.contextContentId(),
+                new PreparedTargetValidation(key, true, releaseDate));
+    }
+
+    @Override
+    public ResolvedPickTarget resolvePreparedForCategory(PicksTemplate template, PicksTemplateCategory category,
+            PreparedPickTarget prepared) {
+        requireCategory(category);
+        ResolvedPickTarget.TargetKey key = prepared.key();
+        if (!matchesCategory(category, key)) {
+            throw new BadRequestException("Content target type does not match the category");
+        }
+        if (key.personTmdbId() == null) ensureEligible(template, prepared.validation().releaseDate());
+        if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
+            return optionRepository.findByCategoryId(category.getId()).stream()
+                    .filter(option -> optionKey(option).equals(key))
+                    .findFirst().map(option -> new ResolvedPickTarget(option.getContent(), key.personTmdbId(),
+                            option.getContextContent(), key))
+                    .orElseThrow(() -> new BadRequestException("Target is not a fixed option for this category"));
+        }
+        return new ResolvedPickTarget(persistContent(prepared.content(), prepared.existingContentId()),
+                key.personTmdbId(), persistContent(prepared.contextContent(), prepared.existingContextContentId()), key);
+    }
+
+    @Override
+    public PreparedTargetValidation prepareValidation(PickSelection selection) {
+        ResolvedPickTarget.TargetKey key = ResolvedPickTarget.keyOf(selection);
+        PicksTemplateCategory category = selection.getCategory();
+        if (!isConfiguredCategory(category) || !matchesCategory(category, key)
+                || (category.getOptionMode() == PickCategoryOptionMode.FIXED
+                    && fixedOptions(category.getId()).stream().noneMatch(option -> option.key().equals(key)))) {
+            return new PreparedTargetValidation(key, false, null, false);
+        }
+        if (key.personTmdbId() != null) {
+            boolean validIdentity = key.content() == null && isNumericIdentity(key.personTmdbId())
+                    && isContextKey(key.contextContent());
+            boolean exists = validIdentity && currentPersonExists(key.personTmdbId())
+                    && (key.contextContent() == null || validateCurrentContent(key.contextContent()).exists());
+            return new PreparedTargetValidation(key, exists, null);
+        }
+        CurrentContentValidation content = key.contextContent() == null
+                ? validateCurrentContent(key.content()) : new CurrentContentValidation(false, null);
+        return new PreparedTargetValidation(key, content.exists(), content.date());
+    }
+
+    @Override
+    public boolean isValidPrepared(PicksTemplate template, PicksTemplateCategory category, PickSelection selection,
+            PreparedTargetValidation prepared) {
+        if (prepared == null || !isConfiguredCategory(category) || !prepared.key().equals(ResolvedPickTarget.keyOf(selection))
+                || !matchesCategory(category, prepared.key())) return false;
+        if (category.getOptionMode() == PickCategoryOptionMode.FIXED
+                && !isCurrentFixedOption(category, prepared.key())) return false;
+        if (!prepared.checked()) throw new StalePickPreparationException();
+        return prepared.exists() && (prepared.key().personTmdbId() != null
+                || isWithinEligibilityPeriod(template, prepared.releaseDate()));
+    }
+
+    private boolean isConfiguredCategory(PicksTemplateCategory category) {
+        return category != null && category.getAllowedType() != null && category.getOptionMode() != null;
+    }
+
+    private boolean isCurrentFixedOption(PicksTemplateCategory category, ResolvedPickTarget.TargetKey key) {
+        return optionRepository.findByCategoryId(category.getId()).stream().anyMatch(option -> optionKey(option).equals(key));
+    }
+
+    private List<FixedOptionReference> fixedOptions(UUID categoryId) {
+        return transactions.runInNewTransaction(() -> optionRepository.findByCategoryId(categoryId).stream()
+                .map(option -> new FixedOptionReference(optionKey(option),
+                        option.getContent() == null ? null : option.getContent().getId(),
+                        option.getContextContent() == null ? null : option.getContextContent().getId()))
+                .toList());
+    }
+
+    private PreparedContentReference prepareContent(ResolvedPickTarget.ContentKey key) {
+        return contentService.prepareReference(referenceDto(key), false);
+    }
+
+    private Content persistContent(PreparedContentReference prepared, UUID existingId) {
+        if (prepared != null) {
+            return contentRepository.getReferenceById(contentService.persistPreparedReference(prepared, false).id());
+        }
+        return existingId == null ? null : contentRepository.getReferenceById(existingId);
+    }
+
+    private ContentRefCreationDTO referenceDto(ResolvedPickTarget.ContentKey key) {
+        return new ContentRefCreationDTO(key.tmdbId(), key.type(), key.seriesTmdbId(), key.seasonNumber(),
+                key.episodeNumber(), null, null, null, null, null, null);
+    }
 
     @Override
     public ResolvedPickTarget validateForCategory(
@@ -46,20 +159,7 @@ public class PickTargetServiceImpl implements PickTargetService {
             PicksTemplate template,
             PicksTemplateCategory category,
             PickTargetDTO target) {
-        requireCategory(category);
-        if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
-            ResolvedPickTarget resolved = resolveFixedSelection(category, target);
-            if (resolved.personTmdbId() != null) {
-                requireFound(tmdbClient.getPersonDetails(resolved.personTmdbId()), "person");
-                if (resolved.key().contextContent() != null) {
-                    validateContentWithTmdb(resolved.key().contextContent());
-                }
-            } else {
-                ensureEligible(template, validateContentWithTmdb(resolved.key().content()));
-            }
-            return resolved;
-        }
-        return resolveTarget(template, category, target);
+        return resolvePreparedForCategory(template, category, prepareForCategory(viewerId, template, category, target));
     }
 
     @Override
@@ -177,16 +277,6 @@ public class PickTargetServiceImpl implements PickTargetService {
         }
         return date != null && !date.isBefore(template.getEligibilityStartDate())
                 && !date.isAfter(template.getEligibilityEndDate());
-    }
-
-    private ResolvedPickTarget resolveFixedSelection(PicksTemplateCategory category, PickTargetDTO target) {
-        ResolvedPickTarget.TargetKey key = normalize(category, target);
-        return optionRepository.findByCategoryId(category.getId()).stream()
-                .filter(option -> optionKey(option).equals(key))
-                .findFirst()
-                .map(option -> new ResolvedPickTarget(
-                        option.getContent(), key.personTmdbId(), option.getContextContent(), key))
-                .orElseThrow(() -> new BadRequestException("Target is not a fixed option for this category"));
     }
 
     private ResolvedPickTarget resolveTarget(
@@ -423,5 +513,8 @@ public class PickTargetServiceImpl implements PickTargetService {
     }
 
     private record CurrentContentValidation(boolean exists, LocalDate date) {
+    }
+
+    private record FixedOptionReference(ResolvedPickTarget.TargetKey key, UUID contentId, UUID contextContentId) {
     }
 }

@@ -85,6 +85,7 @@ class UserListDetailViewControllerIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired UserRepository users;
+    @Autowired com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender emailConfirmationSender;
     @Autowired UserListRepository lists;
     @Autowired UserListItemRepository items;
     @Autowired ContentRepository contents;
@@ -348,14 +349,10 @@ class UserListDetailViewControllerIntegrationTest {
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {}
 
     private RegisteredUser register(String username) throws Exception {
-        MvcResult result = mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"username":"%s","name":"%s","email":"%s@email.com","password":"Password123"}
-                                """.formatted(username, username, username)))
-                .andExpect(status().isCreated()).andReturn();
-        User user = users.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE),
-                result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE));
+        var user = com.watchwise.watchwise_api.user.service.TestRegistrationHelper.register(
+                mockMvc, users, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(user.id(), user.accessToken(), user.csrfToken());
     }
 
     private UserList persistList(User user, String name, UserListVisibility visibility) {

@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class UserAccountDeletionServiceImpl implements UserAccountDeletionServic
     private final UserListItemService userListItemService;
     private final ReportReporterDeletionService reportReporterDeletionService;
     private final LikeRepository likeRepository;
+    private final EntityManager entityManager;
 
     @Override
     @Transactional
@@ -133,7 +135,9 @@ public class UserAccountDeletionServiceImpl implements UserAccountDeletionServic
         likeRepository.deleteAccountLikesAndReconcile(id, likeTargets);
 
         reportReporterDeletionService.removeReporterSubmissions(id);
-        userRepository.delete(lockedUser);
+        entityManager.flush();
+        entityManager.clear();
+        userRepository.deleteById(id);
     }
 
 }

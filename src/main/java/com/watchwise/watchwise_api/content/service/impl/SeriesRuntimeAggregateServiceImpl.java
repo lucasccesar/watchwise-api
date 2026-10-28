@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
@@ -22,9 +23,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 @Service
 @RequiredArgsConstructor
@@ -36,40 +38,44 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
     private final SeriesRuntimeCalculator calculator;
     private final ExecutorService tmdbSeasonFetchExecutor;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final RefreshGenerationSequence refreshGenerationSequence;
     private final ConcurrentHashMap<UUID, LockEntry> resolutionLocks = new ConcurrentHashMap<>();
 
     @Override
     public SeriesRuntimeResolution resolve(Content content, TmdbTvFullDetails freshDetails, String language) {
+        return resolve(content, freshDetails, language, refreshGenerationSequence.next());
+    }
+
+    @Override
+    public SeriesRuntimeResolution resolve(Content content, TmdbTvFullDetails freshDetails, String language,
+            long refreshGeneration) {
         UUID contentId = requirePersistedContentId(content);
-        SeriesRuntimeAggregate reusable = reusableBaseline(content, freshDetails.seasons());
-        if (reusable != null) {
-            return new SeriesRuntimeResolution(reusable, List.of());
-        }
-        LockEntry lock = acquireLock(contentId);
-        synchronized (lock.monitor) {
-            try {
-                Content current = contentRepository.findById(contentId).orElse(content);
-                SeriesRuntimeAggregate afterWait = reusableBaseline(current, freshDetails.seasons());
-                if (afterWait != null) {
-                    return new SeriesRuntimeResolution(afterWait, List.of());
-                }
-                return reconcile(current, freshDetails.seasons(), language);
-            } finally { releaseLock(contentId, lock); }
-        }
+        return withResolutionLock(contentId, () -> {
+            Content current = contentRepository.findById(contentId).orElse(content);
+            SeriesRuntimeAggregate reusable = reusableBaseline(current, freshDetails.seasons());
+            if (reusable != null) {
+                return new SeriesRuntimeResolution(reusable, List.of());
+            }
+            return reconcile(current, freshDetails.seasons(), language, refreshGeneration);
+        });
     }
 
     @Override
     public void initializeIfMissing(Content content, TmdbTvDetails freshDetails) {
+        initializeIfMissing(content, freshDetails, refreshGenerationSequence.next());
+    }
+
+    @Override
+    public void initializeIfMissing(Content content, TmdbTvDetails freshDetails, long refreshGeneration) {
         UUID contentId = requirePersistedContentId(content);
-        LockEntry lock = acquireLock(contentId);
-        synchronized (lock.monitor) {
-            try {
-                Content current = contentRepository.findById(contentId).orElse(content);
-                if (!hasBaseline(current)) {
-                    reconcile(current, freshDetails.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
-                }
-            } finally { releaseLock(contentId, lock); }
-        }
+        withResolutionLock(contentId, () -> {
+            Content current = contentRepository.findById(contentId).orElse(content);
+            if (!hasBaseline(current)) {
+                reconcile(current, freshDetails.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE,
+                        refreshGeneration);
+            }
+            return null;
+        });
     }
 
     @Override
@@ -78,12 +84,23 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
         if (content.getId() == null || reportedEpisodeCount == null) {
             return;
         }
+        incrementForNewEpisode(content, seasonNumber, episodeNumber, reportedEpisodeCount,
+                refreshGenerationSequence.next());
+    }
+
+    @Override
+    public void incrementForNewEpisode(Content content, Integer seasonNumber, Integer episodeNumber,
+            Integer reportedEpisodeCount, long refreshGeneration) {
+        if (content.getId() == null || reportedEpisodeCount == null) {
+            return;
+        }
         Optional<TmdbEpisodeFullDetails> episode = tmdbClient.getEpisodeFullDetails(
                 content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional();
         Integer episodeRuntime = episode.map(TmdbEpisodeFullDetails::runtime).orElse(null);
         boolean reconciliationNeeded = newTransactionExecutor.runInNewTransaction(() -> {
             Content locked = contentRepository.findByIdForUpdate(content.getId()).orElse(null);
-            if (locked == null || !hasBaseline(locked) || locked.getRuntimeReportedEpisodeCount() >= reportedEpisodeCount) return false;
+            if (locked == null || locked.getRefreshGeneration() > refreshGeneration
+                    || !hasBaseline(locked) || locked.getRuntimeReportedEpisodeCount() >= reportedEpisodeCount) return false;
             if (reportedEpisodeCount != locked.getRuntimeReportedEpisodeCount() + 1) return true;
             if (episodeRuntime == null) return false;
             int total = locked.getTotalRuntimeMinutes() + episodeRuntime;
@@ -93,19 +110,40 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
             locked.setRuntimeMinutes((int) Math.round(total / (double) count));
             locked.setRuntimeReportedEpisodeCount(reportedEpisodeCount);
             locked.setUpdatedAt(LocalDateTime.now());
+            locked.setRefreshGeneration(refreshGeneration);
             contentRepository.save(locked);
             return false;
         });
-        if (reconciliationNeeded) tmdbClient.getTvDetails(content.getTmdbId()).ifPresent(details ->
-                reconcile(content, details.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+        if (reconciliationNeeded) {
+            Long reconciliationGeneration = newTransactionExecutor.runInNewTransaction(() -> {
+                Content locked = contentRepository.findByIdForUpdate(content.getId()).orElse(null);
+                if (locked == null || locked.getRefreshGeneration() > refreshGeneration) {
+                    return null;
+                }
+                return refreshGenerationSequence.next();
+            });
+            if (reconciliationGeneration != null) {
+                tmdbClient.getTvDetails(content.getTmdbId()).ifPresent(details ->
+                        withResolutionLock(content.getId(), () -> reconcile(content, details.seasons(),
+                                TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, reconciliationGeneration)));
+            }
+        }
     }
 
     @Override
     public void reconcileBeforeFreezing(Content content, TmdbTvDetails freshDetails) {
-        reconcile(content, freshDetails.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        reconcileBeforeFreezing(content, freshDetails, refreshGenerationSequence.next());
     }
 
-    private SeriesRuntimeResolution reconcile(Content content, List<TmdbSeasonSummary> summaries, String language) {
+    @Override
+    public void reconcileBeforeFreezing(Content content, TmdbTvDetails freshDetails, long refreshGeneration) {
+        UUID contentId = requirePersistedContentId(content);
+        withResolutionLock(contentId, () -> reconcile(content, freshDetails.seasons(),
+                TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, refreshGeneration));
+    }
+
+    private SeriesRuntimeResolution reconcile(Content content, List<TmdbSeasonSummary> summaries, String language,
+            long refreshGeneration) {
         List<TmdbSeasonSummary> regular = regularSeasons(summaries);
         List<SeriesRuntimeResolution.LoadedSeason> fetched = regular.stream()
                 .map(summary -> CompletableFuture.supplyAsync(
@@ -132,7 +170,7 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
                     true,
                     fetched);
         }
-        SeriesRuntimeAggregate published = publishReconciledAggregate(content, aggregate);
+        SeriesRuntimeAggregate published = publishReconciledAggregate(content, aggregate, refreshGeneration);
         return new SeriesRuntimeResolution(published, fetchedDetails, true, fetched);
     }
 
@@ -174,10 +212,14 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
                 .filter(Objects::nonNull).filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() != 0).toList();
     }
 
-    private SeriesRuntimeAggregate publishReconciledAggregate(Content content, SeriesRuntimeAggregate aggregate) {
+    private SeriesRuntimeAggregate publishReconciledAggregate(
+            Content content, SeriesRuntimeAggregate aggregate, long refreshGeneration) {
         UUID contentId = requirePersistedContentId(content);
         return newTransactionExecutor.runInNewTransaction(() -> {
             Content locked = contentRepository.findByIdForUpdate(contentId).orElse(content);
+            if (locked.getRefreshGeneration() > refreshGeneration) {
+                return storedAggregate(locked);
+            }
             if (locked.getRuntimeReportedEpisodeCount() != null && aggregate.reportedEpisodeCount() != null
                     && locked.getRuntimeReportedEpisodeCount() > aggregate.reportedEpisodeCount()) {
                 return storedAggregate(locked);
@@ -188,6 +230,7 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
             locked.setRuntimeReportedEpisodeCount(aggregate.reportedEpisodeCount());
             locked.setRuntimeAggregateVerifiedAt(LocalDateTime.now());
             locked.setUpdatedAt(LocalDateTime.now());
+            locked.setRefreshGeneration(refreshGeneration);
             contentRepository.save(locked);
             return aggregate;
         });
@@ -202,6 +245,17 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
             throw new IllegalArgumentException("Series runtime aggregate requires persisted content");
         }
         return content.getId();
+    }
+
+    private <T> T withResolutionLock(UUID contentId, Supplier<T> operation) {
+        LockEntry lock = acquireLock(contentId);
+        synchronized (lock.monitor) {
+            try {
+                return operation.get();
+            } finally {
+                releaseLock(contentId, lock);
+            }
+        }
     }
 
     private LockEntry acquireLock(UUID contentId) {
@@ -219,5 +273,9 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
         });
     }
 
-    private static final class LockEntry { private final Object monitor = new Object(); private int participants; }
+    private static final class LockEntry {
+        private final Object monitor = new Object();
+        private int participants;
+    }
+
 }

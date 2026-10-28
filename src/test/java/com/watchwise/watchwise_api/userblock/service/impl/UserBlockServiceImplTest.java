@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
@@ -102,13 +103,17 @@ class UserBlockServiceImplTest {
     }
 
     @Test void shouldReturnMappedBlockedUserPage() {
-        BlockedUserDTO dto = mock(BlockedUserDTO.class);
         when(pageRequestFactory.build(1, 10)).thenReturn(PageRequest.of(0, 10));
+        blocked.setDescription("Should not be visible in a block preview");
+        PublicUserDTO mapped = new PublicUserDTO(blockedId, "blocked", "Blocked User",
+                "Should not be visible in a block preview", "avatar", true, LocalDateTime.now());
         when(userBlockRepository.findByBlockerIdOrderByCreatedAtDescIdDesc(blockerId, PageRequest.of(0, 10)))
                 .thenReturn(new PageImpl<>(List.of(UserBlock.builder().blocker(blocker).blocked(blocked).createdAt(LocalDateTime.now()).build())));
-        when(userMapper.userToPublicUserDto(blocked)).thenReturn(null);
+        when(userMapper.userToPublicUserDto(blocked)).thenReturn(mapped);
         var result = service.getBlockedUsers(blockerId, 1, 10);
         assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().getFirst().user().description()).isNull();
+        assertThat(result.getContent().getFirst().user().username()).isEqualTo("blocked");
     }
 
     private static User user(UUID id, String username) {

@@ -56,4 +56,8 @@ public class TrackedContentState {
     @Column(name = "last_checked_at", nullable = false)
     @Setter
     private LocalDateTime lastCheckedAt;
+
+    @Column(name = "refresh_generation", nullable = false)
+    @Setter
+    private long refreshGeneration;
 }

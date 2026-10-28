@@ -5,51 +5,36 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class AttemptLockoutTest {
+class AttemptLockoutTest extends SharedLimiterPostgresSupport {
 
     private static final int MAX_ATTEMPTS = 3;
     private static final Duration WINDOW = Duration.ofMinutes(10);
     private static final Duration BLOCK_DURATION = Duration.ofMinutes(5);
 
-    private final AtomicReference<Instant> currentInstant = new AtomicReference<>(Instant.parse("2024-01-01T00:00:00Z"));
-
-    private final Clock clock = new Clock() {
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return currentInstant.get();
-        }
-    };
-
     private AttemptLockout attemptLockout;
 
     @BeforeEach
     void setUp() {
-        attemptLockout = new AttemptLockout(clock);
+        attemptLockout = new AttemptLockout(store);
+    }
+
+    @Test
+    void independentlyConstructedInstancesMustShareLiveBlocks() {
+        AttemptLockout otherReplica = new AttemptLockout(newStore());
+        attemptLockout.checkAllowed("shared", 1, WINDOW);
+        attemptLockout.recordFailure("shared", 1, BLOCK_DURATION);
+        assertThatThrownBy(() -> otherReplica.checkAllowed("shared", 1, WINDOW))
+                .isInstanceOf(TooManyRequestsException.class);
     }
 
     private void advanceClock(Duration duration) {
-        currentInstant.set(currentInstant.get().plus(duration));
+        elapse(duration);
     }
 
     private void checkAllowed(String key) {
@@ -71,6 +56,16 @@ class AttemptLockoutTest {
     void shouldNotThrowWhenNoPriorAttemptsExist() {
         assertThatCode(() -> checkAllowed("1.2.3.4|user"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("[checkAllowed] Should Reject New Keys At Capacity - Without Evicting Existing Attempts")
+    void shouldRejectNewKeysAtCapacityWithoutEvictingExistingAttempts() {
+        insertActiveLockouts(10_000);
+
+        assertThatThrownBy(() -> attemptLockout.checkAllowed("new-user", MAX_ATTEMPTS, WINDOW))
+                .isInstanceOf(TooManyRequestsException.class);
+        assertThat(size("lockout")).isEqualTo(10_000);
     }
 
     @Test
@@ -240,7 +235,7 @@ class AttemptLockoutTest {
 
         attemptLockout.cleanupExpired();
 
-        assertThat(attemptLockout.size()).isZero();
+        assertThat(size("lockout")).isZero();
     }
 
     @Test
@@ -251,7 +246,7 @@ class AttemptLockoutTest {
 
         attemptLockout.cleanupExpired();
 
-        assertThat(attemptLockout.size()).isEqualTo(1);
+        assertThat(size("lockout")).isEqualTo(1);
     }
 
     @Test
@@ -269,6 +264,6 @@ class AttemptLockoutTest {
 
         attemptLockout.cleanupExpired();
 
-        assertThat(attemptLockout.size()).isEqualTo(1);
+        assertThat(size("lockout")).isEqualTo(1);
     }
 }

@@ -16,11 +16,15 @@ public interface UserMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "role", ignore = true)
+    @Mapping(target = "pendingEmail", ignore = true)
     @Mapping(target = "password", ignore = true)
     @Mapping(target = "isEmailVerified", ignore = true)
+    @Mapping(target = "emailConfirmationTokenHash", ignore = true)
+    @Mapping(target = "emailConfirmationExpiresAt", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "sessionsInvalidatedAt", ignore = true)
+    @Mapping(target = "authVersion", ignore = true)
     @Mapping(target = "preferredLanguage", ignore = true)
     @Mapping(target = "preferredRegion", ignore = true)
     User postUserDtoToUser(PostUserDTO postUserDTO);

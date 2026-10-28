@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.common.security;
 
 import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
+import com.watchwise.watchwise_api.common.exception.ServiceUnavailableException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -52,7 +53,7 @@ public class PickCreationThrottleFilter extends OncePerRequestFilter {
         try {
             requestThrottler.checkAllowed("pick-create|" + userId, maxRequests, window);
             filterChain.doFilter(request, response);
-        } catch (TooManyRequestsException ex) {
+        } catch (TooManyRequestsException | ServiceUnavailableException ex) {
             handlerExceptionResolver.resolveException(request, response, null, ex);
         }
     }

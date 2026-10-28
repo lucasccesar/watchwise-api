@@ -31,6 +31,37 @@ class JwtServiceTest {
     }
 
     @Test
+    @DisplayName("[generateToken] Should Include The Persisted Authentication Version - When Called")
+    void shouldIncludeAuthenticationVersionWhenCalled() {
+        String token = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
+
+        Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+
+        assertThat(claims.get("authVersion", Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("[generateToken] Should Preserve The Supplied Authentication Version - When Called")
+    void shouldPreserveSuppliedAuthenticationVersionWhenCalled() {
+        String token = jwtService.generateToken(UUID.randomUUID(), 9L, TokenType.ACCESS);
+
+        assertThat(jwtService.extractAuthVersion(token)).isEqualTo(9L);
+    }
+
+    @Test
+    @DisplayName("[isTokenValid] Should Reject Tokens Without An Authentication Version")
+    void shouldRejectTokensWithoutAuthenticationVersion() {
+        String token = Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(UUID.randomUUID().toString())
+                .claim("type", TokenType.ACCESS.name())
+                .signWith(key)
+                .compact();
+
+        assertThat(jwtService.isTokenValid(token, TokenType.ACCESS)).isFalse();
+    }
+
+    @Test
     @DisplayName("[generateToken] Should Generate Token With Matching Type Claim - When Called")
     void shouldGenerateTokenWithMatchingTypeClaimWhenCalled() {
         String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);

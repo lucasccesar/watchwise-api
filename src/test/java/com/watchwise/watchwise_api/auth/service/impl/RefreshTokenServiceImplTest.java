@@ -15,11 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -79,7 +81,8 @@ class RefreshTokenServiceImplTest {
         UUID jti = UUID.randomUUID();
         Date expiration = new Date(System.currentTimeMillis() + 60_000);
 
-        when(jwtService.generateToken(userId, TokenType.REFRESH)).thenReturn(token);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH)).thenReturn(token);
         when(jwtService.extractJti(token)).thenReturn(jti);
         when(jwtService.extractExpiration(token)).thenReturn(expiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
@@ -199,8 +202,8 @@ class RefreshTokenServiceImplTest {
         when(jwtService.isTokenValid(oldToken, TokenType.REFRESH)).thenReturn(true);
         when(jwtService.extractJti(oldToken)).thenReturn(oldJti);
         when(refreshTokenRepository.findById(oldJti)).thenReturn(Optional.of(storedToken));
-        when(jwtService.generateToken(userId, TokenType.ACCESS)).thenReturn(newAccessToken);
-        when(jwtService.generateToken(userId, TokenType.REFRESH)).thenReturn(newRefreshToken);
+        when(jwtService.generateToken(userId, 0L, TokenType.ACCESS)).thenReturn(newAccessToken);
+        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH)).thenReturn(newRefreshToken);
         when(jwtService.extractJti(newRefreshToken)).thenReturn(newJti);
         when(jwtService.extractExpiration(newRefreshToken)).thenReturn(newExpiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
@@ -238,7 +241,7 @@ class RefreshTokenServiceImplTest {
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
         verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
-        verify(jwtService, never()).generateToken(any(), eq(TokenType.ACCESS));
+        verify(jwtService, never()).generateToken(any(), anyLong(), eq(TokenType.ACCESS));
     }
 
     @Test
@@ -250,6 +253,31 @@ class RefreshTokenServiceImplTest {
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
         verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
+    }
+
+    @Test
+    void shouldKeepLogicalSessionInvalidationWhenPhysicalRefreshTokenRevocationFails() {
+        when(transactionManager.getTransaction(any()))
+                .thenReturn(mock(TransactionStatus.class), mock(TransactionStatus.class));
+        doThrow(new DataAccessResourceFailureException("refresh-token storage unavailable"))
+                .when(refreshTokenRepository).revokeAllByUserId(userId);
+
+        refreshTokenService.invalidateAllSessions(userId);
+
+        InOrder order = inOrder(userRepository, refreshTokenRepository);
+        order.verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
+        order.verify(refreshTokenRepository).revokeAllByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("[revokeAllRefreshTokens] Should Revoke Refresh Tokens Without Bumping Session Version")
+    void shouldRevokeAllRefreshTokensWithoutBumpingSessionVersion() {
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+
+        refreshTokenService.revokeAllRefreshTokens(userId);
+
+        verify(refreshTokenRepository).revokeAllByUserId(userId);
+        verify(userRepository, never()).markSessionsInvalidatedAt(any(), any());
     }
 
     @Test

@@ -23,6 +23,18 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
     @Query("select template from PicksTemplate template left join fetch template.creator where template.id = :id")
     Optional<PicksTemplate> findByIdWithCreator(@Param("id") UUID id);
 
+    @Query("""
+            select template.id as templateId, creator.id as creatorId
+            from PicksTemplate template left join template.creator creator
+            where template.id = :id
+            """)
+    Optional<CreatorIdentity> findCreatorIdentityById(@Param("id") UUID id);
+
+    interface CreatorIdentity {
+        UUID getTemplateId();
+        UUID getCreatorId();
+    }
+
     Page<PicksTemplate> findByCreatorIdOrderByCreatedAtDescIdDesc(UUID creatorId, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

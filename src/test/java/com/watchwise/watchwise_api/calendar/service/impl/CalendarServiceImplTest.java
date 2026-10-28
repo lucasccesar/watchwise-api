@@ -348,6 +348,24 @@ class CalendarServiceImplTest {
     }
 
     @Test
+    void usesCompletePreviousSeriesSnapshotWhenTmdbIsUnavailable() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(episode("1396", 1, 1, LocalDate.of(2026, 9, 15)).toBuilder()
+                        .nextCheckAt(LocalDateTime.of(2026, 9, 12, 10, 0))
+                        .presentInLastTmdbSnapshot(true)
+                        .build()),
+                new CalendarAssemblyInput.Completeness(Set.of(), Set.of(key)));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.Unavailable());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isNotEmpty();
+    }
+
+    @Test
     void groupsSeriesOnlyWhenTheSeriesCompletenessMarkerIsPresent() {
         CalendarScheduleKey key = key(ContentType.SERIES, "1396");
         CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));

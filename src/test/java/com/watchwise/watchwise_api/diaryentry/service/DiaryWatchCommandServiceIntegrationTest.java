@@ -35,6 +35,8 @@ import com.watchwise.watchwise_api.diaryentry.service.DiaryWatchCommandService;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -95,6 +97,7 @@ class DiaryWatchCommandServiceIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
+    @Autowired private TestEmailConfirmationSender emailConfirmationSender;
     @Autowired private ContentRepository contentRepository;
     @Autowired private DiaryEntryRepository diaryEntryRepository;
     @Autowired private ImportedWatchAssertionRepository importedWatchAssertionRepository;
@@ -356,18 +359,10 @@ class DiaryWatchCommandServiceIntegrationTest {
 
     private RegisteredUser registerUser(String suffix) throws Exception {
         String username = suffix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                { "username": "%s", "name": "%s", "email": "%s@email.com",
-                                  "password": "Password123", "isProfilePublic": true }
-                                """.formatted(username, username, username)))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfToken = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken, csrfToken);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private Content content(ContentType type, String tmdbId, String seriesTmdbId, Integer seasonNumber) {

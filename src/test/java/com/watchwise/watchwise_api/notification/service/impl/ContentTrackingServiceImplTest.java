@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbNextEpisode;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -39,9 +41,20 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -50,6 +63,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 
 @ExtendWith(MockitoExtension.class)
 class ContentTrackingServiceImplTest {
@@ -65,6 +79,8 @@ class ContentTrackingServiceImplTest {
     @Mock private TmdbClient tmdbClient;
     @Mock private ContentChangeDetector contentChangeDetector;
     @Mock private NewTransactionExecutor newTransactionExecutor;
+    @Mock private AdvisoryLock advisoryLock;
+    @Mock private RefreshGenerationSequence refreshGenerationSequence;
 
     @InjectMocks
     private ContentTrackingServiceImpl contentTrackingService;
@@ -83,6 +99,8 @@ class ContentTrackingServiceImplTest {
 
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+        AtomicLong generations = new AtomicLong(1);
+        lenient().when(refreshGenerationSequence.next()).thenAnswer(invocation -> generations.getAndIncrement());
         lenient().when(userRepository.getReferenceById(watchingUserId))
                 .thenReturn(User.builder().id(watchingUserId).build());
         lenient().when(diaryEntryRepository.findInProgressSeriesTmdbIds(null)).thenReturn(List.of());
@@ -107,6 +125,134 @@ class ContentTrackingServiceImplTest {
         assertThat(notification.getUser().getId()).isEqualTo(watchingUserId);
         assertThat(notification.getType()).isEqualTo(NotificationType.RELEASE);
         assertThat(notification.getContent()).isEqualTo(movie);
+    }
+
+    @Test
+    void concurrentInstancesEmitOnlyOneTransitionNotification() throws Exception {
+        TrackedContentState initial = TrackedContentState.builder()
+                .content(movie)
+                .lastKnownStatus("Planned")
+                .lastCheckedAt(LocalDateTime.now().minusDays(1))
+                .build();
+        AtomicReference<TrackedContentState> current = new AtomicReference<>(initial);
+        CyclicBarrier tmdbBarrier = new CyclicBarrier(2);
+        CyclicBarrier unlockedReadBarrier = new CyclicBarrier(2);
+        ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+        ThreadLocal<ReentrantLock> heldLock = new ThreadLocal<>();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(movie.getId()))
+                .thenAnswer(invocation -> Optional.ofNullable(current.get()).map(TrackedContentState::getLastKnownStatus));
+        when(trackedContentStateRepository.findByContentId(movie.getId())).thenAnswer(invocation -> {
+            TrackedContentState snapshot = current.get();
+            if (heldLock.get() == null) {
+                unlockedReadBarrier.await(10, TimeUnit.SECONDS);
+            }
+            return Optional.ofNullable(heldLock.get() == null ? snapshot : current.get());
+        });
+        doAnswer(invocation -> {
+            locks.computeIfAbsent(invocation.getArgument(0), ignored -> new ReentrantLock()).lock();
+            heldLock.set(locks.get(invocation.getArgument(0)));
+            return null;
+        }).when(advisoryLock).lock(any());
+        doAnswer(invocation -> {
+            try {
+                return ((Supplier<?>) invocation.getArgument(0)).get();
+            } finally {
+                ReentrantLock lock = heldLock.get();
+                if (lock != null) {
+                    heldLock.remove();
+                    lock.unlock();
+                }
+            }
+        }).when(newTransactionExecutor).runInNewTransaction(any());
+        when(tmdbClient.getMovieDetails("603")).thenAnswer(invocation -> {
+            tmdbBarrier.await(10, TimeUnit.SECONDS);
+            return Optional.of(new TmdbMovieDetails("603", "2026-08-29", "Released"));
+        });
+        when(contentChangeDetector.detectMovieChange(any(), any(), any())).thenAnswer(invocation ->
+                new com.watchwise.watchwise_api.notification.tracking.ContentChangeDetector().detectMovieChange(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+        when(watchlistEntryRepository.findUserIdsByContentId(movie.getId())).thenReturn(List.of(watchingUserId));
+        doAnswer(invocation -> {
+            current.set(invocation.getArgument(0));
+            return invocation.getArgument(0);
+        }).when(trackedContentStateRepository).save(any());
+
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = workers.submit(contentTrackingService::trackContentChanges);
+            Future<?> second = workers.submit(contentTrackingService::trackContentChanges);
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        } finally {
+            workers.shutdownNow();
+        }
+
+        verify(notificationRepository, times(1)).saveAll(notificationsCaptor.capture());
+        assertThat(notificationsCaptor.getAllValues()).hasSize(1);
+        assertThat(notificationsCaptor.getValue()).hasSize(1);
+        assertThat(current.get().getLastKnownStatus()).isEqualTo("Released");
+    }
+
+    @Test
+    void olderFetchFinishingLastCannotReplaceNewerTrackedState() throws Exception {
+        TrackedContentState initial = TrackedContentState.builder()
+                .content(movie)
+                .lastKnownStatus("Planned")
+                .lastCheckedAt(LocalDateTime.now().minusDays(1))
+                .build();
+        AtomicReference<TrackedContentState> current = new AtomicReference<>(initial);
+        CountDownLatch olderFetchStarted = new CountDownLatch(1);
+        CountDownLatch releaseOlderFetch = new CountDownLatch(1);
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(movie.getId())).thenAnswer(invocation -> {
+            return Optional.of("Planned");
+        });
+        when(trackedContentStateRepository.findByContentId(movie.getId()))
+                .thenAnswer(invocation -> Optional.ofNullable(current.get()));
+        doAnswer(invocation -> {
+            current.set(invocation.getArgument(0));
+            return invocation.getArgument(0);
+        }).when(trackedContentStateRepository).save(any());
+        when(tmdbClient.getMovieDetails("603")).thenAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("older-content-observation")) {
+                olderFetchStarted.countDown();
+                assertThat(releaseOlderFetch.await(5, TimeUnit.SECONDS)).isTrue();
+                return Optional.of(new TmdbMovieDetails("603", "2026-07-01", "Post Production"));
+            }
+            return Optional.of(new TmdbMovieDetails("603", "2026-08-29", "Released"));
+        });
+        when(contentChangeDetector.detectMovieChange(any(), any(), any())).thenAnswer(invocation ->
+                new ContentChangeDetector().detectMovieChange(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+
+        ContentTrackingServiceImpl anotherInstance = new ContentTrackingServiceImpl(
+                watchlistEntryRepository, diaryEntryRepository, trackedContentStateRepository,
+                notificationRepository, userRepository, contentService, contentRepository,
+                tmdbClient, contentChangeDetector, seriesRuntimeAggregateService, newTransactionExecutor,
+                advisoryLock, refreshGenerationSequence);
+        ExecutorService olderWorker = Executors.newSingleThreadExecutor(
+                task -> new Thread(task, "older-content-observation"));
+        ExecutorService newerWorker = Executors.newSingleThreadExecutor(
+                task -> new Thread(task, "newer-content-observation"));
+        try {
+            Future<?> older = olderWorker.submit(contentTrackingService::trackContentChanges);
+            assertThat(olderFetchStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<?> newer = newerWorker.submit(anotherInstance::trackContentChanges);
+
+            newer.get(5, TimeUnit.SECONDS);
+            assertThat(current.get().getLastKnownStatus()).isEqualTo("Released");
+
+            releaseOlderFetch.countDown();
+            older.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseOlderFetch.countDown();
+            olderWorker.shutdownNow();
+            newerWorker.shutdownNow();
+        }
+
+        assertThat(current.get().getLastKnownStatus()).isEqualTo("Released");
+        assertThat(current.get().getLastKnownReleaseDate()).isEqualTo(LocalDate.parse("2026-08-29"));
     }
 
     @Test
@@ -176,6 +322,30 @@ class ContentTrackingServiceImplTest {
 
         verify(tmdbClient, times(1)).getTvDetails("1399");
         verify(trackedContentStateRepository, times(1)).findByContentId(series.getId());
+    }
+
+    @Test
+    void passesTheParentRefreshGenerationToEveryNewEpisodeFromOneResponse() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(4_800).runtimeMinutes(48).runtimeMinutesEpisodeCount(100)
+                .runtimeReportedEpisodeCount(100).runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series",
+                null, List.of(new TmdbSeasonSummary(1, null, null, null, 100, null),
+                        new TmdbSeasonSummary(2, null, null, null, 2, null)))));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(
+                new ContentChangeEvent(NotificationType.NEW_EPISODE, null, 2, 1),
+                new ContentChangeEvent(NotificationType.NEW_EPISODE, null, 2, 2)));
+        when(refreshGenerationSequence.next()).thenReturn(73L);
+
+        contentTrackingService.trackContentChanges();
+
+        ArgumentCaptor<Long> generations = ArgumentCaptor.forClass(Long.class);
+        verify(seriesRuntimeAggregateService, times(2)).incrementForNewEpisode(
+                eq(series), any(), any(), any(), generations.capture());
+        assertThat(generations.getAllValues()).containsExactly(73L, 73L);
     }
 
     @Test
@@ -337,9 +507,10 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
-        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
-        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
+        verify(seriesRuntimeAggregateService).incrementForNewEpisode(
+                eq(series), eq(6), eq(3), eq(11), anyLong());
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any(), anyLong());
     }
 
     @Test
@@ -364,7 +535,8 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService, times(1)).incrementForNewEpisode(series, 6, 3, 11);
+        verify(seriesRuntimeAggregateService, times(1)).incrementForNewEpisode(
+                eq(series), eq(6), eq(3), eq(11), anyLong());
         verify(notificationRepository, times(2)).saveAll(notificationsCaptor.capture());
         List<List<Notification>> notifications = notificationsCaptor.getAllValues();
         assertThat(notifications).allSatisfy(batch -> assertThat(batch).hasSize(1));
@@ -392,7 +564,8 @@ class ContentTrackingServiceImplTest {
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event));
         when(diaryEntryRepository.findUserIdsWatchingSeries("1399")).thenReturn(List.of(watchingUserId));
         doThrow(new IllegalStateException("runtime unavailable"))
-                .when(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+                .when(seriesRuntimeAggregateService)
+                .incrementForNewEpisode(eq(series), eq(6), eq(3), eq(11), anyLong());
 
         contentTrackingService.trackContentChanges();
 
@@ -422,13 +595,15 @@ class ContentTrackingServiceImplTest {
         ContentChangeEvent event = new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3);
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event), List.of());
         doThrow(new IllegalStateException("runtime unavailable"))
-                .when(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+                .when(seriesRuntimeAggregateService)
+                .incrementForNewEpisode(eq(series), eq(6), eq(3), eq(11), anyLong());
 
         contentTrackingService.trackContentChanges();
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
-        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+        verify(seriesRuntimeAggregateService).incrementForNewEpisode(
+                eq(series), eq(6), eq(3), eq(11), anyLong());
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(eq(series), eq(fresh), anyLong());
     }
 
     @Test
@@ -448,12 +623,14 @@ class ContentTrackingServiceImplTest {
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh), Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(), List.of());
         doThrow(new IllegalStateException("runtime unavailable"))
-                .doNothing().when(seriesRuntimeAggregateService).initializeIfMissing(series, fresh);
+                .doNothing().when(seriesRuntimeAggregateService)
+                .initializeIfMissing(eq(series), eq(fresh), anyLong());
 
         contentTrackingService.trackContentChanges();
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService, times(2)).initializeIfMissing(series, fresh);
+        verify(seriesRuntimeAggregateService, times(2))
+                .initializeIfMissing(eq(series), eq(fresh), anyLong());
     }
 
     @Test
@@ -471,8 +648,8 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).initializeIfMissing(series, fresh);
-        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+        verify(seriesRuntimeAggregateService).initializeIfMissing(eq(series), eq(fresh), anyLong());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -494,8 +671,8 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
-        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(eq(series), eq(fresh), anyLong());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -516,7 +693,7 @@ class ContentTrackingServiceImplTest {
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
         doThrow(new IllegalStateException("runtime unavailable"))
-                .when(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+                .when(seriesRuntimeAggregateService).reconcileBeforeFreezing(eq(series), eq(fresh), anyLong());
 
         contentTrackingService.trackContentChanges();
 
@@ -543,9 +720,9 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
-        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
-        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(eq(series), eq(fresh), anyLong());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any(), anyLong());
     }
 
     @Test
@@ -565,7 +742,7 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(eq(series), eq(fresh), anyLong());
         verify(contentRepository, never()).save(any());
     }
 
@@ -584,9 +761,9 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService).initializeIfMissing(eq(series), any());
-        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
-        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+        verify(seriesRuntimeAggregateService).initializeIfMissing(eq(series), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any(), anyLong());
         verify(tmdbClient, never()).getSeasonFullDetails(any(), any(), any());
         verify(contentRepository, never()).save(any());
     }
@@ -611,9 +788,9 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
-        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
-        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any(), anyLong());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any(), anyLong());
         verify(contentRepository, never()).save(any());
     }
 
@@ -621,7 +798,6 @@ class ContentTrackingServiceImplTest {
     @DisplayName("[reactivateAfterRevival] Should Reactivate Tracking And Notify Watchers - When A Frozen Series Revives")
     void shouldReactivateTrackingAndNotifyWatchersWhenAFrozenSeriesRevives() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
-        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Ended"));
         TrackedContentState previous = TrackedContentState.builder().content(series).lastKnownStatus("Ended").build();
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
         when(watchlistEntryRepository.findUserIdsByContentId(series.getId())).thenReturn(List.of(watchingUserId));
@@ -651,12 +827,15 @@ class ContentTrackingServiceImplTest {
     @DisplayName("[reactivateAfterRevival] Should Do Nothing - When Previous Status Was Not Terminal")
     void shouldDoNothingWhenPreviousStatusWasNotTerminal() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
-        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
 
         contentTrackingService.reactivateAfterRevival(series, "Returning Series");
 
-        verify(trackedContentStateRepository, never()).findByContentId(any());
+        verify(trackedContentStateRepository).findByContentId(series.getId());
         verify(trackedContentStateRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
     }
 
     @Test

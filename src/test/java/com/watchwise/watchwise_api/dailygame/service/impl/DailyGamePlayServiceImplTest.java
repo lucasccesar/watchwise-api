@@ -392,7 +392,8 @@ class DailyGamePlayServiceImplTest {
             when(tmdb.getImageBytes("/frame" + index + ".jpg")).thenReturn(new TmdbLookupResult.Found<>(
                     new TmdbImageBytes(bytes.toByteArray(), MediaType.IMAGE_PNG)));
         }
-        var realMedia = new DailyGameMediaServiceImpl(tmdb, challenges, CLOCK);
+        var realMedia = new DailyGameMediaServiceImpl(tmdb, challenges, CLOCK,
+                "test-daily-game-media-jwt-key-at-least-32-bytes");
         var play = new DailyGamePlayServiceImpl(challenges, results, mutations, realMedia,
                 new DailyGameAttemptDetailsCodec(), new DailyGameFilmographyPlayAssembler(), CLOCK);
 

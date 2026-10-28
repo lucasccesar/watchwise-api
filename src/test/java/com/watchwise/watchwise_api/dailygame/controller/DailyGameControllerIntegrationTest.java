@@ -35,6 +35,8 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -99,6 +101,9 @@ class DailyGameControllerIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
@@ -733,17 +738,10 @@ class DailyGameControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfToken = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(accessToken).isNotNull();
-        assertThat(csrfToken).isNotNull();
-
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken, csrfToken);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private MockHttpServletRequestBuilder registerRequest(String username) {

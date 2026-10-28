@@ -15,12 +15,17 @@ public class CookieUtil {
     public static final String ACCESS_TOKEN_COOKIE = "access_token";
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
     public static final String CSRF_TOKEN_COOKIE = "XSRF-TOKEN";
+    public static final String REGISTRATION_PROOF_COOKIE = "registration_proof";
 
     private final long accessTokenExpirationMinutes;
     private final long refreshTokenExpirationDays;
     private final boolean secureCookies;
     private final String refreshTokenPath;
     private final String csrfTokenPath;
+    private final String registrationProofPath;
+
+    @Value("${app.auth.email-confirmation.token-ttl-minutes:30}")
+    private long emailConfirmationTokenTtlMinutes = 30;
 
     public CookieUtil(
             @Value("${app.jwt.expiration-minutes}") long accessTokenExpirationMinutes,
@@ -33,6 +38,7 @@ public class CookieUtil {
         this.secureCookies = secureCookies;
         this.refreshTokenPath = contextPath + "/auth/refresh";
         this.csrfTokenPath = contextPath.isEmpty() ? "/" : contextPath;
+        this.registrationProofPath = contextPath + "/auth";
     }
 
     public String getRefreshTokenPath() {
@@ -41,6 +47,10 @@ public class CookieUtil {
 
     public String getCsrfTokenPath() {
         return csrfTokenPath;
+    }
+
+    public String getRegistrationProofPath() {
+        return registrationProofPath;
     }
 
     public ResponseCookie buildAccessTokenCookie(String token) {
@@ -60,6 +70,26 @@ public class CookieUtil {
                 .path(refreshTokenPath)
                 .sameSite("Lax")
                 .maxAge(Duration.ofDays(refreshTokenExpirationDays))
+                .build();
+    }
+
+    public ResponseCookie buildRegistrationProofCookie(String proof) {
+        return ResponseCookie.from(REGISTRATION_PROOF_COOKIE, proof)
+                .httpOnly(true)
+                .secure(secureCookies)
+                .path(registrationProofPath)
+                .sameSite("Strict")
+                .maxAge(Duration.ofMinutes(emailConfirmationTokenTtlMinutes))
+                .build();
+    }
+
+    public ResponseCookie clearRegistrationProofCookie() {
+        return ResponseCookie.from(REGISTRATION_PROOF_COOKIE, "")
+                .httpOnly(true)
+                .secure(secureCookies)
+                .path(registrationProofPath)
+                .sameSite("Strict")
+                .maxAge(Duration.ZERO)
                 .build();
     }
 

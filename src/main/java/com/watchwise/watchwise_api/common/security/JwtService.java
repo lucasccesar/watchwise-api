@@ -18,6 +18,7 @@ import java.util.UUID;
 public class JwtService {
 
     private static final String TYPE_CLAIM = "type";
+    private static final String AUTH_VERSION_CLAIM = "authVersion";
 
     private final SecretKey key;
     private final long accessTokenExpirationMinutes;
@@ -34,6 +35,13 @@ public class JwtService {
     }
 
     public String generateToken(UUID userId, TokenType type) {
+        return generateToken(userId, 0L, type);
+    }
+
+    public String generateToken(UUID userId, long authVersion, TokenType type) {
+        if (authVersion < 0) {
+            throw new IllegalArgumentException("Authentication version cannot be negative");
+        }
         Instant now = Instant.now();
         Instant expiration = type == TokenType.REFRESH
                 ? now.plus(refreshTokenExpirationDays, ChronoUnit.DAYS)
@@ -43,6 +51,7 @@ public class JwtService {
                 .id(UUID.randomUUID().toString())
                 .subject(userId.toString())
                 .claim(TYPE_CLAIM, type.name())
+                .claim(AUTH_VERSION_CLAIM, authVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiration))
                 .signWith(key)
@@ -69,10 +78,21 @@ public class JwtService {
         return TokenType.valueOf(parseClaims(token).get(TYPE_CLAIM, String.class));
     }
 
+    public long extractAuthVersion(String token) {
+        Object value = parseClaims(token).get(AUTH_VERSION_CLAIM);
+        if (!(value instanceof Number number) || number.longValue() < 0) {
+            throw new IllegalArgumentException("Token has no valid authentication version");
+        }
+        return number.longValue();
+    }
+
     public boolean isTokenValid(String token, TokenType expectedType) {
         try {
             Claims claims = parseClaims(token);
-            return expectedType.name().equals(claims.get(TYPE_CLAIM, String.class));
+            Object authVersion = claims.get(AUTH_VERSION_CLAIM);
+            return expectedType.name().equals(claims.get(TYPE_CLAIM, String.class))
+                    && authVersion instanceof Number number
+                    && number.longValue() >= 0;
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }

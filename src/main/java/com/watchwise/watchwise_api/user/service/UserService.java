@@ -15,7 +15,7 @@ import java.util.UUID;
 
 public interface UserService {
 
-    UserResponseDTO saveNewUser(PostUserDTO postUserDTO);
+    String startRegistration(PostUserDTO postUserDTO);
 
     PublicUserProfileDTO getUserById(UUID viewerId, UUID targetUserId);
 
@@ -34,7 +34,13 @@ public interface UserService {
 
     UserResponseDTO login(LoginUserDTO loginUserDTO);
 
+    AuthenticatedUser loginForAuthentication(LoginUserDTO loginUserDTO);
+
     Optional<UserResponseDTO> findByEmail(String email);
+
+    Optional<AuthenticatedUser> findByEmailForAuthentication(String email);
+
+    long getAuthVersion(UUID userId);
 
     void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO);
 

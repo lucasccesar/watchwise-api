@@ -20,6 +20,8 @@ import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickService;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
+import com.watchwise.watchwise_api.pick.service.PreparedPickTarget;
+import com.watchwise.watchwise_api.pick.service.PreparedTargetValidation;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
@@ -82,10 +84,12 @@ class PickServiceImplTest {
                 optionRepository, commentRepository, mock(CommentPreviewAssembler.class), likeService, pickMapper,
                 targetService, userMapper, templatePreviewAssembler);
         PickResponseAssembler pickResponseAssembler = new PickResponseAssembler(selectionRepository,
-                categoryRepository, templatePreviewAssembler, commentRepository, likeService, pickMapper, targetService);
+                categoryRepository, templatePreviewAssembler, commentRepository, likeService, pickMapper, targetService,
+                new com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor());
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
                 userRepository, followerRepository, targetService, pageRequestFactory, pickResponseAssembler,
-                pickPreviewAssembler, userBlockAccessService);
+                pickPreviewAssembler, userBlockAccessService,
+                new com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor());
         savedSelections = new ArrayList<>();
     }
 
@@ -137,12 +141,11 @@ class PickServiceImplTest {
         Content content = content("550");
         PickCreationDTO request = new PickCreationDTO(PickVisibility.FOLLOWERS, List.of(selectionRequest(movie.getId(), "550")));
         stubCreation(userId, template, List.of(movie));
-        when(targetService.validateForCategory(eq(userId), same(template), same(movie), any()))
-                .thenReturn(new ResolvedPickTarget(content, null, null, movieKey("550")));
+        stubPreparedTarget(userId, template, movie, new ResolvedPickTarget(content, null, null, movieKey("550")));
         when(pickRepository.save(any())).thenAnswer(invocation -> assignPickId(invocation.getArgument(0)));
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
+        when(targetService.isValidPrepared(same(template), same(movie), any(), any())).thenReturn(true);
         PickResponseDTO result = service.createPick(userId, template.getId(), request);
 
         assertThat(result.visibility()).isEqualTo(PickVisibility.FOLLOWERS);
@@ -161,12 +164,11 @@ class PickServiceImplTest {
         PicksTemplateCategory series = category(template, PickAllowedType.SERIES, 2);
         Content content = content("550");
         stubCreation(userId, template, List.of(movie, series));
-        when(targetService.validateForCategory(eq(userId), same(template), same(movie), any()))
-                .thenReturn(new ResolvedPickTarget(content, null, null, movieKey("550")));
+        stubPreparedTarget(userId, template, movie, new ResolvedPickTarget(content, null, null, movieKey("550")));
         when(pickRepository.save(any())).thenAnswer(invocation -> assignPickId(invocation.getArgument(0)));
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
+        when(targetService.isValidPrepared(same(template), same(movie), any(), any())).thenReturn(true);
         PickResponseDTO result = service.createPick(userId, template.getId(),
                 new PickCreationDTO(PickVisibility.PUBLIC, List.of(selectionRequest(movie.getId(), "550"))));
 
@@ -198,7 +200,7 @@ class PickServiceImplTest {
         PicksTemplate template = template();
         PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, 1);
         stubCreationWithoutUserReference(template, List.of(category));
-        when(targetService.validateForCategory(eq(userId), same(template), same(category), any()))
+        when(targetService.prepareForCategory(eq(userId), any(PicksTemplate.class), argThat(value -> value.getId().equals(category.getId())), any()))
                 .thenThrow(new BadRequestException("Target is not eligible"));
 
         assertThatThrownBy(() -> service.createPick(userId, template.getId(),
@@ -215,12 +217,11 @@ class PickServiceImplTest {
         PicksTemplate template = template();
         PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, 1);
         stubCreation(userId, template, List.of(category));
-        when(targetService.validateForCategory(eq(userId), same(template), same(category), any()))
-                .thenReturn(new ResolvedPickTarget(content("550"), null, null, movieKey("550")));
+        stubPreparedTarget(userId, template, category, new ResolvedPickTarget(content("550"), null, null, movieKey("550")));
         when(pickRepository.save(any())).thenAnswer(invocation -> assignPickId(invocation.getArgument(0)));
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(targetService.isValid(eq(userId), same(template), same(category), any())).thenReturn(true);
+        when(targetService.isValidPrepared(same(template), same(category), any(), any())).thenReturn(true);
         PickCreationDTO request = new PickCreationDTO(PickVisibility.PUBLIC, List.of(selectionRequest(category.getId(), "550")));
         PickResponseDTO first = service.createPick(userId, template.getId(), request);
         PickResponseDTO second = service.createPick(userId, template.getId(), request);
@@ -419,8 +420,20 @@ class PickServiceImplTest {
     }
 
     private void stubCreationWithoutUserReference(PicksTemplate template, List<PicksTemplateCategory> categories) {
-        when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
+        when(templateRepository.findCreatorIdentityById(template.getId()))
+                .thenReturn(Optional.of(mock(PicksTemplateRepository.CreatorIdentity.class)));
+        when(templateRepository.findById(template.getId())).thenReturn(Optional.of(template));
+        lenient().when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
         when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(categories);
+    }
+
+    private void stubPreparedTarget(UUID userId, PicksTemplate template, PicksTemplateCategory category, ResolvedPickTarget resolved) {
+        PreparedPickTarget prepared = new PreparedPickTarget(resolved.key(), null, null,
+                resolved.content() == null ? null : resolved.content().getId(),
+                resolved.contextContent() == null ? null : resolved.contextContent().getId(),
+                new PreparedTargetValidation(resolved.key(), true, null));
+        when(targetService.prepareForCategory(eq(userId), any(PicksTemplate.class), argThat(value -> value.getId().equals(category.getId())), any())).thenReturn(prepared);
+        when(targetService.resolvePreparedForCategory(same(template), same(category), same(prepared))).thenReturn(resolved);
     }
 
     private Pick assignPickId(Pick pick) {

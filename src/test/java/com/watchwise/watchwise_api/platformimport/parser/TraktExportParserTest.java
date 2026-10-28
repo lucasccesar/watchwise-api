@@ -147,6 +147,17 @@ class TraktExportParserTest {
     }
 
     @Test
+    void rejectsReleaseYearAboveSupportedMaximum() {
+        TraktItemParserImpl items = new TraktItemParserImpl(mapper);
+        String json = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Example\",\"year\":10000,\"ids\":{}}}]";
+
+        assertThatThrownBy(() -> items.parse(stream(json), CONTEXT, "lists/list-41.json",
+                ImportRecordKind.LIST_ITEM, ignored -> {}))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class)
+                .hasMessageContaining("movie.year");
+    }
+
+    @Test
     void declaredMediaTypeRequiresItsCorrespondingIdentityObject() {
         String json = "[{\"id\":9,\"type\":\"movie\",\"show\":{\"title\":\"Series masquerading as movie\",\"ids\":{\"tmdb\":123}}}]";
         assertThatThrownBy(() -> history.parse(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)),

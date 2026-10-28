@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.common.security;
 
+import tools.jackson.databind.ObjectMapper;
+import com.watchwise.watchwise_api.common.exception.ApiError;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.FilterChain;
@@ -12,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.LocalDateTime;
@@ -19,6 +23,8 @@ import java.time.ZoneId;
 import java.util.Date;
 import java.util.Optional;
 import java.util.UUID;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,6 +44,9 @@ class JwtCookieAuthenticationFilterTest {
     private UserRepository userRepository;
 
     @Mock
+    private ObjectMapper objectMapper;
+
+    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -52,7 +61,7 @@ class JwtCookieAuthenticationFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new JwtCookieAuthenticationFilter(jwtService, userRepository);
+        filter = new JwtCookieAuthenticationFilter(jwtService, userRepository, objectMapper);
         userId = UUID.randomUUID();
         user = User.builder().id(userId).username("lucas").email("lucas@email.com").password("hash").build();
 
@@ -127,6 +136,49 @@ class JwtCookieAuthenticationFilterTest {
     }
 
     @Test
+    @DisplayName("[doFilterInternal] Should Not Authenticate - When Token Authentication Version Is Stale")
+    void shouldNotAuthenticateWhenTokenAuthenticationVersionIsStale() throws Exception {
+        when(userRepository.findSessionsInvalidatedAtById(userId))
+                .thenReturn(Optional.of(sessionsInvalidatedAtView(userId, null, 4)));
+        when(jwtService.extractAuthVersion(TOKEN)).thenReturn(3L);
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("[doFilterInternal] Should Handle A Transient Session Lookup Failure - With A 503 ApiError")
+    void shouldHandleTransientSessionLookupFailureWithoutContinuingTheFilterChain() throws Exception {
+        when(userRepository.findSessionsInvalidatedAtById(userId))
+                .thenThrow(new DataAccessResourceFailureException("database unavailable"));
+        when(objectMapper.writeValueAsString(any(ApiError.class))).thenReturn("{\"status\":503}");
+        when(response.getWriter()).thenReturn(new PrintWriter(new StringWriter()));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> filter.doFilterInternal(request, response, filterChain))
+                .doesNotThrowAnyException();
+
+        verify(response).setStatus(503);
+        verify(filterChain, org.mockito.Mockito.never()).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("[doFilterInternal] Should Keep Unexpected Repository Failures As Generic 500")
+    void shouldKeepUnexpectedRepositoryFailuresAsGeneric500() throws Exception {
+        when(userRepository.findSessionsInvalidatedAtById(userId))
+                .thenThrow(new InvalidDataAccessApiUsageException("query details"));
+        when(objectMapper.writeValueAsString(any(ApiError.class))).thenReturn("{\"status\":500}");
+        when(response.getWriter()).thenReturn(new PrintWriter(new StringWriter()));
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(response).setStatus(500);
+        verify(filterChain, org.mockito.Mockito.never()).doFilter(request, response);
+    }
+
+
+    @Test
     @DisplayName("[doFilterInternal] Should Not Look Up The User - When The Token Itself Is Invalid")
     void shouldNotLookUpTheUserWhenTheTokenItselfIsInvalid() throws Exception {
         when(jwtService.isTokenValid(TOKEN, TokenType.ACCESS)).thenReturn(false);
@@ -142,6 +194,11 @@ class JwtCookieAuthenticationFilterTest {
     }
 
     private UserRepository.SessionsInvalidatedAtView sessionsInvalidatedAtView(UUID id, LocalDateTime sessionsInvalidatedAt) {
+        return sessionsInvalidatedAtView(id, sessionsInvalidatedAt, 0);
+    }
+
+    private UserRepository.SessionsInvalidatedAtView sessionsInvalidatedAtView(
+            UUID id, LocalDateTime sessionsInvalidatedAt, long authVersion) {
         return new UserRepository.SessionsInvalidatedAtView() {
             @Override
             public UUID getId() {
@@ -152,6 +209,12 @@ class JwtCookieAuthenticationFilterTest {
             public LocalDateTime getSessionsInvalidatedAt() {
                 return sessionsInvalidatedAt;
             }
+
+            @Override
+            public long getAuthVersion() {
+                return authVersion;
+            }
+
         };
     }
 }

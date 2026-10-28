@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.search.dto.SearchUserViewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -32,6 +33,7 @@ public class SearchUserViewReader {
     private final FollowerRepository followers;
     private final UserListRepository lists;
     private final DiaryEntryRepository diary;
+    private final UserBlockRepository blocks;
 
     @Transactional(readOnly = true)
     public Page<SearchUserViewDTO> read(UUID viewerId, String query, Pageable pageable) {
@@ -43,6 +45,7 @@ public class SearchUserViewReader {
 
         List<User> candidates = page.getContent();
         List<UUID> targetIds = candidates.stream().map(User::getId).toList();
+        Set<UUID> blockedCounterpartIds = blocks.findBlockedCounterpartIdsEitherDirection(viewerId, targetIds);
         RelationshipState relationships = relationships(viewerId, targetIds);
         Set<UUID> visibleDetails = candidates.stream()
                 .filter(user -> canViewDetails(viewerId, user, relationships.outgoingStatusByUserId()))
@@ -66,7 +69,7 @@ public class SearchUserViewReader {
 
         List<SearchUserViewDTO> cards = candidates.stream()
                 .map(user -> toCard(viewerId, user, relationships, visibleDetails,
-                        followersByUser, listsByUser, watchedByUser))
+                        blockedCounterpartIds, followersByUser, listsByUser, watchedByUser))
                 .toList();
         return new PageImpl<>(cards, pageable, page.getTotalElements());
     }
@@ -76,6 +79,7 @@ public class SearchUserViewReader {
             User user,
             RelationshipState relationships,
             Set<UUID> visibleDetails,
+            Set<UUID> blockedCounterpartIds,
             Map<UUID, Long> followersByUser,
             Map<UUID, Long> listsByUser,
             Map<UUID, Long> watchedByUser) {
@@ -87,7 +91,7 @@ public class SearchUserViewReader {
                 user.getName(),
                 user.getUsername(),
                 user.getProfilePicture(),
-                detailsVisible ? user.getDescription() : null,
+                (ownedByViewer || !blockedCounterpartIds.contains(userId)) ? user.getDescription() : null,
                 detailsVisible,
                 detailsVisible ? watchedByUser.getOrDefault(userId, 0L) : null,
                 detailsVisible ? listsByUser.getOrDefault(userId, 0L) : null,

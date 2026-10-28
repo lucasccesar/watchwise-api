@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.repository.*;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
@@ -34,6 +35,7 @@ class UserAccountDeletionServiceImplTest {
     @Mock UserListItemRepository userListItemRepository;
     @Mock UserListItemService userListItemService;
     @Mock ReportReporterDeletionService reportReporterDeletionService;
+    @Mock EntityManager entityManager;
     @InjectMocks UserAccountDeletionServiceImpl userService;
     User savedUser = User.builder().id(UUID.randomUUID()).password("hash").build();
     @Mock
@@ -61,7 +63,8 @@ class UserAccountDeletionServiceImplTest {
 
         userService.deleteAccount(id, new DeleteAccountDTO("Password123"));
 
-        var order = inOrder(userRepository, accountLikes, userListRepository, userListItemService);
+        var order = inOrder(userRepository, accountLikes, userListRepository, userListItemService,
+                reportReporterDeletionService, entityManager);
         order.verify(userRepository).findByIdForListCreation(id);
         order.verify(accountLikes).findSurvivingAccountLikeTargets(id);
         order.verify(accountLikes).lockLikeTarget(listType, first);
@@ -70,7 +73,10 @@ class UserAccountDeletionServiceImplTest {
         order.verify(accountLikes).lockAccountLikeTargets(List.of(comment));
         order.verify(userListItemService).removeItemsReferencingChildLists(anyCollection());
         order.verify(accountLikes).deleteAccountLikesAndReconcile(id, List.of(comment, new Target(listType, last), new Target(listType, first)));
-        order.verify(userRepository).delete(savedUser);
+        order.verify(reportReporterDeletionService).removeReporterSubmissions(id);
+        order.verify(entityManager).flush();
+        order.verify(entityManager).clear();
+        order.verify(userRepository).deleteById(id);
         verify(accountLikes, never()).lockLikeTarget(listType, ownedId);
     }
 
@@ -86,7 +92,7 @@ class UserAccountDeletionServiceImplTest {
         assertThatThrownBy(() -> userService.deleteAccount(id, new DeleteAccountDTO("Password123")))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
 
-        verify(userRepository, never()).delete(any());
+        verify(userRepository, never()).deleteById(any());
         verifyNoInteractions(reportReporterDeletionService);
     }
     @Test
@@ -99,9 +105,12 @@ class UserAccountDeletionServiceImplTest {
 
         userService.deleteAccount(id, new DeleteAccountDTO("Password123"));
 
-        InOrder order = inOrder(accountLikes, userRepository);
+        InOrder order = inOrder(accountLikes, reportReporterDeletionService, entityManager, userRepository);
         order.verify(accountLikes).deleteAccountLikesAndReconcile(id, List.of());
-        order.verify(userRepository).delete(savedUser);
+        order.verify(reportReporterDeletionService).removeReporterSubmissions(id);
+        order.verify(entityManager).flush();
+        order.verify(entityManager).clear();
+        order.verify(userRepository).deleteById(id);
     }
 
     @Test
@@ -117,13 +126,17 @@ class UserAccountDeletionServiceImplTest {
         userService.deleteAccount(id, deleteAccountDTO);
 
         verify(importUploadQuotaService).prepareAccountDeletion(id);
-        verify(userRepository).delete(savedUser);
+        verify(userRepository).deleteById(id);
         verify(reportReporterDeletionService).removeReporterSubmissions(id);
-        InOrder inOrder = inOrder(advisoryLock, importUploadQuotaService, userRepository, reportReporterDeletionService);
+        InOrder inOrder = inOrder(advisoryLock, importUploadQuotaService, userRepository,
+                reportReporterDeletionService, entityManager);
         inOrder.verify(advisoryLock).lock(com.watchwise.watchwise_api.common.transaction.UserListStructureLock.IDENTITY);
         inOrder.verify(importUploadQuotaService).prepareAccountDeletion(id);
         inOrder.verify(userRepository).findByIdForListCreation(id);
         inOrder.verify(reportReporterDeletionService).removeReporterSubmissions(id);
+        inOrder.verify(entityManager).flush();
+        inOrder.verify(entityManager).clear();
+        inOrder.verify(userRepository).deleteById(id);
     }
 
     @Test
@@ -139,7 +152,7 @@ class UserAccountDeletionServiceImplTest {
                 .hasMessage("Invalid password");
 
         verifyNoInteractions(importUploadQuotaService);
-        verify(userRepository, never()).delete(any());
+        verify(userRepository, never()).deleteById(any());
     }
 
     @Test
@@ -155,7 +168,7 @@ class UserAccountDeletionServiceImplTest {
 
         verifyNoInteractions(importUploadQuotaService);
         verifyNoInteractions(passwordEncoder);
-        verify(userRepository, never()).delete(any());
+        verify(userRepository, never()).deleteById(any());
     }
 
 }

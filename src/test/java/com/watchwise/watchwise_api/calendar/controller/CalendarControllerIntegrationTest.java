@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -80,6 +81,9 @@ class CalendarControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
     @MockitoBean
     private CalendarService calendarService;
 
@@ -89,17 +93,28 @@ class CalendarControllerIntegrationTest {
         userRepository.deleteAll();
         reset(calendarService);
         RequestThrottlerTestSupport.reset(requestThrottler);
+        emailConfirmationSender.clear();
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken) {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username))
-                .andExpect(status().isCreated())
+        String email = username + "@email.com";
+        MvcResult registration = mockMvc.perform(registerRequest(username))
+                .andExpect(status().isAccepted())
                 .andReturn();
 
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie registrationProof = registration.getResponse()
+                .getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        MvcResult confirmation = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor(email) + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+
+        Cookie accessToken = confirmation.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessToken).isNotNull();
 
         User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();

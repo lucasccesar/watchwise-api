@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
@@ -78,6 +79,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
@@ -120,6 +122,9 @@ class ContentDetailsServiceImplTest {
     @Mock
     private AdvisoryLock advisoryLock;
 
+    @Mock
+    private RefreshGenerationSequence refreshGenerationSequence;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -131,13 +136,18 @@ class ContentDetailsServiceImplTest {
         seasonFetchExecutor = Executors.newSingleThreadExecutor();
         contentDetailsService = new ContentDetailsServiceImpl(
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
-                seriesRuntimeAggregateService, calendarScheduleSynchronizer, userContentPosterService,
-                userVisibilityService, new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock));
+                refreshGenerationSequence, seriesRuntimeAggregateService, calendarScheduleSynchronizer,
+                userContentPosterService, userVisibilityService,
+                new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock));
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
         lenient().when(seriesRuntimeAggregateService.resolve(any(), any(), any()))
                 .thenReturn(new SeriesRuntimeResolution(new SeriesRuntimeAggregate(null, null, null, null), List.of()));
+        lenient().when(seriesRuntimeAggregateService.resolve(any(), any(), any(), anyLong()))
+                .thenAnswer(invocation -> seriesRuntimeAggregateService.resolve(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+        lenient().when(refreshGenerationSequence.next()).thenReturn(1L);
     }
 
     @AfterEach
@@ -748,7 +758,7 @@ class ContentDetailsServiceImplTest {
 
         contentDetailsService.getDetails(contentId, requestingUserId);
 
-        verify(contentTrackingService).reactivateAfterRevival(series, "Returning Series");
+        verify(contentTrackingService).reactivateAfterRevival(series, "Returning Series", 1L);
     }
 
     @Test

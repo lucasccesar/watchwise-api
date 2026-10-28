@@ -11,7 +11,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 import org.springframework.web.servlet.ModelAndView;
 
-import java.time.Clock;
+import com.watchwise.watchwise_api.common.exception.ServiceUnavailableException;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,8 +38,11 @@ class PickCreationThrottleFilterTest {
                 new UsernamePasswordAuthenticationToken(userId, null, List.of()));
         FilterChain filterChain = mock(FilterChain.class);
         HandlerExceptionResolver exceptionResolver = mock(HandlerExceptionResolver.class);
+        SharedLimiterStore store = mock(SharedLimiterStore.class);
+        when(store.reserve(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true, true, false);
         PickCreationThrottleFilter filter = new PickCreationThrottleFilter(
-                new RequestThrottler(Clock.systemUTC()), exceptionResolver, 2, 1);
+                new RequestThrottler(store), exceptionResolver, 2, 1);
         when(exceptionResolver.resolveException(any(), any(), isNull(), any(TooManyRequestsException.class)))
                 .thenAnswer(invocation -> {
                     ((MockHttpServletResponse) invocation.getArgument(1)).setStatus(429);
@@ -55,6 +58,28 @@ class PickCreationThrottleFilterTest {
         verify(filterChain, times(2)).doFilter(any(), any());
         verify(exceptionResolver).resolveException(eq(thirdRequest), eq(thirdResponse), isNull(), any(TooManyRequestsException.class));
         assertThat(thirdResponse.getStatus()).isEqualTo(429);
+    }
+
+    @Test
+    void storeFailureIsResolvedAs503BeforeTheBusinessOperationRuns() throws Exception {
+        UUID userId = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(userId, null, List.of()));
+        SharedLimiterStore store = mock(SharedLimiterStore.class);
+        when(store.reserve(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt(), any())).thenThrow(new ServiceUnavailableException("Temporarily unavailable"));
+        HandlerExceptionResolver resolver = mock(HandlerExceptionResolver.class);
+        when(resolver.resolveException(any(), any(), isNull(), any(ServiceUnavailableException.class)))
+                .thenAnswer(invocation -> {
+                    ((MockHttpServletResponse) invocation.getArgument(1)).setStatus(503);
+                    return new ModelAndView();
+                });
+        PickCreationThrottleFilter filter = new PickCreationThrottleFilter(new RequestThrottler(store), resolver, 2, 1);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        java.util.concurrent.atomic.AtomicBoolean businessCalled = new java.util.concurrent.atomic.AtomicBoolean();
+        filter.doFilter(malformedPickCreationRequest(), response, (request, result) -> businessCalled.set(true));
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(businessCalled).isFalse();
     }
 
     @Test

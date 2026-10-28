@@ -42,4 +42,7 @@ public class SeriesProgressMetadata {
 
     @Column(name = "runtime_verified_at")
     private LocalDateTime runtimeVerifiedAt;
+
+    @Column(name = "refresh_generation", nullable = false)
+    private long refreshGeneration;
 }

@@ -64,6 +64,14 @@ public class ContentReleaseDateSnapshot {
     @Setter
     private LocalDateTime nextCheckAt;
 
+    @Column(name = "refresh_generation", nullable = false)
+    @Setter
+    private long refreshGeneration;
+
+    @Column(name = "refresh_claim_id")
+    @Setter
+    private UUID refreshClaimId;
+
     public void update(LocalDate releaseDate, Status status, LocalDateTime checkedAt, LocalDateTime nextCheckAt) {
         this.releaseDate = releaseDate;
         this.status = status;

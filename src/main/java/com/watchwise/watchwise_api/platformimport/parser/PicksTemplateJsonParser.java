@@ -32,6 +32,11 @@ import java.util.Set;
 @Component
 public class PicksTemplateJsonParser {
     private static final long MAX_BYTES = 5L * 1024 * 1024;
+    private static final int MAX_DESCRIPTION_LENGTH = 5000;
+    private static final int MAX_INSTRUCTIONS_LENGTH = 10000;
+    private static final int MAX_CATEGORIES = 50;
+    private static final int MAX_OPTIONS_PER_CATEGORY = 100;
+    private static final int MAX_TOTAL_OPTIONS = 200;
     private static final Logger log = LoggerFactory.getLogger(PicksTemplateJsonParser.class);
     private final ImportLimits limits;
 
@@ -73,8 +78,8 @@ public class PicksTemplateJsonParser {
         if (version != null && (!version.isNumber() || version.decimalValue().compareTo(BigDecimal.ONE) != 0))
             throw invalid("Unsupported schemaVersion");
         String title = requiredText(root, "title", 120);
-        String description = optionalText(root, "description", Integer.MAX_VALUE);
-        String instructions = optionalText(root, "instructions", Integer.MAX_VALUE);
+        String description = optionalText(root, "description", MAX_DESCRIPTION_LENGTH);
+        String instructions = optionalText(root, "instructions", MAX_INSTRUCTIONS_LENGTH);
         String cover = optionalText(root, "coverImage", 2048);
         if (cover != null) validateUrl(cover);
         LocalDate start = null, end = null;
@@ -88,14 +93,14 @@ public class PicksTemplateJsonParser {
         }
         JsonNode sourceCategories = root.get("categories");
         if (sourceCategories == null || !sourceCategories.isArray() || sourceCategories.isEmpty()
-                || sourceCategories.size() > 100) throw invalid("categories must contain 1 to 100 entries");
+                || sourceCategories.size() > MAX_CATEGORIES) throw invalid("categories must contain 1 to 50 entries");
         List<ImportedTemplateCategory> categories = new ArrayList<>();
         int total = 0;
         for (JsonNode node : sourceCategories) {
             int order = categories.size() + 1;
             ImportedTemplateCategory category = category(node, order);
             total += category.nominees().size();
-            if (total > 5000) throw invalid("Too many nominees in template");
+            if (total > MAX_TOTAL_OPTIONS) throw invalid("Template must contain at most 200 options");
             categories.add(category);
         }
         return new TemplateImportDocument(1, title, description, cover, instructions, start, end, List.copyOf(categories));
@@ -104,15 +109,15 @@ public class PicksTemplateJsonParser {
     private ImportedTemplateCategory category(JsonNode node, int order) {
         requireObject(node, "category", Set.of("name", "description", "type", "group", "nominees"));
         String name = requiredText(node, "name", 120);
-        String description = optionalText(node, "description", Integer.MAX_VALUE);
+        String description = optionalText(node, "description", MAX_DESCRIPTION_LENGTH);
         PickAllowedType type = enumValue(node, "type", PickAllowedType.class, null);
         PickCategoryGroup group = enumValue(node, "group", PickCategoryGroup.class, PickCategoryGroup.PRIMARY);
         boolean present = node.has("nominees");
         List<JsonNode> nominees = new ArrayList<>();
         if (present) {
             JsonNode array = node.get("nominees");
-            if (!array.isArray() || array.isEmpty() || array.size() > 500)
-                throw invalid("nominees must be a nonempty array of at most 500 entries or be omitted");
+            if (!array.isArray() || array.isEmpty() || array.size() > MAX_OPTIONS_PER_CATEGORY)
+                throw invalid("nominees must be a nonempty array of at most 100 entries or be omitted");
             for (JsonNode nominee : array) {
                 validateNominee(nominee, type);
                 nominees.add(nominee);

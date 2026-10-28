@@ -88,6 +88,17 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         if (category.getOptionMode() != PickCategoryOptionMode.FIXED) {
             throw new BadRequestException("Open categories cannot receive fixed options");
         }
+        int categoryOptionCount = optionRepository.findByCategoryId(categoryId).size();
+        if (categoryOptionCount >= 100) {
+            throw new BadRequestException("A category can contain at most 100 options");
+        }
+        List<PicksTemplateCategory> categories = categoryRepository
+                .findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(templateId);
+        int templateOptionCount = categories.isEmpty() ? 0 : optionRepository
+                .findByCategoryIdIn(categories.stream().map(PicksTemplateCategory::getId).toList()).size();
+        if (templateOptionCount >= 200) {
+            throw new BadRequestException("A template can contain at most 200 options");
+        }
         ResolvedPickTarget target = pickTargetService.validateFixedOption(actorId, template, category, dto.target());
         PicksTemplateOption saved = FixedOptionPersistence.saveAndFlush(optionRepository, PicksTemplateOption.builder().category(category).content(target.content())
                 .personTmdbId(target.personTmdbId()).contextContent(target.contextContent()).createdAt(LocalDateTime.now()).build());

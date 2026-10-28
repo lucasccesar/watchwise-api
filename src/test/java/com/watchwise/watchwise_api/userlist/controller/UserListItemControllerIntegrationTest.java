@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -32,6 +33,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
+import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -116,6 +118,9 @@ class UserListItemControllerIntegrationTest {
     private UserListItemService userListItemService;
 
     @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
     private UserListService userListService;
 
     @Autowired
@@ -136,6 +141,9 @@ class UserListItemControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
     @MockitoBean
     private TmdbClient tmdbClient;
 
@@ -147,6 +155,7 @@ class UserListItemControllerIntegrationTest {
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
+        emailConfirmationSender.clear();
         RequestThrottlerTestSupport.reset(requestThrottler);
 
         lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
@@ -165,11 +174,21 @@ class UserListItemControllerIntegrationTest {
 
     private RegisteredUser registerUser(String username) throws Exception {
         MvcResult result = mockMvc.perform(registerRequest(username))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
 
-        Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        String email = username + "@email.com";
+        Cookie registrationProof = result.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(registrationProof).isNotNull();
+        MvcResult confirmation = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor(email) + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+
+        Cookie accessTokenCookie = confirmation.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = confirmation.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         assertThat(csrfCookie).isNotNull();
 
@@ -690,7 +709,8 @@ class UserListItemControllerIntegrationTest {
         CountDownLatch resumeAdd = new CountDownLatch(1);
         AtomicBoolean pauseChildPreflightOnce = new AtomicBoolean(true);
         doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
+            Object result = java.util.Optional.ofNullable(
+                    entityManager.find(UserList.class, invocation.getArgument(0)));
             if (child.getId().equals(invocation.getArgument(0))
                     && pauseChildPreflightOnce.compareAndSet(true, false)) {
                 childPreflightLoaded.countDown();
@@ -713,7 +733,8 @@ class UserListItemControllerIntegrationTest {
             }
         });
         try {
-            assertThat(childPreflightLoaded.await(10, TimeUnit.SECONDS)).isTrue();
+            boolean reachedChildPreflight = childPreflightLoaded.await(10, TimeUnit.SECONDS);
+            assertThat(reachedChildPreflight).as("nested-list insertion reaches child preflight").isTrue();
 
             userListService.updateUserList(childOwner.id(), child.getId(),
                     new UserListPatchDTO(null, null, UserListVisibility.PRIVATE));

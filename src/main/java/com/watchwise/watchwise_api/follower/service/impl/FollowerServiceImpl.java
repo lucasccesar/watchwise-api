@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,7 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +38,7 @@ public class FollowerServiceImpl implements FollowerService {
 
     private final FollowerRepository followerRepository;
     private final UserRepository userRepository;
+    private final UserBlockRepository userBlockRepository;
     private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
     private final FollowNotificationService followNotificationService;
@@ -121,8 +125,9 @@ public class FollowerServiceImpl implements FollowerService {
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        return followerRepository.findByFollowedIdAndStatus(targetUserId, FollowStatus.ACCEPTED, pageRequest)
-                .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
+        Page<Follower> follows = followerRepository.findByFollowedIdAndStatus(
+                targetUserId, FollowStatus.ACCEPTED, pageRequest);
+        return mapSocialPreviewPage(viewerId, follows, Follower::getFollower);
     }
 
     @Override
@@ -133,8 +138,9 @@ public class FollowerServiceImpl implements FollowerService {
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        return followerRepository.findByFollowerIdAndStatus(targetUserId, FollowStatus.ACCEPTED, pageRequest)
-                .map(follow -> userMapper.userToPublicUserDto(follow.getFollowed()));
+        Page<Follower> follows = followerRepository.findByFollowerIdAndStatus(
+                targetUserId, FollowStatus.ACCEPTED, pageRequest);
+        return mapSocialPreviewPage(viewerId, follows, Follower::getFollowed);
     }
 
     @Override
@@ -142,6 +148,32 @@ public class FollowerServiceImpl implements FollowerService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return followerRepository.findByFollowedIdAndStatus(targetUserId, FollowStatus.PENDING, pageRequest)
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
+    }
+
+    private Page<PublicUserDTO> mapSocialPreviewPage(
+            UUID viewerId, Page<Follower> follows, Function<Follower, User> listedUser) {
+        List<Follower> content = follows.getContent();
+        if (content.isEmpty()) {
+            return follows.map(follow -> userMapper.userToPublicUserDto(listedUser.apply(follow)));
+        }
+
+        List<UUID> listedUserIds = content.stream()
+                .map(listedUser)
+                .map(User::getId)
+                .distinct()
+                .toList();
+        Set<UUID> blockedUserIds = userBlockRepository.findBlockedCounterpartIdsEitherDirection(
+                viewerId, listedUserIds);
+
+        return follows.map(follow -> {
+            User user = listedUser.apply(follow);
+            PublicUserDTO preview = userMapper.userToPublicUserDto(user);
+            if (viewerId.equals(user.getId()) || !blockedUserIds.contains(user.getId())) {
+                return preview;
+            }
+            return new PublicUserDTO(preview.id(), preview.username(), preview.name(), null,
+                    preview.profilePicture(), preview.isProfilePublic(), preview.createdAt());
+        });
     }
 
     @Override

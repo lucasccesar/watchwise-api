@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeCalculator;
 import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressMetadata;
 import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressSeasonMetadata;
@@ -36,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,6 +68,8 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     @Mock private SeriesProgressMetadataRepository metadataRepository;
     @Mock private SeriesProgressSeasonMetadataRepository seasonMetadataRepository;
     @Mock private NewTransactionExecutor newTransactionExecutor;
+    @Mock private AdvisoryLock advisoryLock;
+    @Mock private RefreshGenerationSequence refreshGenerationSequence;
 
     private ExecutorService seasonExecutor;
     private ExecutorService refreshExecutor;
@@ -74,6 +79,8 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     void setUp() {
         seasonExecutor = Executors.newFixedThreadPool(4);
         refreshExecutor = Executors.newFixedThreadPool(2);
+        AtomicLong generations = new AtomicLong(1);
+        lenient().when(refreshGenerationSequence.next()).thenAnswer(invocation -> generations.getAndIncrement());
         lenient().when(newTransactionExecutor.runInNewTransaction(any())).thenAnswer(invocation ->
                 ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         service = new SeriesProgressMetadataRefreshServiceImpl(
@@ -83,7 +90,9 @@ class SeriesProgressMetadataRefreshServiceImplTest {
                 new SeriesProgressMetadataCalculator(new SeriesRuntimeCalculator()),
                 seasonExecutor,
                 refreshExecutor,
-                newTransactionExecutor);
+                newTransactionExecutor,
+                advisoryLock,
+                refreshGenerationSequence);
         lenient().when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.empty());
         lenient().when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(anyCollection())).thenReturn(List.of());
     }
@@ -514,6 +523,62 @@ class SeriesProgressMetadataRefreshServiceImplTest {
 
         verify(tmdbClient, times(1)).getTvFullDetails(SERIES_ID, "en-US");
         verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+    }
+
+    @Test
+    void olderSeasonRefreshFinishingLastCannotReplaceNewerSnapshotOrSeasonSet() throws Exception {
+        AtomicReference<SeriesProgressMetadata> storedMetadata = new AtomicReference<>();
+        AtomicReference<List<SeriesProgressSeasonMetadata>> storedSeasons = new AtomicReference<>(List.of());
+        CountDownLatch olderSeasonStarted = new CountDownLatch(1);
+        CountDownLatch releaseOlderSeason = new CountDownLatch(1);
+        when(metadataRepository.findById(SERIES_ID))
+                .thenAnswer(invocation -> Optional.ofNullable(storedMetadata.get()));
+        doAnswer(invocation -> {
+            SeriesProgressMetadata saved = invocation.getArgument(0);
+            storedMetadata.set(saved);
+            return saved;
+        }).when(metadataRepository).save(any());
+        doAnswer(invocation -> {
+            storedSeasons.set(List.of());
+            return null;
+        }).when(seasonMetadataRepository).deleteAllBySeriesTmdbIdIn(anyCollection());
+        doAnswer(invocation -> {
+            List<SeriesProgressSeasonMetadata> saved = invocation.getArgument(0);
+            storedSeasons.set(List.copyOf(saved));
+            return saved;
+        }).when(seasonMetadataRepository).saveAll(any());
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US")).thenAnswer(invocation -> {
+            olderSeasonStarted.countDown();
+            assertThat(releaseOlderSeason.await(5, TimeUnit.SECONDS)).isTrue();
+            return found(season(1, episode(1, "2026-09-01", 35)));
+        });
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 2, "en-US"))
+                .thenReturn(found(season(2, episode(1, "2026-09-02", 70))));
+
+        SeriesProgressMetadataRefreshServiceImpl anotherInstance = new SeriesProgressMetadataRefreshServiceImpl(
+                tmdbClient, metadataRepository, seasonMetadataRepository,
+                new SeriesProgressMetadataCalculator(new SeriesRuntimeCalculator()),
+                seasonExecutor, refreshExecutor, newTransactionExecutor, advisoryLock, refreshGenerationSequence);
+        ExecutorService olderCall = Executors.newSingleThreadExecutor();
+        try {
+            Future<SeriesProgressMetadataRefreshService.Snapshot> stale = olderCall.submit(
+                    () -> service.refresh(SERIES_ID, tv(summary(1)), TODAY));
+            assertThat(olderSeasonStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            anotherInstance.refresh(SERIES_ID, tv(summary(2)), TODAY);
+            assertThat(storedSeasons.get()).extracting(SeriesProgressSeasonMetadata::getSeasonNumber)
+                    .containsExactly(2);
+            assertThat(storedMetadata.get().getTotalKnownRuntime()).isEqualTo(70);
+
+            releaseOlderSeason.countDown();
+            stale.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseOlderSeason.countDown();
+            olderCall.shutdownNow();
+        }
+
+        assertThat(storedSeasons.get()).extracting(SeriesProgressSeasonMetadata::getSeasonNumber)
+                .containsExactly(2);
+        assertThat(storedMetadata.get().getTotalKnownRuntime()).isEqualTo(70);
     }
 
     private static Throwable failureOf(Future<?> future) throws Exception {

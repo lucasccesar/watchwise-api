@@ -7,7 +7,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 public record ContentReviewCreationDTO(
-        @NotBlank @Size(max = 20000) String comment,
+        @NotBlank @Size(max = 10000) String comment,
         @Min(1) @Max(10) Integer score,
         @PositiveOrZero Long expectedRatingVersion) {
 }

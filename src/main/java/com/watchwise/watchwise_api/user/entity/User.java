@@ -37,6 +37,10 @@ public class User {
     @Setter
     private String email;
 
+    @Column(name = "pending_email", length = 60)
+    @Setter
+    private String pendingEmail;
+
     @Column(nullable = false)
     @Setter
     private String password;
@@ -62,7 +66,15 @@ public class User {
     @Column(name = "is_email_verified", nullable = false)
     @Setter
     @Builder.Default
-    private Boolean isEmailVerified = true;
+    private Boolean isEmailVerified = false;
+
+    @Column(name = "email_confirmation_token_hash", length = 64)
+    @Setter
+    private String emailConfirmationTokenHash;
+
+    @Column(name = "email_confirmation_expires_at")
+    @Setter
+    private LocalDateTime emailConfirmationExpiresAt;
 
     @Column(name = "created_at", nullable = false)
     @Setter
@@ -75,6 +87,11 @@ public class User {
     @Column(name = "sessions_invalidated_at")
     @Setter
     private LocalDateTime sessionsInvalidatedAt;
+
+    @Column(name = "auth_version", nullable = false)
+    @Setter
+    @Builder.Default
+    private long authVersion = 0L;
 
     @Column(name = "preferred_language", nullable = false, length = 10)
     @Setter

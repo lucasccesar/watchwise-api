@@ -123,6 +123,11 @@ class GlobalExceptionHandlerIntegrationTest {
             public LocalDateTime getSessionsInvalidatedAt() {
                 return sessionsInvalidatedAt;
             }
+
+            @Override
+            public long getAuthVersion() {
+                return 0;
+            }
         };
     }
 }

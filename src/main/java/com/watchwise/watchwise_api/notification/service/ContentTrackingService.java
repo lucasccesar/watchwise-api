@@ -8,4 +8,6 @@ public interface ContentTrackingService {
 
     void reactivateAfterRevival(Content content, String freshStatus);
 
+    void reactivateAfterRevival(Content content, String freshStatus, long refreshGeneration);
+
 }

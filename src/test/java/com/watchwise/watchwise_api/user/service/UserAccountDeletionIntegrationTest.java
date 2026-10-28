@@ -2,11 +2,15 @@ package com.watchwise.watchwise_api.user.service;
 
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.like.repository.AccountLikeFixture;
+import com.watchwise.watchwise_api.like.repository.LikeAccountDeletionOperationsImpl;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.entity.User;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,7 +43,9 @@ class UserAccountDeletionIntegrationTest {
         registry.add("spring.docker.compose.enabled", () -> "false");
     }
     @Autowired UserAccountDeletionService deletion;
+    @Autowired LikeAccountDeletionOperationsImpl accountDeletionOperations;
     @Autowired LikeService likes;
+    @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired PasswordEncoder encoder;
     @Autowired PlatformTransactionManager transactionManager;
@@ -167,7 +173,12 @@ class UserAccountDeletionIntegrationTest {
     @Test void targetDeletedAfterCaptureDoesNotProducePhantomDecrement() throws Exception {
         var target = fixture.targets.get(1);
         CountDownLatch captured = new CountDownLatch(1), continueDeletion = new CountDownLatch(1);
-        doAnswer(call -> { Object result = call.callRealMethod(); captured.countDown(); await(continueDeletion); return result; })
+        doAnswer(call -> {
+            Object result = accountDeletionOperations.findSurvivingAccountLikeTargets(fixture.actor);
+            captured.countDown();
+            await(continueDeletion);
+            return result;
+        })
                 .when(likeRepository).findSurvivingAccountLikeTargets(fixture.actor);
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<?> deleting = pool.submit(this::deleteAccount);
@@ -186,9 +197,19 @@ class UserAccountDeletionIntegrationTest {
 
     void raceAtCleanup(Runnable mutation, UUID concurrentActor, boolean actorDeleted) throws Exception {
         CountDownLatch captured = new CountDownLatch(1), release = new CountDownLatch(1), entered = new CountDownLatch(1);
-        doAnswer(call -> { captured.countDown(); await(release); return call.callRealMethod(); })
+        doAnswer(call -> {
+            captured.countDown();
+            await(release);
+            accountDeletionOperations.deleteAccountLikesAndReconcile(
+                    call.getArgument(0), call.getArgument(1));
+            return null;
+        })
                 .when(likeRepository).deleteAccountLikesAndReconcile(eq(fixture.actor), anyList());
-        doAnswer(call -> { entered.countDown(); return call.callRealMethod(); })
+        doAnswer(call -> {
+            entered.countDown();
+            User lockedUser = entityManager.find(User.class, call.getArgument(0), LockModeType.PESSIMISTIC_WRITE);
+            return Optional.ofNullable(lockedUser);
+        })
                 .when(userRepository).findByIdForLifecycle(concurrentActor);
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<?> deleting = pool.submit(this::deleteAccount);

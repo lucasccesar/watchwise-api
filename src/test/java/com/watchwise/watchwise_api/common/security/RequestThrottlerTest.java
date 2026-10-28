@@ -5,50 +5,34 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class RequestThrottlerTest {
+class RequestThrottlerTest extends SharedLimiterPostgresSupport {
 
     private static final int MAX_REQUESTS = 3;
     private static final Duration WINDOW = Duration.ofMinutes(10);
-
-    private final AtomicReference<Instant> currentInstant = new AtomicReference<>(Instant.parse("2024-01-01T00:00:00Z"));
-
-    private final Clock clock = new Clock() {
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return currentInstant.get();
-        }
-    };
 
     private RequestThrottler requestThrottler;
 
     @BeforeEach
     void setUp() {
-        requestThrottler = new RequestThrottler(clock);
+        requestThrottler = new RequestThrottler(store);
+    }
+
+    @Test
+    void independentlyConstructedInstancesMustShareTheRequestBudget() {
+        RequestThrottler otherReplica = new RequestThrottler(newStore());
+        requestThrottler.checkAllowed("shared", 1, WINDOW);
+        assertThatThrownBy(() -> otherReplica.checkAllowed("shared", 1, WINDOW))
+                .isInstanceOf(TooManyRequestsException.class);
     }
 
     private void advanceClock(Duration duration) {
-        currentInstant.set(currentInstant.get().plus(duration));
+        elapse(duration);
     }
 
     @Test
@@ -166,7 +150,7 @@ class RequestThrottlerTest {
         assertThatThrownBy(() -> requestThrottler.checkAllowed(key, MAX_REQUESTS, WINDOW))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        requestThrottler.reset();
+        jdbc.update("DELETE FROM shared_limiter_state WHERE kind = 'request'");
 
         assertThatCode(() -> requestThrottler.checkAllowed(key, MAX_REQUESTS, WINDOW))
                 .doesNotThrowAnyException();
@@ -181,7 +165,7 @@ class RequestThrottlerTest {
 
         requestThrottler.cleanupExpired();
 
-        assertThat(requestThrottler.size()).isZero();
+        assertThat(size("request")).isZero();
     }
 
     @Test
@@ -192,6 +176,6 @@ class RequestThrottlerTest {
 
         requestThrottler.cleanupExpired();
 
-        assertThat(requestThrottler.size()).isEqualTo(1);
+        assertThat(size("request")).isEqualTo(1);
     }
 }

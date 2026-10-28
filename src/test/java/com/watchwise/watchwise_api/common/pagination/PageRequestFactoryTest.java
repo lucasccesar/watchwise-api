@@ -46,6 +46,14 @@ class PageRequestFactoryTest {
     }
 
     @Test
+    @DisplayName("[build] Should Reject An Unsupported Offset - When Page And Size Exceed The Persistence Limit")
+    void shouldRejectAnUnsupportedOffsetWhenPageAndSizeExceedThePersistenceLimit() {
+        assertThatThrownBy(() -> pageRequestFactory.build(Integer.MAX_VALUE, 1000))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Requested page offset exceeds the supported maximum of 2147483647");
+    }
+
+    @Test
     @DisplayName("[build] Should Use Default Page Size - When Page Size Is Null")
     void shouldUseDefaultPageSizeWhenPageSizeIsNull() {
         PageRequest pageRequest = pageRequestFactory.build(1, null);

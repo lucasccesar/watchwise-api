@@ -27,12 +27,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForListCreation(@Param("id") UUID id);
 
     Optional<User> findByUsernameIgnoreCase(String username);
 
     @Modifying
-    @Query("update User u set u.sessionsInvalidatedAt = :at where u.id = :userId")
+    @Query("update User u set u.sessionsInvalidatedAt = :at, u.authVersion = u.authVersion + 1 where u.id = :userId")
     void markSessionsInvalidatedAt(@Param("userId") UUID userId, @Param("at") LocalDateTime at);
 
     Optional<SessionsInvalidatedAtView> findSessionsInvalidatedAtById(UUID id);
@@ -40,11 +44,37 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     interface SessionsInvalidatedAtView {
         UUID getId();
         LocalDateTime getSessionsInvalidatedAt();
+        long getAuthVersion();
     }
 
     Optional<User> findByUsernameIgnoreCaseOrEmailIgnoreCase(String username, String email);
 
     Optional<User> findByEmailIgnoreCase(String email);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE LOWER(u.email) = LOWER(:email)")
+    Optional<User> findByEmailIgnoreCaseForUpdate(@Param("email") String email);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE LOWER(u.email) = LOWER(:email) OR LOWER(u.pendingEmail) = LOWER(:email)")
+    Optional<User> findByEmailOrPendingEmailIgnoreCaseForUpdate(@Param("email") String email);
+
+    @Query("""
+        SELECT CASE WHEN COUNT(u) > 0 THEN true ELSE false END
+        FROM User u
+        WHERE u.id <> :userId
+          AND (LOWER(u.email) = LOWER(:email) OR LOWER(u.pendingEmail) = LOWER(:email))
+        """)
+    boolean existsEmailOrPendingEmailByAnotherUser(
+            @Param("userId") UUID userId,
+            @Param("email") String email);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.emailConfirmationTokenHash = :tokenHash")
+    Optional<User> findByEmailConfirmationTokenHashForUpdate(@Param("tokenHash") String tokenHash);
+
+    @Query("SELECT u.pendingEmail FROM User u WHERE u.emailConfirmationTokenHash = :tokenHash")
+    Optional<String> findPendingEmailByEmailConfirmationTokenHash(@Param("tokenHash") String tokenHash);
 
     @Query(
             value = """

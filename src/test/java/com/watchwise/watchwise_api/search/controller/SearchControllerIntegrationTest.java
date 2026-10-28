@@ -85,6 +85,9 @@ class SearchControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender emailConfirmationSender;
+
+    @Autowired
     private ContentRepository contentRepository;
 
     @Autowired
@@ -115,15 +118,10 @@ class SearchControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        assertThat(accessToken).isNotNull();
-
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken);
+        var user = com.watchwise.watchwise_api.user.service.TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(user.id(), user.accessToken());
     }
 
     private MockHttpServletRequestBuilder registerRequest(String username) {

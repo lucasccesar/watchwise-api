@@ -105,4 +105,14 @@ class CalendarControllerTest {
 
         verifyNoInteractions(calendarService);
     }
+
+    @Test
+    @DisplayName("[getMonth] Should Reject Year Zero - When Month Is Outside Supported Range")
+    void shouldRejectYearZeroWhenMonthIsOutsideSupportedRange() {
+        assertThatThrownBy(() -> calendarController.getMonth("0000-09"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("month must be in YYYY-MM format");
+
+        verifyNoInteractions(calendarService);
+    }
 }

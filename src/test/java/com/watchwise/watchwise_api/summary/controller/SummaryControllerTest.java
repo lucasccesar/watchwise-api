@@ -146,6 +146,20 @@ class SummaryControllerTest {
     }
 
     @Test
+    @DisplayName("[getMonthInReview] Should Reject Month Outside Supported Year Range")
+    void shouldRejectMonthOutsideSupportedYearRange() {
+        UUID targetUserId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> summaryController.getMonthInReview(targetUserId, ContentType.MOVIE, "0000-08"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("month must be in YYYY-MM format");
+
+        assertThatThrownBy(() -> summaryController.getMonthInReview(targetUserId, ContentType.MOVIE, "10000-08"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("month must be in YYYY-MM format");
+    }
+
+    @Test
     @DisplayName("[getYearInReview] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenGetYearInReviewIsCalled() {
         UUID targetUserId = UUID.randomUUID();

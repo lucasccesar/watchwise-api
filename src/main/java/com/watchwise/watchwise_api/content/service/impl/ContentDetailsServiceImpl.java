@@ -39,6 +39,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbVideo;
 import com.watchwise.watchwise_api.common.tmdb.TmdbVideos;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.content.dto.CastMemberDTO;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.CreatorDTO;
@@ -103,6 +104,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final TmdbClient tmdbClient;
     private final ExecutorService tmdbSeasonFetchExecutor;
     private final ContentTrackingService contentTrackingService;
+    private final RefreshGenerationSequence refreshGenerationSequence;
     private final SeriesRuntimeAggregateService seriesRuntimeAggregateService;
     private final CalendarScheduleSynchronizer calendarScheduleSynchronizer;
     private final UserContentPosterService userContentPosterService;
@@ -241,11 +243,13 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private ContentDetailsDTO buildSeriesDetails(
             Content content, String language, String region, String customPosterUrl) {
         Instant checkedAt = Instant.now();
+        long refreshGeneration = refreshGenerationSequence.next();
         TmdbLookupResult<TmdbTvFullDetails> lookup = tmdbClient.getTvFullDetails(content.getTmdbId(), language);
         TmdbTvFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbExternalIds externalIds = details.externalIds();
 
-        SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(content, details, language);
+        SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(
+                content, details, language, refreshGeneration);
         SeriesRuntimeAggregate runtime = runtimeResolution.aggregate();
         List<TmdbSeasonFullDetails> allSeasons = runtimeResolution.seasonsFetchedForAggregate();
         Map<Integer, TmdbLookupOrigin> seasonOrigins = originsBySeason(runtimeResolution.seasonsFetchedWithOrigin());
@@ -259,7 +263,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             seasonOrigins = originsBySeason(loadedSeasons);
         }
         if (!isTerminalSeriesStatus(details.status())) {
-            contentTrackingService.reactivateAfterRevival(content, details.status());
+            contentTrackingService.reactivateAfterRevival(content, details.status(), refreshGeneration);
         }
         synchronizeSeriesSchedule(content, language, region, lookup, details, allSeasons, seasonOrigins, checkedAt);
 

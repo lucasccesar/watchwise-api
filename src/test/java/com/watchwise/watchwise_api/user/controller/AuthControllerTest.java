@@ -13,11 +13,15 @@ import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
+import com.watchwise.watchwise_api.user.dto.ConfirmEmailDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthLoginDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
+import com.watchwise.watchwise_api.user.dto.ResendEmailConfirmationDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterEach;
@@ -53,6 +57,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -81,6 +86,9 @@ class AuthControllerTest {
 
     @Mock
     private RequestThrottler requestThrottler;
+
+    @Mock
+    private EmailConfirmationService emailConfirmationService;
 
     @InjectMocks
     private AuthController authController;
@@ -127,18 +135,16 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("[register] Should Return Created With UserResponseDTO - When Not Authenticated")
-    void shouldReturnCreatedWithUserResponseDtoWhenNotAuthenticated() {
+    @DisplayName("[register] Should Return Accepted Without A User DTO - When Registration Is Pending")
+    void shouldReturnAcceptedWithoutUserDtoWhenRegistrationIsPending() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
+        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
 
-        ResponseEntity<UserResponseDTO> result = authController.register(postUserDTO, request, response);
+        ResponseEntity<Void> result = authController.register(postUserDTO, request, response);
 
-        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(result.getBody()).isEqualTo(userResponseDTO);
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(result.getBody()).isNull();
     }
 
     @Test
@@ -151,39 +157,98 @@ class AuthControllerTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Already authenticated");
 
-        verify(userService, never()).saveNewUser(any());
+        verify(userService, never()).startRegistration(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
 
     @Test
-    @DisplayName("[register] Should Set Access And Refresh Token Cookies - When Registration Succeeds")
-    void shouldSetAccessAndRefreshTokenCookiesWhenRegistrationSucceeds() {
+    @DisplayName("[register] Should Send Confirmation Without Creating A Session - When Delivery Is Configured")
+    void shouldSendConfirmationWithoutCreatingASessionWhenDeliveryIsConfigured() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
-        ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
-        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
-        when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
-        when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
+        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
 
         authController.register(postUserDTO, request, response);
 
-        verify(cookieUtil).addCookie(response, accessCookie);
-        verify(cookieUtil).addCookie(response, refreshCookie);
+        verify(userService).startRegistration(postUserDTO);
+        verify(cookieUtil).buildRegistrationProofCookie("registration-proof");
+        verify(cookieUtil).addCookie(eq(response), any());
+        verifyNoInteractions(csrfAuthenticationStrategy, jwtService, refreshTokenService);
     }
 
     @Test
-    @DisplayName("[register] Should Rotate Csrf Token - When Registration Succeeds")
-    void shouldRotateCsrfTokenWhenRegistrationSucceeds() {
-        setAnonymous();
-        PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
+    @DisplayName("[resendEmailConfirmation] Should Renew Browser Proof Cookie - When Registration Proof Is Valid")
+    void shouldRenewBrowserProofCookieWhenRegistrationProofIsValid() {
+        ResendEmailConfirmationDTO confirmation = new ResendEmailConfirmationDTO("john.doe@email.com");
+        ResponseCookie refreshedProof = ResponseCookie.from(CookieUtil.REGISTRATION_PROOF_COOKIE, "browser-proof")
+                .maxAge(java.time.Duration.ofMinutes(30)).build();
+        when(emailConfirmationService.resend("john.doe@email.com", "browser-proof")).thenReturn(true);
+        when(cookieUtil.buildRegistrationProofCookie("browser-proof")).thenReturn(refreshedProof);
 
-        authController.register(postUserDTO, request, response);
+        ResponseEntity<Void> result = authController.resendEmailConfirmation(
+                confirmation, "browser-proof", request, response);
 
-        verify(csrfAuthenticationStrategy).onAuthentication(eq(null), eq(request), eq(response));
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(cookieUtil).buildRegistrationProofCookie("browser-proof");
+        verify(cookieUtil).addCookie(response, refreshedProof);
+    }
+
+    @Test
+    @DisplayName("[resendEmailConfirmation] Should Not Renew Browser Proof Cookie - When Registration Proof Is Invalid")
+    void shouldNotRenewBrowserProofCookieWhenRegistrationProofIsInvalid() {
+        ResendEmailConfirmationDTO confirmation = new ResendEmailConfirmationDTO("john.doe@email.com");
+        when(emailConfirmationService.resend("john.doe@email.com", "wrong-proof")).thenReturn(false);
+
+        ResponseEntity<Void> result = authController.resendEmailConfirmation(
+                confirmation, "wrong-proof", request, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(cookieUtil, never()).buildRegistrationProofCookie(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
+    @DisplayName("[confirmEmail] Should Issue Session Cookies - When Registration Proof And Email Token Are Valid")
+    void shouldIssueSessionCookiesAfterRegistrationConfirmation() {
+        UUID userId = userResponseDTO.id();
+        when(emailConfirmationService.confirm("email-token", "browser-proof"))
+                .thenReturn(new EmailConfirmationService.ConfirmationResult(userId, true));
+        when(userService.getCurrentUser(userId)).thenReturn(userResponseDTO);
+        when(userService.getAuthVersion(userId)).thenReturn(3L);
+        when(jwtService.generateToken(userId, 3L, TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userId, 3L)).thenReturn("refresh-token");
+        when(cookieUtil.clearRegistrationProofCookie())
+                .thenReturn(ResponseCookie.from(CookieUtil.REGISTRATION_PROOF_COOKIE, "").maxAge(0).build());
+        when(cookieUtil.buildAccessTokenCookie("access-token"))
+                .thenReturn(ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build());
+        when(cookieUtil.buildRefreshTokenCookie("refresh-token"))
+                .thenReturn(ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build());
+
+        ResponseEntity<Void> result = authController.confirmEmail(
+                new ConfirmEmailDTO("email-token"), "browser-proof", request, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(cookieUtil).clearRegistrationProofCookie();
+        verify(csrfAuthenticationStrategy).onAuthentication(null, request, response);
+        verify(refreshTokenService).issueRefreshToken(userId, 3L);
+        verify(cookieUtil, times(3)).addCookie(eq(response), any());
+    }
+
+    @Test
+    @DisplayName("[confirmEmail] Should Not Issue Session - When Confirming An Email Change")
+    void shouldNotIssueSessionWhenConfirmingAnEmailChange() {
+        when(emailConfirmationService.confirm("email-token", null))
+                .thenReturn(new EmailConfirmationService.ConfirmationResult(userResponseDTO.id(), false));
+        when(cookieUtil.clearRegistrationProofCookie())
+                .thenReturn(ResponseCookie.from(CookieUtil.REGISTRATION_PROOF_COOKIE, "").maxAge(0).build());
+
+        ResponseEntity<Void> result = authController.confirmEmail(
+                new ConfirmEmailDTO("email-token"), null, request, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(cookieUtil).clearRegistrationProofCookie();
+        verify(userService, never()).getCurrentUser(any());
+        verifyNoInteractions(csrfAuthenticationStrategy, jwtService, refreshTokenService);
     }
 
     @Test
@@ -191,13 +256,13 @@ class AuthControllerTest {
     void shouldCheckRateLimitBeforeCreatingUserWhenNotAuthenticated() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
+        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
 
         authController.register(postUserDTO, request, response);
 
         InOrder order = inOrder(requestThrottler, userService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
-        order.verify(userService).saveNewUser(postUserDTO);
+        order.verify(userService).startRegistration(postUserDTO);
     }
 
     @Test
@@ -206,7 +271,7 @@ class AuthControllerTest {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
-        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
+        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
 
         authController.register(postUserDTO, request, response);
 
@@ -224,7 +289,7 @@ class AuthControllerTest {
         assertThatThrownBy(() -> authController.register(postUserDTO, request, response))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        verify(userService, never()).saveNewUser(any());
+        verify(userService, never()).startRegistration(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
 
@@ -233,7 +298,7 @@ class AuthControllerTest {
     void shouldReturnOkWithUserResponseDtoWhenNotAuthenticated() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         ResponseEntity<UserResponseDTO> result = authController.login(loginUserDTO, request, response);
 
@@ -251,7 +316,7 @@ class AuthControllerTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Already authenticated");
 
-        verify(userService, never()).login(any());
+        verify(userService, never()).loginForAuthentication(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
 
@@ -262,9 +327,9 @@ class AuthControllerTest {
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
         ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
+        when(jwtService.generateToken(userResponseDTO.id(), 0L, TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L)).thenReturn("refresh-token");
         when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
 
@@ -279,13 +344,13 @@ class AuthControllerTest {
     void shouldCheckRateLimitBeforeAttemptingLoginWhenNotAuthenticated() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         authController.login(loginUserDTO, request, response);
 
         InOrder order = inOrder(attemptLockout, userService);
         order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
-        order.verify(userService).login(loginUserDTO);
+        order.verify(userService).loginForAuthentication(loginUserDTO);
     }
 
     @Test
@@ -293,14 +358,14 @@ class AuthControllerTest {
     void shouldCheckIpRateLimitBeforeCheckingLockoutWhenNotAuthenticated() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         authController.login(loginUserDTO, request, response);
 
         InOrder order = inOrder(requestThrottler, attemptLockout, userService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
         order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
-        order.verify(userService).login(loginUserDTO);
+        order.verify(userService).loginForAuthentication(loginUserDTO);
     }
 
     @Test
@@ -309,7 +374,7 @@ class AuthControllerTest {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         authController.login(loginUserDTO, request, response);
 
@@ -328,7 +393,7 @@ class AuthControllerTest {
                 .isInstanceOf(TooManyRequestsException.class);
 
         verify(attemptLockout, never()).checkAllowed(any(), anyInt(), any());
-        verify(userService, never()).login(any());
+        verify(userService, never()).loginForAuthentication(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
 
@@ -337,7 +402,7 @@ class AuthControllerTest {
     void shouldBuildLockoutKeyFromIdentifierOnlyWhenCalled() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("  John.Doe@Email.com  ", "Password123");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         authController.login(loginUserDTO, request, response);
 
@@ -364,7 +429,7 @@ class AuthControllerTest {
     void shouldRecordFailureAndRethrowWhenCredentialsAreInvalid() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "WrongPassword123");
-        when(userService.login(loginUserDTO)).thenThrow(new UnauthorizedException("Invalid credentials"));
+        when(userService.loginForAuthentication(loginUserDTO)).thenThrow(new UnauthorizedException("Invalid credentials"));
 
         assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
                 .isInstanceOf(UnauthorizedException.class)
@@ -380,7 +445,7 @@ class AuthControllerTest {
     void shouldRecordSuccessAndNotRecordFailureWhenLoginSucceeds() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
-        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+        when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
 
         authController.login(loginUserDTO, request, response);
 
@@ -394,7 +459,8 @@ class AuthControllerTest {
         setAnonymous();
         OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
         when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
-        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+        when(userService.findByEmailForAuthentication(userResponseDTO.email()))
+                .thenReturn(Optional.of(new AuthenticatedUser(userResponseDTO, 0L)));
 
         ResponseEntity<Object> result = authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
 
@@ -410,9 +476,10 @@ class AuthControllerTest {
         ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
         when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
-        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
-        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
+        when(userService.findByEmailForAuthentication(userResponseDTO.email()))
+                .thenReturn(Optional.of(new AuthenticatedUser(userResponseDTO, 0L)));
+        when(jwtService.generateToken(userResponseDTO.id(), 0L, TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L)).thenReturn("refresh-token");
         when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
 
@@ -429,7 +496,7 @@ class AuthControllerTest {
         setAnonymous();
         OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
         when(googleTokenVerifier.verify("google-id-token")).thenReturn("unregistered@email.com");
-        when(userService.findByEmail("unregistered@email.com")).thenReturn(Optional.empty());
+        when(userService.findByEmailForAuthentication("unregistered@email.com")).thenReturn(Optional.empty());
 
         ResponseEntity<Object> result = authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
 
@@ -449,7 +516,7 @@ class AuthControllerTest {
                 .hasMessage("Already authenticated");
 
         verify(googleTokenVerifier, never()).verify(any());
-        verify(userService, never()).findByEmail(any());
+        verify(userService, never()).findByEmailForAuthentication(any());
     }
 
     @Test
@@ -458,7 +525,8 @@ class AuthControllerTest {
         setAnonymous();
         OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
         when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
-        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+        when(userService.findByEmailForAuthentication(userResponseDTO.email()))
+                .thenReturn(Optional.of(new AuthenticatedUser(userResponseDTO, 0L)));
 
         authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
 
@@ -474,7 +542,8 @@ class AuthControllerTest {
         OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
-        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+        when(userService.findByEmailForAuthentication(userResponseDTO.email()))
+                .thenReturn(Optional.of(new AuthenticatedUser(userResponseDTO, 0L)));
 
         authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
 
@@ -493,7 +562,7 @@ class AuthControllerTest {
                 .isInstanceOf(TooManyRequestsException.class);
 
         verify(googleTokenVerifier, never()).verify(any());
-        verify(userService, never()).findByEmail(any());
+        verify(userService, never()).findByEmailForAuthentication(any());
     }
 
     @Test

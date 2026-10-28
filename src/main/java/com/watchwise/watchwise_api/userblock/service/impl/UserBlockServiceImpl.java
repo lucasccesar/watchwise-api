@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.dto.BlockedUserDTO;
@@ -71,6 +72,12 @@ public class UserBlockServiceImpl implements UserBlockService {
     public Page<BlockedUserDTO> getBlockedUsers(UUID blockerId, Integer page, Integer size) {
         return userBlockRepository.findByBlockerIdOrderByCreatedAtDescIdDesc(
                         blockerId, pageRequestFactory.build(page, size))
-                .map(block -> new BlockedUserDTO(userMapper.userToPublicUserDto(block.getBlocked()), block.getCreatedAt()));
+                .map(block -> new BlockedUserDTO(withoutBiography(userMapper.userToPublicUserDto(block.getBlocked())),
+                        block.getCreatedAt()));
+    }
+
+    private PublicUserDTO withoutBiography(PublicUserDTO user) {
+        return new PublicUserDTO(user.id(), user.username(), user.name(), null, user.profilePicture(),
+                user.isProfilePublic(), user.createdAt());
     }
 }

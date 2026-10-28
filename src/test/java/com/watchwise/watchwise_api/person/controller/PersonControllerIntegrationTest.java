@@ -383,6 +383,11 @@ class PersonControllerIntegrationTest {
             public LocalDateTime getSessionsInvalidatedAt() {
                 return null;
             }
+
+            @Override
+            public long getAuthVersion() {
+                return 0;
+            }
         };
     }
 

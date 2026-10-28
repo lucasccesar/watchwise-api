@@ -114,6 +114,34 @@ class PicksTemplateJsonParserTest {
     }
 
     @Test
+    void enforcesPreparedTemplateTextAndOptionLimitsBeforeNormalization() {
+        String maxDescription = "x".repeat(5000);
+        String maxInstructions = "x".repeat(10000);
+        assertThat(parse(valid().replace("\"categories\"", "\"description\":\"" + maxDescription + "\",\"categories\"")))
+                .isNotNull();
+        assertThat(parse(valid().replace("\"categories\"", "\"instructions\":\"" + maxInstructions + "\",\"categories\"")))
+                .isNotNull();
+        assertRejected(valid().replace("\"categories\"", "\"description\":\"" + "x".repeat(5001) + "\",\"categories\""));
+        assertRejected(valid().replace("\"categories\"", "\"instructions\":\"" + "x".repeat(10001) + "\",\"categories\""));
+        assertRejected(baseCategory("\"type\":\"MOVIE\",\"description\":\"" + "x".repeat(5001) + "\""));
+
+        String open = "{\"name\":\"N\",\"type\":\"MOVIE\"}";
+        assertThat(parse("{\"title\":\"T\",\"categories\":[" + (open + ",").repeat(49) + open + "]}")
+                .categories()).hasSize(50);
+        assertRejected("{\"title\":\"T\",\"categories\":[" + (open + ",").repeat(50) + open + "]}");
+
+        String fixed100 = fixedCategory(100);
+        assertThat(parse("{\"title\":\"T\",\"categories\":[" + fixed100 + "]}").categories())
+                .hasSize(1);
+        assertRejected("{\"title\":\"T\",\"categories\":[" + fixedCategory(101) + "]}");
+        assertThat(parse("{\"title\":\"T\",\"categories\":[" + fixed100 + "," + fixed100 + "]}")
+                .categories()).hasSize(2);
+        assertRejected("{\"title\":\"T\",\"categories\":[" + fixed100 + "," + fixed100 + ","
+                + fixedCategory(1) + "]}");
+
+    }
+
+    @Test
     @DisplayName("[parse] Should Reject The Configured Byte Limit - When The Document Exceeds It")
     void enforcesConfiguredByteAndDepthLimits() {
         limits.setMaxTemplateUploadBytes(valid().getBytes(StandardCharsets.UTF_8).length - 1);
@@ -126,14 +154,23 @@ class PicksTemplateJsonParserTest {
     @Test
     void acceptsUpperBoundsAndRejectsAggregateNomineeOverflow() {
         String open = "{\"name\":\"N\",\"type\":\"MOVIE\"}";
-        String fixed500 = "{\"name\":\"N\",\"type\":\"MOVIE\",\"nominees\":["
-                + ("\"N\",").repeat(499) + "\"N\"]}";
-        assertThat(parse("{\"title\":\"T\",\"categories\":[" + (open + ",").repeat(99) + open + "]}")
-                .categories()).hasSize(100);
-        assertThat(parse("{\"title\":\"T\",\"categories\":[" + (fixed500 + ",").repeat(9) + fixed500 + "]}")
-                .categories()).hasSize(10);
-        assertRejected("{\"title\":\"T\",\"categories\":[" + (fixed500 + ",").repeat(10)
-                + "{\"name\":\"N\",\"type\":\"MOVIE\",\"nominees\":[\"N\"]}]}");
+        String fixed100 = fixedCategory(100);
+        assertThat(parse("{\"title\":\"T\",\"categories\":[" + (open + ",").repeat(49) + open + "]}")
+                .categories()).hasSize(50);
+        assertThat(parse("{\"title\":\"T\",\"categories\":[" + fixed100 + "," + fixed100 + "]}")
+                .categories()).hasSize(2);
+        assertRejected("{\"title\":\"T\",\"categories\":[" + (open + ",").repeat(50) + open + "]}");
+        assertRejected("{\"title\":\"T\",\"categories\":[" + fixedCategory(101) + "]}");
+        assertRejected("{\"title\":\"T\",\"categories\":[" + fixed100 + "," + fixed100 + ","
+                + fixedCategory(1) + "]}");
+
+        JsonNode schema = schema();
+        assertThat(schema.at("/properties/description/maxLength").intValue()).isEqualTo(5000);
+        assertThat(schema.at("/properties/instructions/maxLength").intValue()).isEqualTo(10000);
+        assertThat(schema.at("/properties/categories/maxItems").intValue()).isEqualTo(50);
+        assertThat(schema.at("/$defs/mediaCategory/properties/description/maxLength").intValue()).isEqualTo(5000);
+        assertThat(schema.at("/$defs/mediaCategory/properties/nominees/maxItems").intValue()).isEqualTo(100);
+        assertThat(schema.at("/$comment").asString()).contains("total options <= 200");
     }
 
     @Test
@@ -229,7 +266,7 @@ class PicksTemplateJsonParserTest {
         assertThatThrownBy(() -> parse("{\"title\":"))
                 .isInstanceOf(BadRequestException.class).hasMessage("Invalid template JSON");
         assertThatThrownBy(() -> parse("{\"title\":\"T\",\"categories\":[]}"))
-                .isInstanceOf(BadRequestException.class).hasMessage("categories must contain 1 to 100 entries");
+                .isInstanceOf(BadRequestException.class).hasMessage("categories must contain 1 to 50 entries");
         InputStream failingStream = new InputStream() {
             @Override public int read() throws IOException { throw new IOException("C:\\private\\secret.json"); }
         };
@@ -252,6 +289,10 @@ class PicksTemplateJsonParserTest {
     }
 
     private String valid() { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\"}]}"; }
+    private String fixedCategory(int nomineeCount) {
+        return "{\"name\":\"N\",\"type\":\"MOVIE\",\"nominees\":["
+                + ("\"N\",").repeat(nomineeCount - 1) + "\"N\"]}";
+    }
     private String baseCategory(String fields) { return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\"," + fields + "}]}"; }
     private String mediaNominee(String field, String value) {
         return "{\"title\":\"T\",\"categories\":[{\"name\":\"N\",\"type\":\"MOVIE\",\"nominees\":[{\"title\":\"Film\",\"" + field + "\":" + value + "}]}]}";

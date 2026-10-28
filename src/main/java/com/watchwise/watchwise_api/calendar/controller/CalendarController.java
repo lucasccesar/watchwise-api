@@ -39,7 +39,7 @@ public class CalendarController {
 
         try {
             YearMonth parsedMonth = YearMonth.parse(month, MONTH_FORMATTER);
-            if (!MONTH_FORMATTER.format(parsedMonth).equals(month)) {
+            if (!MONTH_FORMATTER.format(parsedMonth).equals(month) || parsedMonth.getYear() < 1) {
                 throw new BadRequestException("month must be in YYYY-MM format");
             }
             return parsedMonth;

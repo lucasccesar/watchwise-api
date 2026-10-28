@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.contentposter.entity.UserContentPoster;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -59,6 +61,9 @@ class UserContentPosterControllerIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
@@ -207,26 +212,10 @@ class UserContentPosterControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                    "username": "%s",
-                                    "name": "%s",
-                                    "email": "%s@email.com",
-                                    "password": "Password123"
-                                }
-                                """.formatted(username, username, username)))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfToken = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(accessToken).isNotNull();
-        assertThat(csrfToken).isNotNull();
-
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken, csrfToken);
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private MockHttpServletRequestBuilder putRequest(RegisteredUser user, UUID contentId, String posterUrl) {

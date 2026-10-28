@@ -654,6 +654,9 @@ public class UserListItemServiceImpl implements UserListItemService {
         lockListItemRows(listId);
 
         UserListItem item = findOwnedItem(listId, itemId);
+        if (preflightItem != null) {
+            entityManager.refresh(item);
+        }
 
         deleteAndCloseGap(item);
     }

@@ -411,6 +411,9 @@ public class SummaryServiceImpl implements SummaryService {
         if (year == null) {
             throw new BadRequestException("year must be provided");
         }
+        if (year < 1 || year > 9999) {
+            throw new BadRequestException("year must be between 1 and 9999");
+        }
 
         LocalDate start = LocalDate.of(year, 1, 1);
         LocalDate end = LocalDate.of(year, 12, 31);

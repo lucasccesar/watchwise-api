@@ -470,7 +470,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository).findByTmdbIdAndType("100", ContentType.MOVIE);
+        verify(contentRepository, org.mockito.Mockito.times(2)).findByTmdbIdAndType("100", ContentType.MOVIE);
     }
 
     @Test
@@ -491,7 +491,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository)
+        verify(contentRepository, org.mockito.Mockito.times(2))
                 .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON);
     }
 
@@ -564,7 +564,7 @@ class ContentServiceImplTest {
 
         contentService.getOrCreateReference(dto);
 
-        verify(contentRepository).findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+        verify(contentRepository, org.mockito.Mockito.times(2)).findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
                 eq("200"), eq(1), isNull(), eq(ContentType.SEASON));
     }
 
@@ -922,7 +922,7 @@ class ContentServiceImplTest {
         Content existing = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE).isSeasonFinale(false).build();
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
-                .thenReturn(Optional.empty(), Optional.of(existing));
+                .thenReturn(Optional.empty(), Optional.empty(), Optional.of(existing));
         doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped))
@@ -962,7 +962,7 @@ class ContentServiceImplTest {
         ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null);
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE))
-                .thenReturn(Optional.empty(), Optional.of(existing));
+                .thenReturn(Optional.empty(), Optional.empty(), Optional.of(existing));
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_tmdb_id_type"));
@@ -982,7 +982,7 @@ class ContentServiceImplTest {
         ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), null, ContentType.EPISODE, "200", 1, 5, true, null, null, null);
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
-                .thenReturn(Optional.empty(), Optional.of(existing));
+                .thenReturn(Optional.empty(), Optional.empty(), Optional.of(existing));
         doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped))

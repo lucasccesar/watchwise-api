@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.search.dto.SearchUserViewDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,12 +41,29 @@ class SearchUserViewReaderTest {
     private UserListRepository lists;
     @Mock
     private DiaryEntryRepository diary;
+    @Mock
+    private UserBlockRepository blocks;
 
     private SearchUserViewReader reader;
 
     @BeforeEach
     void setUp() {
-        reader = new SearchUserViewReader(users, followers, lists, diary);
+        reader = new SearchUserViewReader(users, followers, lists, diary, blocks);
+    }
+
+    @Test
+    void shouldHideBioForBlockedPublicProfilePreview() {
+        User target = user(UUID.randomUUID(), "blocked-night", "Blocked Night", true);
+        PageRequest pageable = PageRequest.of(0, 10);
+        List<UUID> targetIds = List.of(target.getId());
+        when(users.searchByNameOrUsernameForView(eq("night"), eq("night"), eq(pageable)))
+                .thenReturn(new PageImpl<>(List.of(target), pageable, 1));
+        when(blocks.findBlockedCounterpartIdsEitherDirection(VIEWER_ID, targetIds)).thenReturn(Set.of(target.getId()));
+
+        SearchUserViewDTO card = reader.read(VIEWER_ID, "night", pageable).getContent().getFirst();
+
+        assertThat(card.profileDetailsVisible()).isTrue();
+        assertThat(card.description()).isNull();
     }
 
     @Test
@@ -88,7 +107,7 @@ class SearchUserViewReaderTest {
 
         SearchUserViewDTO privateCard = result.getContent().get(1);
         assertThat(privateCard.profileDetailsVisible()).isFalse();
-        assertThat(privateCard.description()).isNull();
+        assertThat(privateCard.description()).isEqualTo("description");
         assertThat(privateCard.watchedCount()).isNull();
         assertThat(privateCard.listsCount()).isNull();
         assertThat(privateCard.followersCount()).isNull();

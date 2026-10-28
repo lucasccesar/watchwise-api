@@ -149,6 +149,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 ));
     }
 
+    @ExceptionHandler(BadGatewayException.class)
+    ResponseEntity<ApiError> handleBadGateway(BadGatewayException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiError(LocalDateTime.now(), HttpStatus.BAD_GATEWAY.value(),
+                        "Bad Gateway", ex.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    ResponseEntity<ApiError> handleServiceUnavailable(
+            ServiceUnavailableException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiError(LocalDateTime.now(), HttpStatus.SERVICE_UNAVAILABLE.value(),
+                        "Service Unavailable", ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(TooManyRequestsException.class)
     ResponseEntity<ApiError> handleTooManyRequests(
             TooManyRequestsException ex,

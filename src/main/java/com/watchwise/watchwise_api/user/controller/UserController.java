@@ -20,6 +20,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -42,6 +44,7 @@ public class UserController {
     private final CookieUtil cookieUtil;
     private final AttemptLockout attemptLockout;
     private final RequestThrottler requestThrottler;
+    private final PlatformTransactionManager transactionManager;
 
     @Value("${app.rate-limit.delete-account.max-attempts}")
     private int deleteAccountMaxAttempts;
@@ -104,17 +107,19 @@ public class UserController {
 
         UserResponseDTO user;
         try {
-            user = userService.updateUser(credentialCheck.user(), patchUserDTO);
+            user = new TransactionTemplate(transactionManager).execute(status -> {
+                UserResponseDTO updated = userService.updateUser(credentialCheck.user(), patchUserDTO);
+                if (touchesCredentials) {
+                    attemptLockout.recordSuccess(lockoutKey);
+                }
+                return updated;
+            });
         } catch (UnauthorizedException e) {
             if (touchesCredentials) {
                 attemptLockout.recordFailure(lockoutKey, patchAccountMaxAttempts, Duration.ofMinutes(patchAccountBlockMinutes));
             }
             throw e;
         }
-        if (touchesCredentials) {
-            attemptLockout.recordSuccess(lockoutKey);
-        }
-
         return ResponseEntity.ok(user);
     }
 
@@ -136,13 +141,14 @@ public class UserController {
         attemptLockout.checkAllowed(lockoutKey, deleteAccountMaxAttempts, Duration.ofMinutes(deleteAccountWindowMinutes));
 
         try {
-            userService.deleteAccount(currentUserId, deleteAccountDTO);
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                userService.deleteAccount(currentUserId, deleteAccountDTO);
+                attemptLockout.recordSuccess(lockoutKey);
+            });
         } catch (UnauthorizedException e) {
             attemptLockout.recordFailure(lockoutKey, deleteAccountMaxAttempts, Duration.ofMinutes(deleteAccountBlockMinutes));
             throw e;
         }
-        attemptLockout.recordSuccess(lockoutKey);
-
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, cookieUtil.getCsrfTokenPath()));

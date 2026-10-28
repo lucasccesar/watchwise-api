@@ -11,6 +11,15 @@ import java.util.Collection;
 
 public interface PickTargetService {
 
+    PreparedPickTarget prepareForCategory(UUID viewerId, PicksTemplate template, PicksTemplateCategory category, PickTargetDTO target);
+
+    ResolvedPickTarget resolvePreparedForCategory(PicksTemplate template, PicksTemplateCategory category, PreparedPickTarget prepared);
+
+    PreparedTargetValidation prepareValidation(PickSelection selection);
+
+    boolean isValidPrepared(PicksTemplate template, PicksTemplateCategory category, PickSelection selection,
+            PreparedTargetValidation prepared);
+
     ResolvedPickTarget validateForCategory(
             UUID viewerId,
             PicksTemplate template,

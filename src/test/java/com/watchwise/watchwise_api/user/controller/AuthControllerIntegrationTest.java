@@ -6,7 +6,11 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.PendingRegistrationRepository;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.impl.UserServiceImpl;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,16 +19,34 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
+import javax.sql.DataSource;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,7 +61,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AuthControllerIntegrationTest {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withImagePullPolicy(image -> false);
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -56,35 +79,326 @@ class AuthControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private PendingRegistrationRepository pendingRegistrationRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @MockitoBean
     private GoogleTokenVerifier googleTokenVerifier;
 
+    @MockitoSpyBean
+    private UserServiceImpl userService;
+
     @Autowired
     private RequestThrottler requestThrottler;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private final Map<String, Cookie> registrationProofCookies = new HashMap<>();
 
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
+        pendingRegistrationRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+        emailConfirmationSender.clear();
+        registrationProofCookies.clear();
     }
 
     @Test
-    @DisplayName("[register] Should Emit Access, Refresh And Csrf Cookies - When Registration Succeeds")
-    void shouldEmitAccessRefreshAndCsrfCookiesWhenRegistrationSucceeds() throws Exception {
+    void loginDoesNotIssueTokensOrCookiesWhenClearingLockoutFails() throws Exception {
+        MvcResult login = registerConfirmAndLogin("clearfailure", "clearfailure@example.test");
+        var refreshBefore = jdbcTemplate.queryForList("SELECT id, revoked FROM refresh_tokens ORDER BY id");
+        long attemptsBefore = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(request_count), 0) FROM shared_limiter_state WHERE kind = 'lockout'", Long.class);
+        jdbcTemplate.execute("""
+                CREATE FUNCTION reject_login_lockout_clear() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'test lockout clear unavailable'; END $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER reject_login_lockout_clear BEFORE DELETE ON shared_limiter_state
+                FOR EACH ROW WHEN (OLD.kind = 'lockout') EXECUTE FUNCTION reject_login_lockout_clear()
+                """);
+        try {
+            mockMvc.perform(loginRequest("clearfailure")
+                            .cookie(login.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE)))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.status").value(503))
+                    .andExpect(cookie().doesNotExist(CookieUtil.ACCESS_TOKEN_COOKIE))
+                    .andExpect(cookie().doesNotExist(CookieUtil.REFRESH_TOKEN_COOKIE))
+                    .andExpect(cookie().doesNotExist(CookieUtil.CSRF_TOKEN_COOKIE));
+            assertThat(jdbcTemplate.queryForList("SELECT id, revoked FROM refresh_tokens ORDER BY id"))
+                    .isEqualTo(refreshBefore);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(SUM(request_count), 0) FROM shared_limiter_state WHERE kind = 'lockout'", Long.class))
+                    .isEqualTo(attemptsBefore + 1);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER reject_login_lockout_clear ON shared_limiter_state");
+            jdbcTemplate.execute("DROP FUNCTION reject_login_lockout_clear()");
+        }
+    }
+
+    @Test
+    @DisplayName("[register] Should Not Create A Session Before Email Confirmation")
+    void shouldNotCreateASessionBeforeEmailConfirmation() throws Exception {
         mockMvc.perform(registerRequest("csrfuser", "csrfuser@email.com"))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
+                .andExpect(cookie().exists(CookieUtil.REGISTRATION_PROOF_COOKIE))
+                .andExpect(cookie().doesNotExist(CookieUtil.ACCESS_TOKEN_COOKIE))
+                .andExpect(cookie().doesNotExist(CookieUtil.REFRESH_TOKEN_COOKIE));
+
+        assertThat(userRepository.findByEmailIgnoreCase("csrfuser@email.com")).isEmpty();
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                "csrfuser@email.com", LocalDateTime.now())).isEqualTo(1);
+        mockMvc.perform(loginRequest("csrfuser")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[confirmEmail] Should Verify The Address And Consume Its Token - When Token Is Valid")
+    void shouldVerifyTheAddressAndConsumeItsTokenWhenTokenIsValid() throws Exception {
+        MvcResult registration = mockMvc.perform(registerRequest("confirmuser", "confirmuser@email.com"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        String token = emailConfirmationSender.tokenFor("confirmuser@email.com");
+
+        mockMvc.perform(confirmEmailRequest(token)).andExpect(status().isBadRequest());
+        assertThat(userRepository.findByEmailIgnoreCase("confirmuser@email.com")).isEmpty();
+
+        mockMvc.perform(confirmEmailRequest(token)
+                        .cookie(registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
+                .andExpect(status().isNoContent())
                 .andExpect(cookie().exists(CookieUtil.ACCESS_TOKEN_COOKIE))
                 .andExpect(cookie().exists(CookieUtil.REFRESH_TOKEN_COOKIE))
                 .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
-                .andExpect(cookie().httpOnly(CookieUtil.CSRF_TOKEN_COOKIE, false));
+                .andExpect(cookie().maxAge(CookieUtil.REGISTRATION_PROOF_COOKIE, 0));
+
+        assertThat(userRepository.findByEmailIgnoreCase("confirmuser@email.com").orElseThrow().getIsEmailVerified())
+                .isTrue();
+        mockMvc.perform(loginRequest("confirmuser")).andExpect(status().isOk());
+        mockMvc.perform(confirmEmailRequest(token)).andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("[register] Should Replace A Pre-Existing Csrf Token - When A Stale Cookie Was Already Present")
-    void shouldReplaceAPreExistingCsrfTokenWhenAStaleCookieWasAlreadyPresent() throws Exception {
+    @DisplayName("[register] Should Keep Browser Attempts Separate - When The Same Email Starts Registration Twice")
+    void shouldKeepBrowserAttemptsSeparateWhenTheSameEmailStartsRegistrationTwice() throws Exception {
+        MvcResult attackerRegistration = registerAndRememberProof("preclaim", "owner@email.com");
+        String attackerToken = emailConfirmationSender.tokenFor("owner@email.com");
+
+        MvcResult ownerRegistration = registerAndRememberProof("emailowner", "owner@email.com");
+        String ownerToken = emailConfirmationSender.tokenFor("owner@email.com");
+        assertThat(ownerToken).isNotEqualTo(attackerToken);
+        assertThat(userRepository.findByEmailIgnoreCase("owner@email.com")).isEmpty();
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                "owner@email.com", LocalDateTime.now())).isEqualTo(2);
+
+        mockMvc.perform(confirmEmailRequest(attackerToken)
+                        .cookie(ownerRegistration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(confirmEmailRequest(attackerToken)
+                        .cookie(attackerRegistration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
+                .andExpect(status().isNoContent());
+        assertThat(userRepository.findByEmailIgnoreCase("owner@email.com").orElseThrow().getIsEmailVerified())
+                .isTrue();
+        mockMvc.perform(confirmEmailRequest(ownerToken)
+                        .cookie(ownerRegistration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
+                .andExpect(status().isBadRequest());
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                "owner@email.com", LocalDateTime.now())).isZero();
+    }
+
+    @Test
+    @DisplayName("[confirmEmail] Should Serialize Confirmation With New Attempts - When The Email Is Locked")
+    void shouldWaitForEmailLockBeforeConfirmingRegistration() throws Exception {
+        String email = "serialized-confirmation@email.com";
+        MvcResult registration = registerAndRememberProof("serializedconfirmation", email);
+        String token = emailConfirmationSender.tokenFor(email);
+        Cookie proof = registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+
+        try (Connection lockConnection = dataSource.getConnection();
+                var executor = Executors.newSingleThreadExecutor()) {
+            lockConnection.setAutoCommit(true);
+            try (PreparedStatement lock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_lock(hashtextextended(LOWER(?), 0))")) {
+                lock.setString(1, email);
+                lock.execute();
+            }
+
+            Future<Integer> confirmation = executor.submit(() -> mockMvc.perform(
+                            confirmEmailRequest(token).cookie(proof))
+                    .andReturn()
+                    .getResponse()
+                    .getStatus());
+
+            boolean waitedForEmailLock = awaitAdvisoryLockWaitOrCompletion(confirmation, email);
+            assertThat(waitedForEmailLock)
+                    .as("confirmation must serialize through the per-email registration lock")
+                    .isTrue();
+
+            try (PreparedStatement unlock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_unlock(hashtextextended(LOWER(?), 0))")) {
+                unlock.setString(1, email);
+                unlock.execute();
+            }
+
+            assertThat(confirmation.get(10, TimeUnit.SECONDS)).isEqualTo(204);
+            assertThat(userRepository.findByEmailIgnoreCase(email)).isPresent();
+        }
+    }
+
+    @Test
+    @DisplayName("[register] Should Recheck Email Under Its Lock - When It Becomes Active After Preflight")
+    void shouldRejectRegistrationWhenEmailBecomesActiveAfterPreflight() throws Exception {
+        String email = "active-during-register@email.com";
+
+        try (Connection lockConnection = dataSource.getConnection();
+                var executor = Executors.newSingleThreadExecutor()) {
+            lockConnection.setAutoCommit(true);
+            try (PreparedStatement lock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_lock(hashtextextended(LOWER(?), 0))")) {
+                lock.setString(1, email);
+                lock.execute();
+            }
+
+            Future<Integer> registration = executor.submit(() -> mockMvc.perform(
+                            registerRequest("racingregistration", email))
+                    .andReturn()
+                    .getResponse()
+                    .getStatus());
+
+            boolean waitedForEmailLock = awaitAdvisoryLockWaitOrCompletion(registration, email);
+            assertThat(waitedForEmailLock)
+                    .as("registration must reach the same per-email lock after its initial preflight")
+                    .isTrue();
+
+            LocalDateTime now = LocalDateTime.now();
+            userRepository.saveAndFlush(User.builder()
+                    .username("existing-confirmed-user")
+                    .name("Existing confirmed user")
+                    .email(email)
+                    .password(passwordEncoder.encode("Password123"))
+                    .isEmailVerified(true)
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build());
+
+            try (PreparedStatement unlock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_unlock(hashtextextended(LOWER(?), 0))")) {
+                unlock.setString(1, email);
+                unlock.execute();
+            }
+
+            assertThat(registration.get(10, TimeUnit.SECONDS)).isEqualTo(409);
+            assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                    email, LocalDateTime.now())).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("[register] Should Bound Separate Attempts - When The Same Email Starts More Than Three Registrations")
+    void shouldBoundSeparateAttemptsWhenTheSameEmailStartsMoreThanThreeRegistrations() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(registerRequest("attempt" + i, "limited@email.com"))
+                    .andExpect(status().isAccepted());
+        }
+
+        mockMvc.perform(registerRequest("attempt4", "limited@email.com").with(req -> {
+                    req.setRemoteAddr("10.0.0.99");
+                    return req;
+                }))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value(
+                        "Too many pending registration attempts for this email. Try again later."));
+
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                "limited@email.com", LocalDateTime.now())).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[register] Should Enforce The Three Attempt Limit Concurrently - When Four Browsers Use The Same Email")
+    void shouldEnforceThreeAttemptLimitConcurrentlyWhenFourBrowsersUseTheSameEmail() throws Exception {
+        int requestCount = 4;
+        CountDownLatch ready = new CountDownLatch(requestCount);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(requestCount)) {
+            List<java.util.concurrent.Future<Integer>> responses = IntStream.range(0, requestCount)
+                    .mapToObj(index -> executor.submit(() -> {
+                        ready.countDown();
+                        if (!start.await(10, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("Concurrent registration start was not released");
+                        }
+                        return mockMvc.perform(registerRequest("parallel" + index, "parallel@email.com")
+                                        .with(request -> {
+                                            request.setRemoteAddr("10.0.1." + (index + 1));
+                                            return request;
+                                        }))
+                                .andReturn()
+                                .getResponse()
+                                .getStatus();
+                    }))
+                    .toList();
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<Integer> statuses = responses.stream()
+                    .map(response -> {
+                        try {
+                            return response.get(30, TimeUnit.SECONDS);
+                        } catch (Exception exception) {
+                            throw new IllegalStateException("Concurrent registration request failed", exception);
+                        }
+                    })
+                    .toList();
+
+            assertThat(statuses).containsExactlyInAnyOrder(202, 202, 202, 429);
+            assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                    "parallel@email.com", LocalDateTime.now())).isEqualTo(3);
+        } finally {
+            start.countDown();
+        }
+    }
+
+    @Test
+    @DisplayName("[confirmEmail/resend] Should Resend Only With The Registration Browser Proof")
+    void shouldResendRegistrationTokenOnlyWithTheBrowserProof() throws Exception {
+        MvcResult registration = registerAndRememberProof("resendproofuser", "resendproofuser@email.com");
+        Cookie proof = registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        String originalToken = emailConfirmationSender.tokenFor("resendproofuser@email.com");
+
+        mockMvc.perform(resendEmailConfirmationRequest("resendproofuser@email.com"))
+                .andExpect(status().isNoContent());
+        assertThat(emailConfirmationSender.tokenFor("resendproofuser@email.com")).isEqualTo(originalToken);
+
+        MvcResult resendResult = mockMvc.perform(
+                        resendEmailConfirmationRequest("resendproofuser@email.com").cookie(proof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+        String resentToken = emailConfirmationSender.tokenFor("resendproofuser@email.com");
+        assertThat(resentToken).isNotEqualTo(originalToken);
+        Cookie renewedProof = resendResult.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(renewedProof).isNotNull();
+        assertThat(renewedProof.getValue()).isEqualTo(proof.getValue());
+        assertThat(renewedProof.getMaxAge()).isEqualTo(30 * 60);
+
+        mockMvc.perform(confirmEmailRequest(resentToken).cookie(renewedProof)).andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("[register] Should Not Rotate Csrf Token - When A Stale Cookie Was Already Present")
+    void shouldNotRotateCsrfTokenWhenAStaleCookieWasAlreadyPresent() throws Exception {
         MvcResult anonymousResult = mockMvc.perform(get("/protected-test-route"))
                 .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
                 .andReturn();
@@ -94,12 +408,11 @@ class AuthControllerIntegrationTest {
 
         MvcResult registerResult = mockMvc.perform(registerRequest("rotateduser", "rotateduser@email.com")
                         .cookie(staleCsrfCookie))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
 
         Cookie freshCsrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(freshCsrfCookie).isNotNull();
-        assertThat(freshCsrfCookie.getValue()).isNotEqualTo(staleCsrfCookie.getValue());
+        assertThat(freshCsrfCookie).isNull();
     }
 
     @Test
@@ -123,10 +436,15 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[register] Should Return Conflict With Username Message - When Username Is Already Taken")
     void shouldReturnConflictWithUsernameMessageWhenUsernameIsAlreadyTaken() throws Exception {
-        mockMvc.perform(registerRequest("duplicateuser", "first@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("duplicateuser", "first@email.com");
 
-        mockMvc.perform(registerRequest("duplicateuser", "second@email.com"))
+        MvcResult second = mockMvc.perform(registerRequest("duplicateuser", "second@email.com"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        String secondToken = emailConfirmationSender.tokenFor("second@email.com");
+        confirmRegisteredEmail("first@email.com");
+        mockMvc.perform(confirmEmailRequest(secondToken)
+                        .cookie(second.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Username already in use"));
     }
@@ -134,19 +452,24 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[register] Should Return Conflict With Username Message - When Username Is Already Taken With Different Case")
     void shouldReturnConflictWithUsernameMessageWhenUsernameIsAlreadyTakenWithDifferentCase() throws Exception {
-        mockMvc.perform(registerRequest("CaseUser", "casefirst@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("CaseUser", "casefirst@email.com");
 
-        mockMvc.perform(registerRequest("caseuser", "casesecond@email.com"))
+        MvcResult second = mockMvc.perform(registerRequest("caseuser", "casesecond@email.com"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        String secondToken = emailConfirmationSender.tokenFor("casesecond@email.com");
+        confirmRegisteredEmail("casefirst@email.com");
+        mockMvc.perform(confirmEmailRequest(secondToken)
+                        .cookie(second.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Username already in use"));
     }
 
     @Test
-    @DisplayName("[register] Should Return Conflict With Email Message - When Email Is Already Taken")
-    void shouldReturnConflictWithEmailMessageWhenEmailIsAlreadyTaken() throws Exception {
-        mockMvc.perform(registerRequest("firstuser", "duplicate@email.com"))
-                .andExpect(status().isCreated());
+    @DisplayName("[register] Should Return Conflict With Email Message - When Email Is Already Verified")
+    void shouldReturnConflictWithEmailMessageWhenEmailIsAlreadyVerified() throws Exception {
+        registerAndRememberProof("firstuser", "duplicate@email.com");
+        confirmRegisteredEmail("duplicate@email.com");
 
         mockMvc.perform(registerRequest("seconduser", "duplicate@email.com"))
                 .andExpect(status().isConflict())
@@ -156,11 +479,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[register] Should Return Conflict - When Already Authenticated")
     void shouldReturnConflictWhenAlreadyAuthenticated() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("alreadyauthuser", "alreadyauthuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("alreadyauthuser", "alreadyauthuser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
 
         mockMvc.perform(registerRequest("anotheruser", "anotheruser@email.com").cookie(accessTokenCookie))
@@ -173,7 +493,7 @@ class AuthControllerIntegrationTest {
     void shouldReturnTooManyRequestsWhenRegisterRequestsFromSameIpExceedTheConfiguredMax() throws Exception {
         for (int i = 0; i < 10; i++) {
             mockMvc.perform(registerRequest("throttleuser" + i, "throttleuser" + i + "@email.com"))
-                    .andExpect(status().isCreated());
+                    .andExpect(status().isAccepted());
         }
 
         mockMvc.perform(registerRequest("throttleuser10", "throttleuser10@email.com"))
@@ -186,7 +506,7 @@ class AuthControllerIntegrationTest {
     void shouldNotBlockADifferentIpWhenAnotherIpIsRateLimitedForRegister() throws Exception {
         for (int i = 0; i < 10; i++) {
             mockMvc.perform(registerRequest("ipthrottleuser" + i, "ipthrottleuser" + i + "@email.com"))
-                    .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
         }
         mockMvc.perform(registerRequest("ipthrottleuser10", "ipthrottleuser10@email.com"))
                 .andExpect(status().isTooManyRequests());
@@ -195,20 +515,14 @@ class AuthControllerIntegrationTest {
                     req.setRemoteAddr("10.0.0.99");
                     return req;
                 }))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     @Test
     @DisplayName("[login] Should Return Conflict - When Already Authenticated")
     void shouldReturnConflictWhenLoggingInWhileAlreadyAuthenticated() throws Exception {
-        mockMvc.perform(registerRequest("alreadyauthloginuser", "alreadyauthloginuser@email.com"))
-                .andExpect(status().isCreated());
-
-        MvcResult registerResult = mockMvc.perform(registerRequest("otherloginuser", "otherloginuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("otherloginuser", "otherloginuser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
 
         mockMvc.perform(loginRequest("alreadyauthloginuser").cookie(accessTokenCookie))
@@ -219,8 +533,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[login] Should Return UserResponseDTO And Emit Access, Refresh And Csrf Cookies - When Credentials Are Valid")
     void shouldReturnUserResponseDtoAndEmitCookiesWhenCredentialsAreValid() throws Exception {
-        mockMvc.perform(registerRequest("loginuser", "loginuser@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("loginuser", "loginuser@email.com");
+        confirmRegisteredEmail("loginuser@email.com");
 
         mockMvc.perform(loginRequest("loginuser"))
                 .andExpect(status().isOk())
@@ -231,10 +545,71 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[login] Should Reject The Session - When Password Changes After Credential Validation")
+    void shouldRejectTheSessionWhenPasswordChangesAfterCredentialValidation() throws Exception {
+        String email = "loginversionrace@email.com";
+        registerAndRememberProof("loginversionrace", email);
+        confirmRegisteredEmail(email);
+
+        doAnswer(invocation -> {
+            Object authenticatedUser = invocation.callRealMethod();
+            User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+            user.setPassword(passwordEncoder.encode("ChangedPassword456"));
+            user.setAuthVersion(user.getAuthVersion() + 1);
+            userRepository.saveAndFlush(user);
+            return authenticatedUser;
+        }).when(userService).loginForAuthentication(any());
+
+        MvcResult login = mockMvc.perform(loginRequest("loginversionrace"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie accessToken = login.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie refreshToken = login.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(accessToken).isNotNull();
+        assertThat(refreshToken).isNotNull();
+
+        mockMvc.perform(get("/users/me").cookie(accessToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Reject The Session - When Password Changes After Account Lookup")
+    void shouldRejectOauthSessionWhenPasswordChangesAfterAccountLookup() throws Exception {
+        String email = "oauthversionrace@email.com";
+        registerAndRememberProof("oauthversionrace", email);
+        confirmRegisteredEmail(email);
+        when(googleTokenVerifier.verify("oauth-version-race-token")).thenReturn(email);
+
+        doAnswer(invocation -> {
+            Object authenticatedUser = invocation.callRealMethod();
+            User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+            user.setPassword(passwordEncoder.encode("ChangedPassword456"));
+            user.setAuthVersion(user.getAuthVersion() + 1);
+            userRepository.saveAndFlush(user);
+            return authenticatedUser;
+        }).when(userService).findByEmailForAuthentication(email);
+
+        MvcResult oauthLogin = mockMvc.perform(oauthLoginRequest("google", "oauth-version-race-token"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie accessToken = oauthLogin.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie refreshToken = oauthLogin.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(accessToken).isNotNull();
+        assertThat(refreshToken).isNotNull();
+
+        mockMvc.perform(get("/users/me").cookie(accessToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("[login] Should Return Unauthorized - When Password Is Incorrect")
     void shouldReturnUnauthorizedWhenPasswordIsIncorrect() throws Exception {
-        mockMvc.perform(registerRequest("wrongpassuser", "wrongpassuser@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("wrongpassuser", "wrongpassuser@email.com");
+        confirmRegisteredEmail("wrongpassuser@email.com");
 
         String body = """
                 {
@@ -259,10 +634,18 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[login] Should Resolve To The Username Match - When A Username Collides With A Different User's Email")
     void shouldResolveToTheUsernameMatchWhenAUsernameCollidesWithADifferentUsersEmail() throws Exception {
-        mockMvc.perform(registerRequest("emailowner", "collision@email.com"))
-                .andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("collision@email.com", "usernameowner@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("emailowner", "collision@email.com");
+        confirmRegisteredEmail("collision@email.com");
+        LocalDateTime now = LocalDateTime.now();
+        userRepository.saveAndFlush(User.builder()
+                .username("collision@email.com")
+                .name("Legacy username owner")
+                .email("usernameowner@email.com")
+                .password(passwordEncoder.encode("Password123"))
+                .isEmailVerified(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
 
         mockMvc.perform(loginRequest("collision@email.com"))
                 .andExpect(status().isOk())
@@ -272,8 +655,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[login] Should Return TooManyRequests - When Failed Attempts Reach The Configured Max")
     void shouldReturnTooManyRequestsWhenFailedAttemptsReachTheConfiguredMax() throws Exception {
-        mockMvc.perform(registerRequest("ratelimituser", "ratelimituser@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("ratelimituser", "ratelimituser@email.com");
+        confirmRegisteredEmail("ratelimituser@email.com");
 
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(wrongPasswordLoginRequest("ratelimituser"))
@@ -288,10 +671,10 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[login] Should Not Block A Different Identifier - When Another Identifier Is Rate Limited")
     void shouldNotBlockADifferentIdentifierWhenAnotherIdentifierIsRateLimited() throws Exception {
-        mockMvc.perform(registerRequest("ratelimituserA", "ratelimituserA@email.com"))
-                .andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("ratelimituserB", "ratelimituserB@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("ratelimituserA", "ratelimituserA@email.com");
+        registerAndRememberProof("ratelimituserB", "ratelimituserB@email.com");
+        confirmRegisteredEmail("ratelimituserA@email.com");
+        confirmRegisteredEmail("ratelimituserB@email.com");
 
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(wrongPasswordLoginRequest("ratelimituserA"))
@@ -307,8 +690,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[login] Should Still Block A Different Ip - When Same Identifier Is Rate Limited")
     void shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited() throws Exception {
-        mockMvc.perform(registerRequest("ratelimitipuser", "ratelimitipuser@email.com"))
-                .andExpect(status().isCreated());
+        registerAndRememberProof("ratelimitipuser", "ratelimitipuser@email.com");
+        confirmRegisteredEmail("ratelimitipuser@email.com");
 
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(wrongPasswordLoginRequest("ratelimitipuser"))
@@ -328,10 +711,16 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[oauthLogin] Should Return Ok And Emit Access, Refresh And Csrf Cookies - When Local Account With That Email Exists")
     void shouldReturnOkAndEmitCookiesWhenLocalAccountWithThatEmailExists() throws Exception {
-        mockMvc.perform(registerRequest("oauthuser", "oauthuser@email.com"))
-                .andExpect(status().isCreated());
+        MvcResult registration = registerAndRememberProof("oauthuser", "oauthuser@email.com");
 
         when(googleTokenVerifier.verify("valid-google-token")).thenReturn("oauthuser@email.com");
+
+        mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(confirmEmailRequest(emailConfirmationSender.tokenFor("oauthuser@email.com"))
+                        .cookie(registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE)))
+                .andExpect(status().isNoContent());
 
         mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
                 .andExpect(status().isOk())
@@ -393,11 +782,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[oauthLogin] Should Return Conflict - When Already Authenticated")
     void shouldReturnConflictWhenOAuthLoginWhileAlreadyAuthenticated() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("alreadyauthoauthuser", "alreadyauthoauthuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("alreadyauthoauthuser", "alreadyauthoauthuser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
 
         mockMvc.perform(oauthLoginRequest("google", "valid-google-token").cookie(accessTokenCookie))
@@ -444,12 +830,7 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[refresh] Should Revoke Every Valid Refresh Token For The User - When A Revoked Refresh Token Is Reused")
     void shouldRevokeEveryValidRefreshTokenForTheUserWhenARevokedRefreshTokenIsReused() throws Exception {
-        mockMvc.perform(registerRequest("reuseuser", "reuseuser@email.com"))
-                .andExpect(status().isCreated());
-
-        MvcResult loginResult = mockMvc.perform(loginRequest("reuseuser"))
-                .andExpect(status().isOk())
-                .andReturn();
+        MvcResult loginResult = registerConfirmAndLogin("reuseuser", "reuseuser@email.com");
         Cookie originalRefreshCookie = loginResult.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
         assertThat(originalRefreshCookie).isNotNull();
 
@@ -469,13 +850,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[refresh][logout] Should Rotate Refresh Token And Reject Reuse Of Old Token - When Full Auth Flow Is Executed")
     void shouldRotateRefreshTokenAndRejectReuseOfOldTokenWhenFullAuthFlowIsExecuted() throws Exception {
-        mockMvc.perform(registerRequest("flowuser", "flowuser@email.com"))
-                .andExpect(status().isCreated());
-
-        MvcResult loginResult = mockMvc.perform(loginRequest("flowuser"))
-                .andExpect(status().isOk())
-                .andExpect(cookie().exists(CookieUtil.REFRESH_TOKEN_COOKIE))
-                .andReturn();
+        MvcResult loginResult = registerConfirmAndLogin("flowuser", "flowuser@email.com");
+        assertThat(loginResult.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE)).isNotNull();
 
         Cookie originalRefreshCookie = loginResult.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
         assertThat(originalRefreshCookie).isNotNull();
@@ -519,12 +895,7 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Revoke Every Refresh Token For The User - When Called")
     void shouldRevokeEveryRefreshTokenForTheUserWhenLogoutAllCalled() throws Exception {
-        mockMvc.perform(registerRequest("multideviceuser", "multideviceuser@email.com"))
-                .andExpect(status().isCreated());
-
-        MvcResult deviceALogin = mockMvc.perform(loginRequest("multideviceuser"))
-                .andExpect(status().isOk())
-                .andReturn();
+        MvcResult deviceALogin = registerConfirmAndLogin("multideviceuser", "multideviceuser@email.com");
         Cookie deviceAAccessCookie = deviceALogin.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie deviceARefreshCookie = deviceALogin.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
         Cookie deviceACsrfCookie = deviceALogin.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -550,11 +921,9 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Invalidate The Access Token Already Issued - When Called")
     void shouldInvalidateTheAccessTokenAlreadyIssuedWhenLogoutAllCalled() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("accesstokeninvalidateuser", "accesstokeninvalidateuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("accesstokeninvalidateuser", "accesstokeninvalidateuser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = loginResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
 
         mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
@@ -570,18 +939,14 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Not Affect Refresh Tokens Of Other Users - When Called")
     void shouldNotAffectRefreshTokensOfOtherUsersWhenLogoutAllCalled() throws Exception {
-        MvcResult userARegister = mockMvc.perform(registerRequest("logoutalluserA", "logoutalluserA@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie userAAccessCookie = userARegister.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie userACsrfCookie = userARegister.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        MvcResult userALogin = registerConfirmAndLogin("logoutalluserA", "logoutalluserA@email.com");
+        Cookie userAAccessCookie = userALogin.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie userACsrfCookie = userALogin.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(userAAccessCookie).isNotNull();
         assertThat(userACsrfCookie).isNotNull();
 
-        MvcResult userBRegister = mockMvc.perform(registerRequest("logoutalluserB", "logoutalluserB@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie userBRefreshCookie = userBRegister.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        MvcResult userBLogin = registerConfirmAndLogin("logoutalluserB", "logoutalluserB@email.com");
+        Cookie userBRefreshCookie = userBLogin.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
         assertThat(userBRefreshCookie).isNotNull();
 
         mockMvc.perform(logoutAllRequest(userAAccessCookie, userACsrfCookie))
@@ -594,10 +959,10 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForLogoutAll() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nocookielogoutalluser", "nocookielogoutalluser@email.com"))
-                .andExpect(status().isCreated())
+        MvcResult anonymousResult = mockMvc.perform(get("/protected-test-route"))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
                 .andReturn();
-        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        Cookie csrfCookie = anonymousResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(csrfCookie).isNotNull();
 
         mockMvc.perform(post("/auth/logout-all")
@@ -609,10 +974,8 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Return Forbidden - When Csrf Token Is Missing")
     void shouldReturnForbiddenWhenCsrfTokenIsMissingForLogoutAll() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nocsrflogoutalluser", "nocsrflogoutalluser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("nocsrflogoutalluser", "nocsrflogoutalluser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
 
         mockMvc.perform(post("/auth/logout-all").cookie(accessTokenCookie))
@@ -622,11 +985,9 @@ class AuthControllerIntegrationTest {
     @Test
     @DisplayName("[logoutAll] Should Clear Access, Refresh And Csrf Cookies - When Called")
     void shouldClearAccessRefreshAndCsrfCookiesWhenLogoutAllCalled() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("clearcookieslogoutalluser", "clearcookieslogoutalluser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        MvcResult loginResult = registerConfirmAndLogin("clearcookieslogoutalluser", "clearcookieslogoutalluser@email.com");
+        Cookie accessTokenCookie = loginResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = loginResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         assertThat(csrfCookie).isNotNull();
 
@@ -643,6 +1004,54 @@ class AuthControllerIntegrationTest {
                 .anySatisfy(header -> assertThat(header)
                         .startsWith(CookieUtil.CSRF_TOKEN_COOKIE + "=")
                         .contains("Max-Age=0"));
+    }
+
+    private void confirmRegisteredEmail(String email) throws Exception {
+        String token = emailConfirmationSender.tokenFor(email);
+        Cookie proof = registrationProofCookies.get(email);
+        mockMvc.perform(confirmEmailRequest(token).cookie(proof)).andExpect(status().isNoContent());
+    }
+
+    private MvcResult registerAndRememberProof(String username, String email) throws Exception {
+        MvcResult result = mockMvc.perform(registerRequest(username, email))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        registrationProofCookies.put(email, result.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE));
+        return result;
+    }
+
+    private boolean awaitAdvisoryLockWaitOrCompletion(Future<?> operation, String email) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (operation.isDone()) {
+                return false;
+            }
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    WITH requested_lock AS (
+                        SELECT hashtextextended(LOWER(?), 0) AS lock_key
+                    )
+                            SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks, requested_lock
+                        WHERE locktype = 'advisory'
+                          AND granted = FALSE
+                          AND classid = ((lock_key >> 32) & 4294967295)::oid
+                          AND objid = (lock_key & 4294967295)::oid
+                          AND objsubid = 1
+                    )
+                    """, Boolean.class, email);
+            if (Boolean.TRUE.equals(waiting)) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Operation neither waited for the email lock nor completed");
+    }
+
+    private MvcResult registerConfirmAndLogin(String username, String email) throws Exception {
+        registerAndRememberProof(username, email);
+        confirmRegisteredEmail(email);
+        return mockMvc.perform(loginRequest(username)).andExpect(status().isOk()).andReturn();
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder registerRequest(String username, String email) {
@@ -672,6 +1081,19 @@ class AuthControllerIntegrationTest {
         return post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder confirmEmailRequest(String token) {
+        String body = "{\"token\":\"%s\"}".formatted(token);
+        return post("/auth/confirm-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder resendEmailConfirmationRequest(String email) {
+        return post("/auth/confirm-email/resend")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\"}");
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder wrongPasswordLoginRequest(String identifier) {

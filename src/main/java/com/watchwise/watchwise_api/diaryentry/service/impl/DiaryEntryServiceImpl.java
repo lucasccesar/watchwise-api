@@ -870,6 +870,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private LocalDate startOfYear(Integer year) {
+        if (year < 1 || year > 9999) {
+            throw new BadRequestException("year must be between 1 and 9999");
+        }
         try {
             return LocalDate.of(year, 1, 1);
         } catch (DateTimeException e) {

@@ -49,8 +49,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    public JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter(JwtService jwtService, UserRepository userRepository) {
-        return new JwtCookieAuthenticationFilter(jwtService, userRepository);
+    public JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter(
+            JwtService jwtService, UserRepository userRepository, ObjectMapper objectMapper) {
+        return new JwtCookieAuthenticationFilter(jwtService, userRepository, objectMapper);
     }
 
     @Bean
@@ -123,7 +124,8 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
                         .sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
-                        .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh", "/auth/logout"))
+                        .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh",
+                                "/auth/logout", "/auth/confirm-email", "/auth/confirm-email/resend"))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/logout-all").authenticated()

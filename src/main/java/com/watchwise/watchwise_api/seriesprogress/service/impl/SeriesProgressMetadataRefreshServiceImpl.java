@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.RefreshGenerationSequence;
 import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressMetadata;
 import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressSeasonMetadata;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressMetadataRepository;
@@ -48,6 +50,8 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     private final ExecutorService seasonFetchExecutor;
     private final ExecutorService refreshExecutor;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final AdvisoryLock advisoryLock;
+    private final RefreshGenerationSequence refreshGenerationSequence;
     private final ConcurrentHashMap<String, CompletableFuture<Snapshot>> refreshes = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LocalDate> retryAfter = new ConcurrentHashMap<>();
 
@@ -58,7 +62,9 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
             SeriesProgressMetadataCalculator calculator,
             @Qualifier("tmdbSeasonFetchExecutor") ExecutorService seasonFetchExecutor,
             @Qualifier("calendarScheduleRefreshExecutor") ExecutorService refreshExecutor,
-            NewTransactionExecutor newTransactionExecutor) {
+            NewTransactionExecutor newTransactionExecutor,
+            AdvisoryLock advisoryLock,
+            RefreshGenerationSequence refreshGenerationSequence) {
         this.tmdbClient = tmdbClient;
         this.metadataRepository = metadataRepository;
         this.seasonMetadataRepository = seasonMetadataRepository;
@@ -66,6 +72,8 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
         this.seasonFetchExecutor = seasonFetchExecutor;
         this.refreshExecutor = refreshExecutor;
         this.newTransactionExecutor = newTransactionExecutor;
+        this.advisoryLock = advisoryLock;
+        this.refreshGenerationSequence = refreshGenerationSequence;
     }
 
     @Override
@@ -115,14 +123,16 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
         Objects.requireNonNull(tvDetails, "tvDetails must not be null");
         validateTvDetailsId(seriesTmdbId, tvDetails);
         return singleFlight(seriesTmdbId,
-                () -> refreshLoaded(seriesTmdbId, tvDetails, today, readSnapshot(seriesTmdbId)));
+                () -> refreshLoaded(seriesTmdbId, tvDetails, today, readSnapshot(seriesTmdbId),
+                        refreshGenerationSequence.next()));
     }
 
     private Snapshot refreshLoaded(
             String seriesTmdbId,
             TmdbTvFullDetails tvDetails,
             LocalDate today,
-            Snapshot previous) {
+            Snapshot previous,
+            long refreshGeneration) {
         List<Integer> seasonNumbers = regularSeasonNumbers(tvDetails);
         List<CompletableFuture<Optional<LoadedSeason>>> seasonLoads = seasonNumbers.stream()
                 .map(seasonNumber -> CompletableFuture.supplyAsync(
@@ -142,7 +152,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
         if (!completeLoad) {
             return previous == null ? unavailable() : previous;
         }
-        return persist(seriesTmdbId, calculated);
+        return persist(seriesTmdbId, calculated, refreshGeneration);
     }
 
     private Optional<LoadedSeason> loadSeason(String seriesTmdbId, Integer seasonNumber) {
@@ -156,10 +166,15 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
 
     private Snapshot persist(
             String seriesTmdbId,
-            SeriesProgressMetadataCalculator.CalculatedSnapshot calculated) {
+            SeriesProgressMetadataCalculator.CalculatedSnapshot calculated,
+            long refreshGeneration) {
         LocalDateTime refreshedAt = LocalDateTime.now();
         return newTransactionExecutor.runInNewTransaction(() -> {
+            advisoryLock.lock("series-progress:" + seriesTmdbId);
             SeriesProgressMetadata current = metadataRepository.findById(seriesTmdbId).orElse(null);
+            if (current != null && current.getRefreshGeneration() >= refreshGeneration) {
+                return readSnapshot(seriesTmdbId);
+            }
             SeriesProgressMetadata metadata = SeriesProgressMetadata.builder()
                     .seriesTmdbId(seriesTmdbId)
                     .regularReleasedEpisodeCount(calculated.series().regularReleasedEpisodeCount())
@@ -168,6 +183,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
                     .lastReleasedEpisodeDate(calculated.series().lastReleasedEpisodeDate())
                     .refreshedAt(refreshedAt)
                     .runtimeVerifiedAt(calculated.series().runtimeComplete() ? refreshedAt : null)
+                    .refreshGeneration(refreshGeneration)
                     .build();
             metadataRepository.save(metadata);
 
@@ -313,12 +329,13 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     }
 
     private Snapshot refreshFromTmdb(String seriesTmdbId, LocalDate today, Snapshot previous) {
+        long refreshGeneration = refreshGenerationSequence.next();
         TmdbLookupResult<TmdbTvFullDetails> lookup = tmdbClient.getTvFullDetails(seriesTmdbId, LANGUAGE);
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found)) {
             return previous == null ? unavailable() : previous;
         }
         validateTvDetailsId(seriesTmdbId, found.value());
-        Snapshot refreshed = refreshLoaded(seriesTmdbId, found.value(), today, previous);
+        Snapshot refreshed = refreshLoaded(seriesTmdbId, found.value(), today, previous, refreshGeneration);
         if (refreshed != previous) {
             retryAfter.remove(seriesTmdbId);
         }

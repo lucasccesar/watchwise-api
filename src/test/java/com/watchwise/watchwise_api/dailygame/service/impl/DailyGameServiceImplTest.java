@@ -35,7 +35,10 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonServ
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
+import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
+import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -100,6 +103,14 @@ class DailyGameServiceImplTest {
     @Mock
     private DailyGameMediaService mediaService;
 
+    @BeforeEach
+    void stubOpaqueMediaGrants() {
+        org.mockito.Mockito.lenient().when(mediaService.issue(any(), any(), any(), any(), any()))
+                .thenAnswer(call -> new DailyGameMediaRefDTO(call.getArgument(2),
+                        "/games/play/media/" + call.getArgument(2) + call.getArgument(4),
+                        call.getArgument(3), true));
+    }
+
     @Test
     void overviewUsesTheSameDistinctLegacyFrameSlotsAsPlay() {
         List<DailyChallenge> challenges = allChallenges().stream().map(challenge ->
@@ -132,8 +143,8 @@ class DailyGameServiceImplTest {
                 .thenReturn(allHints(challenges));
         var raw = service().getToday(USER_ID).games().stream()
                 .filter(game -> game.gameType() == DailyGameType.EPISODE_BY_FRAME).findFirst().orElseThrow();
-        assertThat(raw.imageUrls()).hasSize(7).contains(
-                "https://image.tmdb.org/t/p/w300/still-7.jpg");
+        assertThat(raw.imageUrls()).hasSize(6)
+                .allSatisfy(url -> assertThat(url).startsWith("/games/play/media/FRAME_"));
     }
 
     @ParameterizedTest
@@ -815,7 +826,7 @@ class DailyGameServiceImplTest {
         assertThat(response.answer().personTmdbId()).isNull();
         assertThat(response.answer().seriesTmdbId()).isNull();
         assertThat(response.answer().title()).isEqualTo("Answer");
-        assertThat(response.answer().imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/image.jpg");
+        assertThat(response.answer().imageUrl()).isEqualTo("/games/play/media/CLUE/image.jpg");
         assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.FAILED);
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
     }
@@ -959,10 +970,33 @@ class DailyGameServiceImplTest {
 
         assertThat(response.answer()).satisfies(answer -> {
             assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
-            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
+            assertThat(answer.seriesPosterUrl()).isEqualTo("/games/play/media/SERIES_POSTER/poster.jpg");
             assertThat(answer.seriesYear()).isEqualTo(2008);
         });
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    void legacyGameStateUsesTheSameBlurredMediaGrantAsThePlayProjection() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+        UserDailyGameResult result = result(challenge, 2, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        String mediaUrl = "/games/play/media/opaque-grant";
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_POSTER))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+        when(mediaService.issue(USER_ID, challenge.getId(), DailyGameMediaSlot.CLUE,
+                DailyGameImageVariant.BLUR_14, "/image.jpg"))
+                .thenReturn(new DailyGameMediaRefDTO(DailyGameMediaSlot.CLUE, mediaUrl,
+                        DailyGameImageVariant.BLUR_14, true));
+
+        DailyGameStateDTO response = service().getGame(
+                USER_ID, TODAY, DailyGameType.MOVIE_BY_POSTER, true);
+
+        assertThat(response.imageUrl()).isEqualTo(mediaUrl);
+        assertThat(response.visibleImageUrls()).containsExactly(mediaUrl);
+        assertThat(response.imageUrl()).doesNotContain("image.tmdb.org");
     }
 
     @Test

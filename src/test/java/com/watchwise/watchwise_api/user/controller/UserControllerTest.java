@@ -27,6 +27,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -65,6 +66,9 @@ class UserControllerTest {
 
     @Mock
     private RequestThrottler requestThrottler;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     @InjectMocks
     private UserController userController;

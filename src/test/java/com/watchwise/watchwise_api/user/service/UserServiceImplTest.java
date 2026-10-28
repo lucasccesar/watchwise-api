@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.ServiceUnavailableException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
@@ -27,6 +28,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,6 +88,9 @@ class UserServiceImplTest {
     @Mock
     private UserBlockAccessService userBlockAccessService;
 
+    @Mock
+    private EmailConfirmationService emailConfirmationService;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -130,9 +135,11 @@ class UserServiceImplTest {
                 .description(postUserDTO.description())
                 .profilePicture(postUserDTO.profilePicture())
                 .isProfilePublic(true)
+                .isEmailVerified(true)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+        lenient().when(userRepository.findByIdForUpdate(savedUser.getId())).thenReturn(Optional.of(savedUser));
 
         userResponseDTO = new UserResponseDTO(
                 savedUser.getId(),
@@ -220,33 +227,37 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Return UserResponseDTO - When Save Is Successful")
-    void shouldReturnUserResponseDtoWhenSaveIsSuccessful() {
+    @DisplayName("[startRegistration] Should Return Browser Proof - When Registration Is Valid")
+    void shouldReturnBrowserProofWhenRegistrationIsValid() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
+        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
 
-        UserResponseDTO result = userService.saveNewUser(postUserDTO);
+        String result = userService.startRegistration(postUserDTO);
 
-        assertThat(result).isEqualTo(userResponseDTO);
-        verify(userRepository).save(any(User.class));
-        verify(userMapper).userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L);
+        assertThat(result).isEqualTo("browser-proof");
+        verify(emailConfirmationService).issueForRegistration(any(User.class));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Normalize Email, Username And Password - When Data Is Valid")
-    void shouldNormalizeEmailUsernameAndPasswordBeforeSavingWhenDataIsValid() {
+    @DisplayName("[startRegistration] Should Normalize Email, Username And Password - When Data Is Valid")
+    void shouldNormalizeEmailUsernameAndPasswordBeforeCreatingAttemptWhenDataIsValid() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
+        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
-        userService.saveNewUser(postUserDTO);
+        userService.startRegistration(postUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(emailConfirmationService).issueForRegistration(userCaptor.capture());
         User capturedUser = userCaptor.getValue();
 
         assertThat(capturedUser.getUsername()).isEqualTo("JohnDoe");
@@ -255,96 +266,79 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Set IsEmailVerified True - When Registering Common Account")
-    void shouldSetIsEmailVerifiedTrueWhenRegisteringCommonAccount() {
+    @DisplayName("[startRegistration] Should Keep The Draft Unverified - Until The Email Is Confirmed")
+    void shouldKeepTheDraftUnverifiedUntilTheEmailIsConfirmed() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
+        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
-        userService.saveNewUser(postUserDTO);
+        userService.startRegistration(postUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getIsEmailVerified()).isTrue();
+        verify(emailConfirmationService).issueForRegistration(userCaptor.capture());
+        assertThat(userCaptor.getValue().getIsEmailVerified()).isFalse();
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Throw ConflictException With Username Message - When Username Constraint Is Violated")
-    void shouldThrowConflictExceptionWithUsernameMessageWhenUsernameConstraintIsViolated() {
+    void shouldNotReplaceAnExistingUnverifiedUserWhenRegistrationUsesItsEmail() {
+        User existing = User.builder().username("preclaimed").email("john.doe@email.com")
+                .password("existing-password-hash").isEmailVerified(false).build();
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.of(existing));
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
-        when(userRepository.save(any(User.class)))
-                .thenThrow(buildDataIntegrityViolationException("uq_users_username"));
+        when(passwordEncoder.encode(postUserDTO.password())).thenReturn("new-password-hash");
 
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTO))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Username already in use");
-
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
-    }
-
-    @Test
-    @DisplayName("[saveNewUser] Should Throw ConflictException With Email Message - When Email Constraint Is Violated")
-    void shouldThrowConflictExceptionWithEmailMessageWhenEmailConstraintIsViolated() {
-        when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
-        when(userRepository.save(any(User.class)))
-                .thenThrow(buildDataIntegrityViolationException("uq_users_email"));
-
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTO))
+        assertThatThrownBy(() -> userService.startRegistration(postUserDTO))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
+        assertThat(existing.getUsername()).isEqualTo("preclaimed");
+        assertThat(existing.getPassword()).isEqualTo("existing-password-hash");
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Throw ConflictException With Generic Message - When Constraint Name Is Unknown")
-    void shouldThrowConflictExceptionWithGenericMessageWhenConstraintNameIsUnknown() {
+    void shouldRejectRegistrationWhenSubmittedEmailIsPendingOnAnotherAccount() {
+        User accountWithPendingEmail = User.builder().username("existinguser").email("current@email.com")
+                .pendingEmail("john.doe@email.com").password("existing-password-hash").isEmailVerified(true).build();
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
-        when(userRepository.save(any(User.class)))
-                .thenThrow(buildDataIntegrityViolationException("uq_some_other_constraint"));
+        when(passwordEncoder.encode(postUserDTO.password())).thenReturn("new-password-hash");
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.of(accountWithPendingEmail));
 
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTO))
+        assertThatThrownBy(() -> userService.startRegistration(postUserDTO))
                 .isInstanceOf(ConflictException.class)
-                .hasMessage("Username or email already in use");
+                .hasMessage("Email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
+        assertThat(accountWithPendingEmail.getEmail()).isEqualTo("current@email.com");
+        assertThat(accountWithPendingEmail.getPendingEmail()).isEqualTo("john.doe@email.com");
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Throw ConflictException With Generic Message - When Cause Is Not ConstraintViolationException")
-    void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNotConstraintViolationException() {
+    void shouldRejectRegistrationWhenUsernameIsAlreadyInUseIgnoringCase() {
+        User existing = User.builder().username("johndoe").email("other@email.com")
+                .password("existing-password-hash").build();
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
+        when(passwordEncoder.encode(postUserDTO.password())).thenReturn("new-password-hash");
+        when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.of(existing));
 
-        DataIntegrityViolationException exception =
-                new DataIntegrityViolationException("generic db error", new RuntimeException("unexpected cause"));
-        when(userRepository.save(any(User.class))).thenThrow(exception);
-
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTO))
+        assertThatThrownBy(() -> userService.startRegistration(postUserDTO))
                 .isInstanceOf(ConflictException.class)
-                .hasMessage("Username or email already in use");
+                .hasMessage("Username already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
+        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
     }
-
     @Test
-    @DisplayName("[saveNewUser] Should Throw ConflictException With Generic Message - When Cause Is Null")
-    void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNull() {
-        when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
-
-        DataIntegrityViolationException exception = new DataIntegrityViolationException("no cause here");
-        when(userRepository.save(any(User.class))).thenThrow(exception);
-
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTO))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Username or email already in use");
-
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
-    }
-
-    @Test
-    @DisplayName("[saveNewUser] Should Throw BadRequestException - When Trimmed Username Is Shorter Than The Minimum Length")
+    @DisplayName("[startRegistration] Should Throw BadRequestException - When Trimmed Username Is Shorter Than The Minimum Length")
     void shouldThrowBadRequestExceptionWhenTrimmedUsernameIsShorterThanTheMinimumLength() {
         PostUserDTO postUserDTOWithPaddedShortUsername = new PostUserDTO(
                 " ab ",
@@ -355,7 +349,7 @@ class UserServiceImplTest {
                 postUserDTO.isProfilePublic()
         );
 
-        assertThatThrownBy(() -> userService.saveNewUser(postUserDTOWithPaddedShortUsername))
+        assertThatThrownBy(() -> userService.startRegistration(postUserDTOWithPaddedShortUsername))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Username must be at least 3 characters long");
 
@@ -390,18 +384,26 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Throw ForbiddenException - When Profile Is Private")
-    void shouldThrowForbiddenExceptionWhenProfileIsPrivate() {
+    @DisplayName("[getUserById] Should Return Minimum Profile With Bio - When Private And Not Followed")
+    void shouldReturnMinimumProfileWithBioWhenPrivateAndNotFollowed() {
         UUID viewerId = UUID.randomUUID();
         UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(false);
+        savedUser.setDescription("Visible biography");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         doThrow(new ForbiddenException("This user profile is private"))
                 .when(userVisibilityService).assertCanView(viewerId, id);
 
-        assertThatThrownBy(() -> userService.getUserById(viewerId, id))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessage("This user profile is private");
+        PublicUserProfileDTO result = userService.getUserById(viewerId, id);
 
+        assertThat(result.id()).isEqualTo(id);
+        assertThat(result.username()).isEqualTo(savedUser.getUsername());
+        assertThat(result.name()).isEqualTo(savedUser.getName());
+        assertThat(result.description()).isEqualTo("Visible biography");
+        assertThat(result.profilePicture()).isEqualTo(savedUser.getProfilePicture());
+        assertThat(result.totalMinutesWatchedMovies()).isNull();
+        assertThat(result.followersCount()).isNull();
+        assertThat(result.viewerRelation()).isEqualTo(ViewerProfileRelation.NOT_FOLLOWING);
         verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
     }
 
@@ -561,14 +563,12 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[saveNewUser] Should Not Query Watch Stats - When Registering A New User")
+    @DisplayName("[startRegistration] Should Not Query Watch Stats - When Creating A Pending Registration")
     void shouldNotQueryWatchStatsWhenRegisteringANewUser() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
-        userService.saveNewUser(postUserDTO);
+        userService.startRegistration(postUserDTO);
 
         verifyNoInteractions(diaryEntryRepository);
     }
@@ -859,8 +859,8 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[updateUser] Should Update Email Normalized - When A Different Value Is Provided")
-    void shouldUpdateEmailNormalizedWhenDifferentValueProvided() {
+    @DisplayName("[updateUser] Should Keep Current Email And Store Normalized Pending Email - When A Different Value Is Provided")
+    void shouldKeepCurrentEmailAndStoreNormalizedPendingEmailWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  NEW.EMAIL@EMAIL.COM  ", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
@@ -871,7 +871,82 @@ class UserServiceImplTest {
         userService.updateUser(savedUser, patchUserDTO);
 
         verify(userRepository).saveAndFlush(userCaptor.capture());
-        assertThat(userCaptor.getValue().getEmail()).isEqualTo("new.email@email.com");
+        assertThat(userCaptor.getValue().getEmail()).isEqualTo("john.doe@email.com");
+        assertThat(userCaptor.getValue().getPendingEmail()).isEqualTo("new.email@email.com");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Reject Email Used As Another Account Current Or Pending Email")
+    void shouldRejectEmailUsedAsAnotherAccountCurrentOrPendingEmail() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null,
+                "Password123");
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userRepository.existsEmailOrPendingEmailByAnotherUser(savedUser.getId(), "new.email@email.com"))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Email already in use");
+
+        assertThat(savedUser.getEmail()).isEqualTo("john.doe@email.com");
+        assertThat(savedUser.getPendingEmail()).isNull();
+        verify(userRepository, never()).saveAndFlush(any());
+        verify(emailConfirmationService, never()).issueAndSend(any(User.class));
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Require Confirmation For A New Email - When Current Email Was Verified")
+    void shouldRequireConfirmationForNewEmailWhenCurrentEmailWasVerified() {
+        savedUser.setIsEmailVerified(true);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null,
+                "Password123");
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
+                .thenReturn(userResponseDTO);
+
+        userService.updateUser(savedUser, patchUserDTO);
+
+        assertThat(savedUser.getEmail()).isEqualTo("john.doe@email.com");
+        assertThat(savedUser.getPendingEmail()).isEqualTo("new.email@email.com");
+        assertThat(savedUser.getIsEmailVerified()).isTrue();
+        verify(emailConfirmationService).requireDeliveryConfigured();
+        verify(emailConfirmationService).issueAndSend(savedUser);
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Keep Current Email - When Confirmation Delivery Is Not Configured")
+    void shouldKeepCurrentEmailWhenConfirmationDeliveryIsNotConfigured() {
+        savedUser.setIsEmailVerified(true);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null,
+                "Password123");
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        doThrow(new ServiceUnavailableException("Email confirmation is not configured"))
+                .when(emailConfirmationService).requireDeliveryConfigured();
+
+        assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
+                .isInstanceOf(ServiceUnavailableException.class)
+                .hasMessage("Email confirmation is not configured");
+
+        assertThat(savedUser.getEmail()).isEqualTo("john.doe@email.com");
+        assertThat(savedUser.getIsEmailVerified()).isTrue();
+        assertThat(savedUser.getPendingEmail()).isNull();
+        verify(userRepository, never()).saveAndFlush(any());
+        verify(emailConfirmationService, never()).issueAndSend(any(User.class));
+    }
+
+    @Test
+    void shouldRejectWhitespaceEmailWithoutChangingCurrentOrPendingEmail() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "   ", null, null, null, null, "Password123");
+
+        assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Email must not be blank");
+
+        assertThat(savedUser.getEmail()).isEqualTo("john.doe@email.com");
+        assertThat(savedUser.getPendingEmail()).isNull();
+        verify(userRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(emailConfirmationService);
     }
 
     @Test
@@ -925,9 +1000,10 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[updateUser] Should Revoke All Refresh Tokens - When Password Changes")
-    void shouldRevokeAllRefreshTokensWhenPasswordChanges() {
+    @DisplayName("[updateUser] Should Persist Session Invalidation With Credential Change")
+    void shouldPersistSessionInvalidationWithCredentialChange() {
         UUID id = savedUser.getId();
+        savedUser.setAuthVersion(4L);
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "Password123");
         when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
@@ -937,13 +1013,15 @@ class UserServiceImplTest {
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(refreshTokenService).invalidateAllSessions(id);
+        assertThat(savedUser.getAuthVersion()).isEqualTo(5L);
+        assertThat(savedUser.getSessionsInvalidatedAt()).isNotNull();
+        verify(refreshTokenService).revokeAllRefreshTokens(id);
+        verify(refreshTokenService, never()).invalidateAllSessions(id);
     }
 
     @Test
-    @DisplayName("[updateUser] Should Revoke All Refresh Tokens - When Email Changes")
-    void shouldRevokeAllRefreshTokensWhenEmailChanges() {
-        UUID id = savedUser.getId();
+    @DisplayName("[updateUser] Should Preserve Existing Sessions - Until New Email Is Confirmed")
+    void shouldPreserveExistingSessionsUntilNewEmailIsConfirmed() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
@@ -951,7 +1029,35 @@ class UserServiceImplTest {
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(refreshTokenService).invalidateAllSessions(id);
+        verifyNoInteractions(refreshTokenService);
+    }
+
+    @Test
+    void shouldApplyPatchToFreshLockedUserInsteadOfRestoringStaleEmailConfirmationState() {
+        UUID id = savedUser.getId();
+        User staleSnapshot = User.builder().id(id).email("john.doe@email.com")
+                .pendingEmail("new.email@email.com").isEmailVerified(true).authVersion(0L)
+                .emailConfirmationTokenHash("stale-token-hash")
+                .emailConfirmationExpiresAt(LocalDateTime.now().plusMinutes(10)).build();
+        User latestPersisted = User.builder().id(id).email("new.email@email.com")
+                .pendingEmail(null).isEmailVerified(true).authVersion(1L)
+                .emailConfirmationTokenHash(null).emailConfirmationExpiresAt(null)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated after confirmation", null, null, null);
+        when(userRepository.findByIdForUpdate(id)).thenReturn(Optional.of(latestPersisted));
+        when(userRepository.saveAndFlush(latestPersisted)).thenReturn(latestPersisted);
+        when(userMapper.userToUserResponseDto(eq(latestPersisted), anyLong(), anyLong(), anyLong(), anyLong(),
+                anyLong(), any(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
+
+        userService.updateUser(staleSnapshot, patchUserDTO);
+
+        assertThat(latestPersisted.getEmail()).isEqualTo("new.email@email.com");
+        assertThat(latestPersisted.getPendingEmail()).isNull();
+        assertThat(latestPersisted.getEmailConfirmationTokenHash()).isNull();
+        assertThat(latestPersisted.getAuthVersion()).isEqualTo(1L);
+        assertThat(latestPersisted.getDescription()).isEqualTo("Updated after confirmation");
+        verify(userRepository).saveAndFlush(latestPersisted);
+        verify(userRepository, never()).saveAndFlush(staleSnapshot);
     }
 
     @Test
@@ -1429,6 +1535,18 @@ class UserServiceImplTest {
         Optional<UserResponseDTO> result = userService.findByEmail(savedUser.getEmail());
 
         assertThat(result).contains(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[findByEmail] Should Hide An Unconfirmed Account - When OAuth Resolves Its Email")
+    void shouldHideAnUnconfirmedAccountWhenOauthResolvesItsEmail() {
+        savedUser.setIsEmailVerified(false);
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
+
+        Optional<UserResponseDTO> result = userService.findByEmail(savedUser.getEmail());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userMapper);
     }
 
     @Test

@@ -9,7 +9,9 @@ public record AliasQuery(Kind kind, String title, Integer year, ContentType cont
         if (kind == null) throw new IllegalArgumentException("Alias query kind is required");
         if (title == null || title.isBlank()) throw new IllegalArgumentException("Alias query title is required");
         if (title.length() > 500) throw new IllegalArgumentException("Alias query title is too long");
-        if (year != null && year < 1) throw new IllegalArgumentException("Alias query year must be positive");
+        if (year != null && (year < 1 || year > 9999)) {
+            throw new IllegalArgumentException("Alias query year must be between 1 and 9999");
+        }
         if (kind == Kind.PERSON && (year != null || contentType != null)) {
             throw new IllegalArgumentException("Person alias queries cannot include a year or content type");
         }

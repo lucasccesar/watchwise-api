@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -111,6 +112,9 @@ class Top5EntryControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
     @MockitoBean
     private TmdbClient tmdbClient;
 
@@ -122,6 +126,7 @@ class Top5EntryControllerIntegrationTest {
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
+        emailConfirmationSender.clear();
         RequestThrottlerTestSupport.reset(requestThrottler);
 
         lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
@@ -141,11 +146,21 @@ class Top5EntryControllerIntegrationTest {
 
     private RegisteredUser registerUser(String username, boolean isProfilePublic) throws Exception {
         MvcResult result = mockMvc.perform(registerRequest(username, isProfilePublic))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
 
-        Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfCookie = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        String email = username + "@email.com";
+        Cookie registrationProof = result.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(registrationProof).isNotNull();
+        MvcResult confirmation = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor(email) + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+
+        Cookie accessTokenCookie = confirmation.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = confirmation.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         assertThat(csrfCookie).isNotNull();
 

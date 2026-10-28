@@ -727,6 +727,18 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getYearInReview] Should Reject Year Above 9999")
+    void shouldRejectYearAboveSupportedMaximumForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 10_000))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("year must be between 1 and 9999");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
     @DisplayName("[getAllTimeStats] Should Enrich Both Rating Rankings With The Owner Poster In One Batch")
     void shouldEnrichBothRatingRankingsWithTheOwnerPosterInOneBatchForAllTimeStats() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

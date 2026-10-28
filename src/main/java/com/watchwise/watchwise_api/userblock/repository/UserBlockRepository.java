@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public interface UserBlockRepository extends JpaRepository<UserBlock, UUID> {
@@ -35,6 +36,15 @@ public interface UserBlockRepository extends JpaRepository<UserBlock, UUID> {
             """)
     boolean existsEitherDirection(@Param("firstUserId") UUID firstUserId,
             @Param("secondUserId") UUID secondUserId);
+
+    @Query("""
+            SELECT CASE WHEN b.blocker.id = :viewerId THEN b.blocked.id ELSE b.blocker.id END
+            FROM UserBlock b
+            WHERE (b.blocker.id = :viewerId AND b.blocked.id IN :targetIds)
+               OR (b.blocked.id = :viewerId AND b.blocker.id IN :targetIds)
+            """)
+    Set<UUID> findBlockedCounterpartIdsEitherDirection(
+            @Param("viewerId") UUID viewerId, @Param("targetIds") java.util.Collection<UUID> targetIds);
 
     boolean existsByBlockerIdAndBlockedId(UUID blockerId, UUID blockedId);
 

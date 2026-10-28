@@ -86,6 +86,9 @@ class PickControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender emailConfirmationSender;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -321,19 +324,10 @@ class PickControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"username":"%s","name":"%s","email":"%s@email.com","password":"Password123"}
-                                """.formatted(username, username, username)))
-                .andExpect(status().isCreated())
-                .andReturn();
-        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
-        Cookie csrfToken = result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
-        assertThat(accessToken).isNotNull();
-        assertThat(csrfToken).isNotNull();
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(user.getId(), accessToken, csrfToken);
+        var user = com.watchwise.watchwise_api.user.service.TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, username, username + "@email.com", true);
+        return new RegisteredUser(user.id(), user.accessToken(), user.csrfToken());
     }
 
     private MockHttpServletRequestBuilder createPickRequest(RegisteredUser user, UUID templateId) {

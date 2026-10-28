@@ -90,6 +90,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("[handleBadGateway] Should Return A Generic 502 ApiError - When Google Transport Fails")
+    void shouldReturnGeneric502ApiErrorWhenGoogleTransportFails() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/oauth/GOOGLE");
+
+        var response = handler.handleBadGateway(
+                new BadGatewayException("Google identity provider is temporarily unavailable"), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error()).isEqualTo("Bad Gateway");
+        assertThat(response.getBody().message()).isEqualTo("Google identity provider is temporarily unavailable");
+    }
+
+    @Test
     @DisplayName("[handleMaxUploadSizeExceeded] Should Return 413 ApiError - When Multipart Upload Exceeds Limit")
     void shouldReturn413ApiErrorWhenMultipartUploadExceedsLimit() {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/imports/uploads");

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.pickstemplate.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
@@ -42,6 +43,20 @@ public class PicksTemplateCategoryServiceImpl implements PicksTemplateCategorySe
         PicksTemplate template = lockTemplate(templateId);
         assertCanManage(actorId, template);
         LocalDateTime now = LocalDateTime.now();
+        List<PicksTemplateCategory> existingCategories = categoryRepository
+                .findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(templateId);
+        if (existingCategories.size() >= 50) {
+            throw new BadRequestException("A template can contain at most 50 categories");
+        }
+        int incomingOptions = dto.options() == null ? 0 : dto.options().size();
+        if (incomingOptions > 100) {
+            throw new BadRequestException("A category can contain at most 100 options");
+        }
+        int existingOptions = existingCategories.isEmpty() ? 0 : optionRepository
+                .findByCategoryIdIn(existingCategories.stream().map(PicksTemplateCategory::getId).toList()).size();
+        if (existingOptions + incomingOptions > 200) {
+            throw new BadRequestException("A template can contain at most 200 options");
+        }
         PicksTemplateCategoryOptionsValidator.validateNewCategory(dto.optionMode(), dto.options());
         PicksTemplateCategory category = categoryRepository.save(PicksTemplateCategory.builder().picksTemplate(template)
                 .name(dto.name()).description(dto.description()).group(dto.group()).displayOrder(dto.displayOrder())

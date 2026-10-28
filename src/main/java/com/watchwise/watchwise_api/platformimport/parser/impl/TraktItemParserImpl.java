@@ -67,6 +67,9 @@ public class TraktItemParserImpl implements TraktItemParser {
         String title = requiredText(parent, "title", path, recordNumber, branch + ".title");
         if (title.length() > 500) throw failure(path, recordNumber, branch + ".title", "Title is too long");
         Integer year = optionalPositiveInt(parent, "year", path, recordNumber, branch + ".year");
+        if (year != null && year > 9999) {
+            throw failure(path, recordNumber, branch + ".year", "Year must be between 1 and 9999");
+        }
         String tmdb = optionalId(parent.path("ids").path("tmdb"), path, recordNumber, branch + ".ids.tmdb");
         ContentType contentType = episode ? ContentType.SERIES : branch.equals("movie") ? ContentType.MOVIE : ContentType.SERIES;
         MediaReference ref = null;

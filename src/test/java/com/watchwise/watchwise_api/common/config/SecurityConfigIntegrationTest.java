@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.common.config;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.TokenType;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,9 @@ class SecurityConfigIntegrationTest {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Test
     @DisplayName("[securityFilterChain] Should Return Unauthorized Json Body - When Accessing Protected Route Without Authentication")
@@ -100,9 +104,16 @@ class SecurityConfigIntegrationTest {
         var registerResult = mockMvc.perform(post("/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
-        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie registrationProof = registerResult.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        var confirmationResult = mockMvc.perform(post("/auth/confirm-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + emailConfirmationSender.tokenFor("securityconfigroutinguser@email.com") + "\"}")
+                        .cookie(registrationProof))
+                .andExpect(status().isNoContent())
+                .andReturn();
+        Cookie accessTokenCookie = confirmationResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
 
         mockMvc.perform(get(PROTECTED_ROUTE).cookie(accessTokenCookie))
                 .andExpect(status().isNotFound())

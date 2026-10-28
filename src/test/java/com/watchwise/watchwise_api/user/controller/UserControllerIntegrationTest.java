@@ -18,7 +18,9 @@ import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.PendingRegistrationRepository;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -34,6 +36,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -47,9 +50,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -66,7 +75,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class UserControllerIntegrationTest {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withImagePullPolicy(image -> false);
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -83,13 +93,25 @@ class UserControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private PendingRegistrationRepository pendingRegistrationRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
+
+    @Autowired
     private RequestThrottler requestThrottler;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
@@ -128,6 +150,60 @@ class UserControllerIntegrationTest {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+        emailConfirmationSender.clear();
+    }
+
+    @Test
+    void passwordChangeRollsBackWhenClearingLockoutFails() throws Exception {
+        assertAccountActionRollsBackWhenClearingLockoutFails(false);
+    }
+
+    @Test
+    void accountDeletionRollsBackWhenClearingLockoutFails() throws Exception {
+        assertAccountActionRollsBackWhenClearingLockoutFails(true);
+    }
+
+    private void assertAccountActionRollsBackWhenClearingLockoutFails(boolean deletion) throws Exception {
+        MvcResult login = registerConfirmAndLogin("atomicaccount", "atomicaccount@example.test");
+        User before = userRepository.findByUsernameIgnoreCase("atomicaccount").orElseThrow();
+        var refreshBefore = jdbcTemplate.queryForList("SELECT id, revoked FROM refresh_tokens ORDER BY id");
+        long attemptsBefore = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(request_count), 0) FROM shared_limiter_state WHERE kind = 'lockout'", Long.class);
+        Cookie access = login.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrf = login.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        jdbcTemplate.execute("""
+                CREATE FUNCTION reject_lockout_clear() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'test lockout clear unavailable'; END $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER reject_lockout_clear BEFORE DELETE ON shared_limiter_state
+                FOR EACH ROW WHEN (OLD.kind = 'lockout') EXECUTE FUNCTION reject_lockout_clear()
+                """);
+        try {
+            MockHttpServletRequestBuilder action = deletion
+                    ? deleteMeRequest(access, csrf, "{\"password\":\"Password123\"}")
+                    : patchMeRequest(access, csrf,
+                            "{\"password\":\"NewPassword123\",\"currentPassword\":\"Password123\"}");
+            mockMvc.perform(action)
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.status").value(503))
+                    .andExpect(cookie().doesNotExist(CookieUtil.ACCESS_TOKEN_COOKIE))
+                    .andExpect(cookie().doesNotExist(CookieUtil.REFRESH_TOKEN_COOKIE))
+                    .andExpect(cookie().doesNotExist(CookieUtil.CSRF_TOKEN_COOKIE));
+            assertThat(userRepository.findById(before.getId())).isPresent();
+            User after = userRepository.findById(before.getId()).orElseThrow();
+            assertThat(after.getPassword()).isEqualTo(before.getPassword());
+            assertThat(after.getAuthVersion()).isEqualTo(before.getAuthVersion());
+            assertThat(after.getSessionsInvalidatedAt()).isEqualTo(before.getSessionsInvalidatedAt());
+            assertThat(jdbcTemplate.queryForList("SELECT id, revoked FROM refresh_tokens ORDER BY id"))
+                    .isEqualTo(refreshBefore);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(SUM(request_count), 0) FROM shared_limiter_state WHERE kind = 'lockout'", Long.class))
+                    .isEqualTo(attemptsBefore + 1);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER reject_lockout_clear ON shared_limiter_state");
+            jdbcTemplate.execute("DROP FUNCTION reject_lockout_clear()");
+        }
     }
 
     @Test
@@ -160,9 +236,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[getCurrentUser] Should Include Watch Time Stats - When Diary Has A Movie Entry With RuntimeMinutes And Genres")
     void shouldIncludeWatchTimeStatsWhenDiaryHasAMovieEntryWithRuntimeMinutesAndGenres() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("statsuser", "statsuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("statsuser", "statsuser@email.com");
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         User statsUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("statsuser", "statsuser")
@@ -209,9 +283,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Update Authenticated User - When Request Is Valid")
     void shouldUpdateAuthenticatedUserWhenRequestIsValid() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("johndoe", "johndoe@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("johndoe", "johndoe@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -225,14 +297,66 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Keep Current Email And Session Until Pending Email Is Confirmed")
+    void shouldKeepCurrentEmailAndSessionUntilPendingEmailIsConfirmed() throws Exception {
+        MvcResult login = registerConfirmAndLogin("pendingemailuser", "current@email.com");
+        Cookie accessToken = login.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfToken = login.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(accessToken).isNotNull();
+
+        mockMvc.perform(patchMeRequest(accessToken, csrfToken,
+                        "{ \"email\": \"new@email.com\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("current@email.com"));
+
+        User pendingChange = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
+                "pendingemailuser", "pendingemailuser").orElseThrow();
+        assertThat(pendingChange.getEmail()).isEqualTo("current@email.com");
+        assertThat(pendingChange.getPendingEmail()).isEqualTo("new@email.com");
+        assertThat(pendingChange.getIsEmailVerified()).isTrue();
+        mockMvc.perform(get("/users/me").cookie(accessToken)).andExpect(status().isOk());
+
+        String firstConfirmationToken = emailConfirmationSender.tokenFor("new@email.com");
+        mockMvc.perform(patchMeRequest(accessToken, csrfToken,
+                        "{ \"email\": \"new@email.com\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("current@email.com"));
+        String confirmationToken = emailConfirmationSender.tokenFor("new@email.com");
+        assertThat(confirmationToken).isNotEqualTo(firstConfirmationToken);
+
+        mockMvc.perform(confirmEmailRequest(confirmationToken)).andExpect(status().isNoContent());
+
+        User confirmedChange = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
+                "pendingemailuser", "pendingemailuser").orElseThrow();
+        assertThat(confirmedChange.getEmail()).isEqualTo("new@email.com");
+        assertThat(confirmedChange.getPendingEmail()).isNull();
+        assertThat(confirmedChange.getIsEmailVerified()).isTrue();
+        mockMvc.perform(get("/users/me").cookie(accessToken)).andExpect(status().isUnauthorized());
+        mockMvc.perform(loginRequest("current@email.com")).andExpect(status().isUnauthorized());
+        mockMvc.perform(loginRequest("new@email.com")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("[register] Should Reject Email Reserved By Another Account Pending Email Change")
+    void shouldRejectEmailReservedByAnotherAccountPendingEmailChange() throws Exception {
+        MvcResult login = registerConfirmAndLogin("pendingreservation", "reservation-current@email.com");
+        Cookie accessToken = login.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfToken = login.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessToken, csrfToken,
+                        "{ \"email\": \"reserved@email.com\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(registerRequest("pendingcollision", "reserved@email.com"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Email already in use"));
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Notify Pending Requesters - When Private Profile Becomes Public")
     void shouldNotifyPendingRequestersWhenPrivateProfileBecomesPublic() throws Exception {
-        MvcResult ownerResult = mockMvc.perform(registerRequest("publicowner", "publicowner@email.com", false))
-                .andExpect(status().isCreated())
-                .andReturn();
-        MvcResult requesterResult = mockMvc.perform(registerRequest("publicrequester", "publicrequester@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult ownerResult = registerConfirmAndLogin("publicowner", "publicowner@email.com", false);
+        MvcResult requesterResult = registerConfirmAndLogin("publicrequester", "publicrequester@email.com");
 
         Cookie ownerAccessToken = ownerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie ownerCsrfToken = ownerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -258,9 +382,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Update Banner - When Request Is Valid")
     void shouldUpdateBannerWhenRequestIsValid() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("bannerupdateuser", "bannerupdateuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("bannerupdateuser", "bannerupdateuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -272,8 +394,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void shouldRemoveBannerAndKeepProfilePictureAcrossCurrentUserRead() throws Exception {
-        MvcResult registration = mockMvc.perform(registerRequest("bannerremoveuser", "bannerremoveuser@email.com"))
-                .andExpect(status().isCreated()).andReturn();
+        MvcResult registration = registerConfirmAndLogin("bannerremoveuser", "bannerremoveuser@email.com");
         Cookie access = registration.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("bannerremoveuser", "bannerremoveuser").orElseThrow();
@@ -293,8 +414,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void shouldRequireAuthenticationToRemoveBanner() throws Exception {
-        MvcResult registration = mockMvc.perform(registerRequest("bannerunauthuser", "bannerunauthuser@email.com"))
-                .andExpect(status().isCreated()).andReturn();
+        MvcResult registration = registerConfirmAndLogin("bannerunauthuser", "bannerunauthuser@email.com");
         Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         mockMvc.perform(delete("/users/me/banner").cookie(csrf).header("X-XSRF-TOKEN", csrf.getValue()))
                 .andExpect(status().isUnauthorized());
@@ -302,8 +422,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void shouldRequireValidCsrfToRemoveBanner() throws Exception {
-        MvcResult registration = mockMvc.perform(registerRequest("bannercsrfuser", "bannercsrfuser@email.com"))
-                .andExpect(status().isCreated()).andReturn();
+        MvcResult registration = registerConfirmAndLogin("bannercsrfuser", "bannercsrfuser@email.com");
         Cookie access = registration.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         mockMvc.perform(delete("/users/me/banner").cookie(access, csrf).header("X-XSRF-TOKEN", "invalid"))
@@ -317,9 +436,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Accept The Same Csrf Token Twice - When Two Authenticated Requests Are Made In A Row")
     void shouldAcceptTheSameCsrfTokenTwiceWhenTwoAuthenticatedRequestsAreMadeInARow() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("repeatuser", "repeatuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("repeatuser", "repeatuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -337,11 +454,9 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Update Only The Authenticated User - When Another User Exists")
     void shouldUpdateOnlyTheAuthenticatedUserWhenAnotherUserExists() throws Exception {
-        mockMvc.perform(registerRequest("userone", "userone@email.com")).andExpect(status().isCreated());
+        registerConfirmAndLogin("userone", "userone@email.com");
 
-        MvcResult registerResultTwo = mockMvc.perform(registerRequest("usertwo", "usertwo@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResultTwo = registerConfirmAndLogin("usertwo", "usertwo@email.com");
 
         Cookie accessTokenCookieTwo = registerResultTwo.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookieTwo = registerResultTwo.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -360,11 +475,10 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresent() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nocookieuser", "nocookieuser@email.com"))
-                .andExpect(status().isCreated())
+        MvcResult anonymousResult = mockMvc.perform(get("/protected-test-route"))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
                 .andReturn();
-
-        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        Cookie csrfCookie = anonymousResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(csrfCookie).isNotNull();
 
         mockMvc.perform(patch("/users/me")
@@ -378,9 +492,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Account Was Deleted After Token Was Issued")
     void shouldReturnUnauthorizedWhenAccountWasDeletedAfterTokenWasIssued() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("stalepatchuser", "stalepatchuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("stalepatchuser", "stalepatchuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -395,12 +507,9 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Conflict - When Updating Username To One Already Taken By Another Real User")
     void shouldReturnConflictWhenUpdatingUsernameToOneAlreadyTakenByAnotherRealUser() throws Exception {
-        mockMvc.perform(registerRequest("takenusername", "takenusername@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("takenusername", "takenusername@email.com");
 
-        MvcResult registerResult = mockMvc.perform(registerRequest("conflictuser", "conflictuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("conflictuser", "conflictuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -413,12 +522,9 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Conflict - When Updating Username To One Already Taken With Different Case")
     void shouldReturnConflictWhenUpdatingUsernameToOneAlreadyTakenWithDifferentCase() throws Exception {
-        mockMvc.perform(registerRequest("CaseTakenUser", "casetakenuser@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("CaseTakenUser", "casetakenuser@email.com");
 
-        MvcResult registerResult = mockMvc.perform(registerRequest("caseconflictuser", "caseconflictuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("caseconflictuser", "caseconflictuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -431,9 +537,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return BadRequest - When Email Format Is Invalid")
     void shouldReturnBadRequestWhenEmailFormatIsInvalid() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("invalidemailuser", "invalidemailuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("invalidemailuser", "invalidemailuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -445,9 +549,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Update Password - When CurrentPassword Is Correct")
     void shouldUpdatePasswordWhenCurrentPasswordIsCorrect() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("passwordchangeuser", "passwordchangeuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("passwordchangeuser", "passwordchangeuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -465,9 +567,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Invalidate The Access Token Already Issued - When Password Changes")
     void shouldInvalidateTheAccessTokenAlreadyIssuedWhenPasswordChanges() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("pwchangeinvalidateuser", "pwchangeinvalidateuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("pwchangeinvalidateuser", "pwchangeinvalidateuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -483,9 +583,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return BadRequest - When Changing Password Without CurrentPassword")
     void shouldReturnBadRequestWhenChangingPasswordWithoutCurrentPassword() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nopwconfirmuser", "nopwconfirmuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("nopwconfirmuser", "nopwconfirmuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -498,9 +596,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Changing Password With Wrong CurrentPassword")
     void shouldReturnUnauthorizedWhenChangingPasswordWithWrongCurrentPassword() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("wrongpwconfirmuser", "wrongpwconfirmuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("wrongpwconfirmuser", "wrongpwconfirmuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -517,11 +613,9 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Update Email - When CurrentPassword Is Correct")
+    @DisplayName("[updateCurrentUser] Should Keep Current Email Until Confirmation - When CurrentPassword Is Correct")
     void shouldUpdateEmailWhenCurrentPasswordIsCorrect() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("emailchangeuser", "emailchangeuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("emailchangeuser", "emailchangeuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -529,15 +623,77 @@ class UserControllerIntegrationTest {
         mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
                         "{ \"email\": \"newemail@email.com\", \"currentPassword\": \"Password123\" }"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("newemail@email.com"));
+                .andExpect(jsonPath("$.email").value("emailchangeuser@email.com"));
+
+        User pendingChange = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
+                "emailchangeuser", "emailchangeuser").orElseThrow();
+        assertThat(pendingChange.getEmail()).isEqualTo("emailchangeuser@email.com");
+        assertThat(pendingChange.getPendingEmail()).isEqualTo("newemail@email.com");
+        assertThat(emailConfirmationSender.tokenFor("newemail@email.com")).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("[confirmEmail] Should Remove Registration Attempts - When A Pending Email Becomes Active")
+    void shouldRemovePendingRegistrationAttemptsWhenEmailChangeIsConfirmed() throws Exception {
+        String targetEmail = "claimed-after-pending-registration@email.com";
+        MvcResult ownerLogin = registerConfirmAndLogin("emailclaimowner", "emailclaimowner@email.com");
+        Cookie accessToken = ownerLogin.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfToken = ownerLogin.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        MvcResult registration = mockMvc.perform(registerRequest("emailclaimattempt", targetEmail))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        String registrationToken = emailConfirmationSender.tokenFor(targetEmail);
+        Cookie registrationProof = registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                targetEmail, LocalDateTime.now())).isEqualTo(1);
+
+        mockMvc.perform(patchMeRequest(accessToken, csrfToken,
+                        "{ \"email\": \"" + targetEmail + "\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk());
+        String emailChangeToken = emailConfirmationSender.tokenFor(targetEmail);
+        assertThat(emailChangeToken).isNotEqualTo(registrationToken);
+
+        try (Connection lockConnection = dataSource.getConnection();
+                var executor = Executors.newSingleThreadExecutor()) {
+            lockConnection.setAutoCommit(true);
+            try (PreparedStatement lock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_lock(hashtextextended(LOWER(?), 0))")) {
+                lock.setString(1, targetEmail);
+                lock.execute();
+            }
+
+            Future<Integer> confirmation = executor.submit(() -> mockMvc.perform(
+                            confirmEmailRequest(emailChangeToken))
+                    .andReturn()
+                    .getResponse()
+                    .getStatus());
+            assertThat(awaitAdvisoryLockWaitOrCompletion(confirmation, targetEmail))
+                    .as("email-change confirmation must serialize on the target email lock")
+                    .isTrue();
+
+            try (PreparedStatement unlock = lockConnection.prepareStatement(
+                    "SELECT pg_advisory_unlock(hashtextextended(LOWER(?), 0))")) {
+                unlock.setString(1, targetEmail);
+                unlock.execute();
+            }
+
+            assertThat(confirmation.get(10, TimeUnit.SECONDS)).isEqualTo(204);
+        }
+
+        User owner = userRepository.findByUsernameIgnoreCase("emailclaimowner").orElseThrow();
+        assertThat(owner.getEmail()).isEqualTo(targetEmail);
+        assertThat(owner.getPendingEmail()).isNull();
+        assertThat(pendingRegistrationRepository.countByEmailIgnoreCaseAndExpiresAtAfter(
+                targetEmail, LocalDateTime.now())).isZero();
+        mockMvc.perform(confirmEmailRequest(registrationToken).cookie(registrationProof))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("[updateCurrentUser] Should Return BadRequest - When Changing Email Without CurrentPassword")
     void shouldReturnBadRequestWhenChangingEmailWithoutCurrentPassword() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("noemailconfirmuser", "noemailconfirmuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("noemailconfirmuser", "noemailconfirmuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -550,9 +706,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Changing Email With Wrong CurrentPassword")
     void shouldReturnUnauthorizedWhenChangingEmailWithWrongCurrentPassword() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("wrongemailconfirmuser", "wrongemailconfirmuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("wrongemailconfirmuser", "wrongemailconfirmuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -571,9 +725,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return TooManyRequests - When Wrong CurrentPassword Attempts Reach The Configured Max")
     void shouldReturnTooManyRequestsWhenPatchWrongCurrentPasswordAttemptsReachTheConfiguredMax() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("patchlockoutuser", "patchlockoutuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("patchlockoutuser", "patchlockoutuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -593,9 +745,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Not Reset The Lockout Counter - When An Unrelated Successful Edit Happens Between Failed Password Attempts")
     void shouldNotResetTheLockoutCounterWhenAnUnrelatedSuccessfulEditHappensBetweenFailedPasswordAttempts() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("interleaveuser", "interleaveuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("interleaveuser", "interleaveuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -621,9 +771,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Not Reset The Lockout Counter - When The Same Current Email Is Resent Between Failed Password Attempts")
     void shouldNotResetTheLockoutCounterWhenTheSameCurrentEmailIsResentBetweenFailedPasswordAttempts() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("resendemailuser", "resendemailuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("resendemailuser", "resendemailuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -650,9 +798,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return Forbidden - When Csrf Token Is Missing")
     void shouldReturnForbiddenWhenCsrfTokenIsMissing() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nocsrfuser", "nocsrfuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("nocsrfuser", "nocsrfuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
@@ -667,9 +813,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Delete Account And Clear Cookies - When Password Matches")
     void shouldDeleteAccountAndClearCookiesWhenPasswordMatches() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("deleteuser", "deleteuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("deleteuser", "deleteuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -690,16 +834,12 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Close Parent List Position Gaps - When Account Owns Nested Child Lists")
     void shouldCloseParentListPositionGapsWhenAccountOwnsNestedChildLists() throws Exception {
-        MvcResult parentOwnerRegistration = mockMvc.perform(registerRequest("nestedparentowner", "nestedparentowner@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult parentOwnerRegistration = registerConfirmAndLogin("nestedparentowner", "nestedparentowner@email.com");
         User parentOwner = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("nestedparentowner", "nestedparentowner")
                 .orElseThrow();
 
-        MvcResult deletingOwnerRegistration = mockMvc.perform(registerRequest("nestedchildowner", "nestedchildowner@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult deletingOwnerRegistration = registerConfirmAndLogin("nestedchildowner", "nestedchildowner@email.com");
         User deletingOwner = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("nestedchildowner", "nestedchildowner")
                 .orElseThrow();
@@ -713,9 +853,9 @@ class UserControllerIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
-        UserList firstChild = saveChildList(deletingOwner, "First child", now);
+        UserList firstChild = saveChildList(parentOwner, "First child", now);
         UserList middleChild = saveChildList(deletingOwner, "Middle child", now);
-        UserList lastChild = saveChildList(deletingOwner, "Last child", now);
+        UserList lastChild = saveChildList(parentOwner, "Last child", now);
         persistNestedListItem(parent, firstChild, 1, now);
         persistNestedListItem(parent, middleChild, 2, now);
         persistNestedListItem(parent, lastChild, 3, now);
@@ -725,9 +865,9 @@ class UserControllerIntegrationTest {
         mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
                 .andExpect(status().isNoContent());
 
-        assertThat(userListRepository.findById(firstChild.getId())).isEmpty();
+        assertThat(userListRepository.findById(firstChild.getId())).isPresent();
         assertThat(userListRepository.findById(middleChild.getId())).isEmpty();
-        assertThat(userListRepository.findById(lastChild.getId())).isEmpty();
+        assertThat(userListRepository.findById(lastChild.getId())).isPresent();
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId()))
                 .extracting(item -> item.getChildList().getId(), UserListItem::getPosition)
                 .containsExactly(
@@ -759,14 +899,11 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Delete Account And Cascade The Watch Companion Row - When User Was Tagged As A Companion In Another User's Diary Entry")
     void shouldDeleteAccountAndCascadeWatchCompanionRowWhenUserWasTaggedAsACompanionInAnotherUsersDiaryEntry() throws Exception {
-        mockMvc.perform(registerRequest("diaryowner", "diaryowner@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("diaryowner", "diaryowner@email.com");
         User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("diaryowner", "diaryowner")
                 .orElseThrow();
 
-        MvcResult companionRegisterResult = mockMvc.perform(registerRequest("companionuser", "companionuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult companionRegisterResult = registerConfirmAndLogin("companionuser", "companionuser@email.com");
         User companion = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("companionuser", "companionuser")
                 .orElseThrow();
 
@@ -793,9 +930,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Return Unauthorized And Keep Account - When Password Does Not Match")
     void shouldReturnUnauthorizedAndKeepAccountWhenPasswordDoesNotMatch() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("keepuser", "keepuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("keepuser", "keepuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -812,9 +947,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Return TooManyRequests - When Wrong Password Attempts Reach The Configured Max")
     void shouldReturnTooManyRequestsWhenDeleteWrongPasswordAttemptsReachTheConfiguredMax() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("deletelockoutuser", "deletelockoutuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("deletelockoutuser", "deletelockoutuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -836,9 +969,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Return BadRequest - When Password Is Blank")
     void shouldReturnBadRequestWhenPasswordIsBlank() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("blankdeleteuser", "blankdeleteuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("blankdeleteuser", "blankdeleteuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -850,11 +981,10 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForDeleteCurrentUser() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("nocookiedeleteuser", "nocookiedeleteuser@email.com"))
-                .andExpect(status().isCreated())
+        MvcResult anonymousResult = mockMvc.perform(get("/protected-test-route"))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
                 .andReturn();
-
-        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        Cookie csrfCookie = anonymousResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(csrfCookie).isNotNull();
 
         mockMvc.perform(delete("/users/me")
@@ -868,9 +998,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[deleteCurrentUser] Should Return Unauthorized - When Retried With The Access Token Of An Already-Deleted Account")
     void shouldReturnUnauthorizedWhenRetriedWithTheAccessTokenOfAnAlreadyDeletedAccount() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("doubledeleteuser", "doubledeleteuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("doubledeleteuser", "doubledeleteuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -885,9 +1013,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[getCurrentUser] Should Return Unauthorized - When Called With The Access Token Of An Already-Deleted Account")
     void shouldReturnUnauthorizedWhenCalledWithTheAccessTokenOfAnAlreadyDeletedAccount() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("deletedtokenuser", "deletedtokenuser@email.com"))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("deletedtokenuser", "deletedtokenuser@email.com");
 
         Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
@@ -916,8 +1042,7 @@ class UserControllerIntegrationTest {
     void shouldReturnPublicUserDtoWhenUserExistsAndProfileIsPublic() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerpublic", "viewerpublic@email.com");
 
-        mockMvc.perform(registerRequest("targetpublic", "targetpublic@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("targetpublic", "targetpublic@email.com");
         User targetUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetpublic", "targetpublic")
                 .orElseThrow();
@@ -937,8 +1062,7 @@ class UserControllerIntegrationTest {
     @Test
     void shouldReturnOnlyNameAndUsernameForBlockedProfile() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("blockprofileviewer", "blockprofileviewer@email.com");
-        mockMvc.perform(registerRequest("blockprofiletarget", "blockprofiletarget@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("blockprofiletarget", "blockprofiletarget@email.com");
         User viewer = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
                 "blockprofileviewer", "blockprofileviewer").orElseThrow();
         User target = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
@@ -970,8 +1094,7 @@ class UserControllerIntegrationTest {
     void shouldIncludeWatchTimeStatsWhenTargetUsersDiaryHasAnEpisodeEntry() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerstats", "viewerstats@email.com");
 
-        mockMvc.perform(registerRequest("targetstats", "targetstats@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("targetstats", "targetstats@email.com");
         User targetUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetstats", "targetstats")
                 .orElseThrow();
@@ -997,27 +1120,30 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return Forbidden - When Target Profile Is Private")
-    void shouldReturnForbiddenWhenTargetProfileIsPrivate() throws Exception {
+    @DisplayName("[getUserById] Should Return Identity And Bio - When Target Profile Is Private")
+    void shouldReturnIdentityAndBioWhenTargetProfileIsPrivate() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerprivate", "viewerprivate@email.com");
 
-        mockMvc.perform(registerRequest("targetprivate", "targetprivate@email.com", false))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("targetprivate", "targetprivate@email.com", false);
         User targetUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetprivate", "targetprivate")
                 .orElseThrow();
+        targetUser.setDescription("Bio remains visible while the profile is private");
+        userRepository.saveAndFlush(targetUser);
 
         mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("This user profile is private"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("targetprivate"))
+                .andExpect(jsonPath("$.description").value("Bio remains visible while the profile is private"))
+                .andExpect(jsonPath("$.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").doesNotExist())
+                .andExpect(jsonPath("$.followersCount").doesNotExist());
     }
 
     @Test
     @DisplayName("[getUserById] Should Return Private Profile - When Requester Is The Profile Owner")
     void shouldReturnPrivateProfileWhenRequesterIsTheProfileOwner() throws Exception {
-        MvcResult registerResult = mockMvc.perform(registerRequest("ownerprivate", "ownerprivate@email.com", false))
-                .andExpect(status().isCreated())
-                .andReturn();
+        MvcResult registerResult = registerConfirmAndLogin("ownerprivate", "ownerprivate@email.com", false);
         Cookie ownerAccessToken = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         User owner = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("ownerprivate", "ownerprivate")
@@ -1034,8 +1160,7 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUserById] Should Return Private Profile - When Requester Is An Accepted Follower")
     void shouldReturnPrivateProfileWhenRequesterIsAnAcceptedFollower() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("acceptedviewer", "acceptedviewer@email.com");
-        mockMvc.perform(registerRequest("acceptedtarget", "acceptedtarget@email.com", false))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("acceptedtarget", "acceptedtarget@email.com", false);
         User viewer = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("acceptedviewer", "acceptedviewer")
                 .orElseThrow();
@@ -1052,11 +1177,10 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return Forbidden - When Requester Has A Pending Follow Request")
-    void shouldReturnForbiddenWhenRequesterHasAPendingFollowRequest() throws Exception {
+    @DisplayName("[getUserById] Should Return Identity And Bio - When Requester Has A Pending Follow Request")
+    void shouldReturnIdentityAndBioWhenRequesterHasAPendingFollowRequest() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("pendingviewer", "pendingviewer@email.com");
-        mockMvc.perform(registerRequest("pendingtarget", "pendingtarget@email.com", false))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("pendingtarget", "pendingtarget@email.com", false);
         User viewer = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("pendingviewer", "pendingviewer")
                 .orElseThrow();
@@ -1066,8 +1190,9 @@ class UserControllerIntegrationTest {
         persistFollow(viewer, target, FollowStatus.PENDING);
 
         mockMvc.perform(get("/users/" + target.getId()).cookie(viewerAccessToken))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("This user profile is private"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("pendingtarget"))
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").doesNotExist());
     }
 
     @Test
@@ -1093,8 +1218,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[getUserById] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUserById() throws Exception {
-        mockMvc.perform(registerRequest("targetnoauth", "targetnoauth@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("targetnoauth", "targetnoauth@email.com");
         User targetUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetnoauth", "targetnoauth")
                 .orElseThrow();
@@ -1107,9 +1231,9 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUsersByUsername] Should Return Matching Users - When Username Prefix Matches")
     void shouldReturnMatchingUsersWhenUsernamePrefixMatches() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("searchviewer", "searchviewer@email.com");
-        mockMvc.perform(registerRequest("searchuser1", "searchuser1@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("searchuser2", "searchuser2@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("unrelated", "unrelated@email.com")).andExpect(status().isCreated());
+        registerConfirmAndLogin("searchuser1", "searchuser1@email.com");
+        registerConfirmAndLogin("searchuser2", "searchuser2@email.com");
+        registerConfirmAndLogin("unrelated", "unrelated@email.com");
 
         mockMvc.perform(get("/users").param("username", "searchuser").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
@@ -1126,8 +1250,7 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUsersByUsername] Should Include Private Profiles In Results - When Username Matches")
     void shouldIncludePrivateProfilesInResultsWhenUsernameMatches() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("privatesearchviewer", "privatesearchviewer@email.com");
-        mockMvc.perform(registerRequest("privatesearchtarget", "privatesearchtarget@email.com", false))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("privatesearchtarget", "privatesearchtarget@email.com", false);
 
         mockMvc.perform(get("/users").param("username", "privatesearchtarget").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
@@ -1140,9 +1263,9 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUsersByUsername] Should Respect Size Parameter - When Provided")
     void shouldRespectSizeParameterWhenProvided() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("sizeviewer", "sizeviewer@email.com");
-        mockMvc.perform(registerRequest("sizeuser1", "sizeuser1@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("sizeuser2", "sizeuser2@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("sizeuser3", "sizeuser3@email.com")).andExpect(status().isCreated());
+        registerConfirmAndLogin("sizeuser1", "sizeuser1@email.com");
+        registerConfirmAndLogin("sizeuser2", "sizeuser2@email.com");
+        registerConfirmAndLogin("sizeuser3", "sizeuser3@email.com");
 
         mockMvc.perform(get("/users").param("username", "sizeuser").param("size", "2").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
@@ -1157,9 +1280,9 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUsersByUsername] Should Return Different Page Of Results - When Page Parameter Changes")
     void shouldReturnDifferentPageOfResultsWhenPageParameterChanges() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("pageviewer", "pageviewer@email.com");
-        mockMvc.perform(registerRequest("pageuser1", "pageuser1@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("pageuser2", "pageuser2@email.com")).andExpect(status().isCreated());
-        mockMvc.perform(registerRequest("pageuser3", "pageuser3@email.com")).andExpect(status().isCreated());
+        registerConfirmAndLogin("pageuser1", "pageuser1@email.com");
+        registerConfirmAndLogin("pageuser2", "pageuser2@email.com");
+        registerConfirmAndLogin("pageuser3", "pageuser3@email.com");
 
         mockMvc.perform(get("/users").param("username", "pageuser").param("page", "1").param("size", "1").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
@@ -1200,8 +1323,7 @@ class UserControllerIntegrationTest {
     @Test
     @DisplayName("[getUsersByUsername] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForSearch() throws Exception {
-        mockMvc.perform(registerRequest("noauthsearchtarget", "noauthsearchtarget@email.com"))
-                .andExpect(status().isCreated());
+        registerConfirmAndLogin("noauthsearchtarget", "noauthsearchtarget@email.com");
 
         mockMvc.perform(get("/users").param("username", "noauthsearchtarget"))
                 .andExpect(status().isUnauthorized());
@@ -1211,7 +1333,7 @@ class UserControllerIntegrationTest {
     @DisplayName("[getUsersByUsername][getUserById] Should Return TooManyRequests - When Combined Requests From The Same User Exceed The Configured Max")
     void shouldReturnTooManyRequestsWhenCombinedProfileRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("scanviewer", "scanviewer@email.com");
-        mockMvc.perform(registerRequest("scantarget", "scantarget@email.com")).andExpect(status().isCreated());
+        registerConfirmAndLogin("scantarget", "scantarget@email.com");
         User targetUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("scantarget", "scantarget")
                 .orElseThrow();
@@ -1365,13 +1487,64 @@ class UserControllerIntegrationTest {
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username, email))
-                .andExpect(status().isCreated())
-                .andReturn();
-
+        MvcResult result = registerConfirmAndLogin(username, email);
         Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         return accessTokenCookie;
+    }
+
+    private MvcResult registerConfirmAndLogin(String username, String email) throws Exception {
+        return registerConfirmAndLogin(username, email, true);
+    }
+
+    private MvcResult registerConfirmAndLogin(String username, String email, boolean isProfilePublic) throws Exception {
+        MvcResult registration = mockMvc.perform(registerRequest(username, email, isProfilePublic))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        Cookie registrationProof = registration.getResponse().getCookie(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        mockMvc.perform(confirmEmailRequest(emailConfirmationSender.tokenFor(email)).cookie(registrationProof))
+                .andExpect(status().isNoContent());
+        return mockMvc.perform(loginRequest(username)).andExpect(status().isOk()).andReturn();
+    }
+
+    private boolean awaitAdvisoryLockWaitOrCompletion(Future<?> operation, String email) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (operation.isDone()) {
+                return false;
+            }
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    WITH requested_lock AS (
+                        SELECT hashtextextended(LOWER(?), 0) AS lock_key
+                    )
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks, requested_lock
+                        WHERE locktype = 'advisory'
+                          AND granted = FALSE
+                          AND classid = ((lock_key >> 32) & 4294967295)::oid
+                          AND objid = (lock_key & 4294967295)::oid
+                          AND objsubid = 1
+                    )
+                    """, Boolean.class, email);
+            if (Boolean.TRUE.equals(waiting)) {
+                return true;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Operation neither waited for the requested email lock nor completed");
+    }
+
+    private MockHttpServletRequestBuilder loginRequest(String identifier) {
+        return post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"identifier\":\"" + identifier + "\",\"password\":\"Password123\"}");
+    }
+
+    private MockHttpServletRequestBuilder confirmEmailRequest(String token) {
+        return post("/auth/confirm-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + token + "\"}");
     }
 
     private MockHttpServletRequestBuilder patchMeRequest(Cookie accessTokenCookie, Cookie csrfCookie, String body) {

@@ -10,10 +10,14 @@ import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
@@ -27,6 +31,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class RefreshTokenServiceImpl implements RefreshTokenService {
 
+    private static final Logger log = LoggerFactory.getLogger(RefreshTokenServiceImpl.class);
+
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRepository userRepository;
     private final JwtService jwtService;
@@ -34,7 +40,14 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public String issueRefreshToken(UUID userId) {
-        String token = jwtService.generateToken(userId, TokenType.REFRESH);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("Invalid refresh token"));
+        return issueRefreshToken(userId, user.getAuthVersion());
+    }
+
+    @Override
+    public String issueRefreshToken(UUID userId, long authVersion) {
+        String token = jwtService.generateToken(userId, authVersion, TokenType.REFRESH);
         UUID jti = jwtService.extractJti(token);
 
         RefreshToken refreshToken = RefreshToken.builder()
@@ -74,8 +87,11 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         }
 
         User user = storedToken.getUser();
-        String newAccessToken = jwtService.generateToken(user.getId(), TokenType.ACCESS);
-        String newRefreshToken = issueRefreshToken(user.getId());
+        if (jwtService.extractAuthVersion(rawRefreshToken) != user.getAuthVersion()) {
+            throw new UnauthorizedException("Invalid refresh token");
+        }
+        String newAccessToken = jwtService.generateToken(user.getId(), user.getAuthVersion(), TokenType.ACCESS);
+        String newRefreshToken = issueRefreshToken(user.getId(), user.getAuthVersion());
 
         return new RefreshedTokens(newAccessToken, newRefreshToken);
     }
@@ -96,12 +112,25 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public void invalidateAllSessions(UUID userId) {
+        executeInRequiresNewTransaction(() ->
+                userRepository.markSessionsInvalidatedAt(userId, LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)));
+        revokeAllRefreshTokens(userId);
+    }
+
+    @Override
+    public void revokeAllRefreshTokens(UUID userId) {
+        try {
+            executeInRequiresNewTransaction(() -> refreshTokenRepository.revokeAllByUserId(userId));
+        } catch (DataAccessException | TransactionException exception) {
+            log.warn("Could not physically revoke refresh tokens for user {} after session invalidation; "
+                    + "auth-version checks remain active", userId, exception);
+        }
+    }
+
+    private void executeInRequiresNewTransaction(Runnable operation) {
         TransactionTemplate requiresNewTransaction = new TransactionTemplate(transactionManager);
         requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        requiresNewTransaction.executeWithoutResult(status -> {
-            refreshTokenRepository.revokeAllByUserId(userId);
-            userRepository.markSessionsInvalidatedAt(userId, LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
-        });
+        requiresNewTransaction.executeWithoutResult(status -> operation.run());
     }
 
     @Override

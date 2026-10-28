@@ -54,6 +54,18 @@ public class PreparedTemplateCreationServiceImpl implements PreparedTemplateCrea
         if (actorId == null) throw new BadRequestException("Template creator is required");
         users.findById(actorId).orElseThrow(() -> new NotFoundException("User not found"));
         requestValidator.validate(dto);
+        Set<PreparationTargetIdentity> distinctTargetIdentities = new HashSet<>();
+        for (PicksTemplateCategoryCreationDTO category : dto.categories()) {
+            if (category.options() == null) continue;
+            for (PicksTemplateOptionCreationDTO option : category.options()) {
+                if (option != null && option.target() != null) {
+                    distinctTargetIdentities.add(new PreparationTargetIdentity(category.allowedType(), option.target()));
+                }
+            }
+        }
+        if (distinctTargetIdentities.size() > 100) {
+            throw new BadRequestException("A template preparation can contain at most 100 distinct target identities");
+        }
 
         PicksTemplate templateContext = PicksTemplate.builder()
                 .eligibilityStartDate(dto.eligibilityStartDate())
@@ -137,4 +149,6 @@ public class PreparedTemplateCreationServiceImpl implements PreparedTemplateCrea
 
     private record ValidationKey(PickAllowedType type, PickTargetDTO target,
                                  java.time.LocalDate start, java.time.LocalDate end) { }
+
+    private record PreparationTargetIdentity(PickAllowedType type, PickTargetDTO target) { }
 }

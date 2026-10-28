@@ -38,6 +38,32 @@ class CookieUtilTest {
     }
 
     @Test
+    @DisplayName("[buildRegistrationProofCookie] Should Build Strict HttpOnly Cookie Scoped To Auth - When Called")
+    void shouldBuildStrictHttpOnlyRegistrationProofCookieScopedToAuthWhenCalled() {
+        ResponseCookie cookie = cookieUtil.buildRegistrationProofCookie("temporary-proof");
+
+        assertThat(cookie.getName()).isEqualTo(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(cookie.getValue()).isEqualTo("temporary-proof");
+        assertThat(cookie.isHttpOnly()).isTrue();
+        assertThat(cookie.isSecure()).isTrue();
+        assertThat(cookie.getPath()).isEqualTo("/api/v1/auth");
+        assertThat(cookie.getSameSite()).isEqualTo("Strict");
+        assertThat(cookie.getMaxAge()).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
+    @DisplayName("[clearRegistrationProofCookie] Should Expire The Auth-Scoped Proof Cookie - When Called")
+    void shouldExpireAuthScopedRegistrationProofCookieWhenCalled() {
+        ResponseCookie cookie = cookieUtil.clearRegistrationProofCookie();
+
+        assertThat(cookie.getName()).isEqualTo(CookieUtil.REGISTRATION_PROOF_COOKIE);
+        assertThat(cookie.getValue()).isEmpty();
+        assertThat(cookie.getPath()).isEqualTo("/api/v1/auth");
+        assertThat(cookie.getSameSite()).isEqualTo("Strict");
+        assertThat(cookie.getMaxAge()).isEqualTo(Duration.ZERO);
+    }
+
+    @Test
     @DisplayName("[buildRefreshTokenCookie] Should Build Cookie Scoped To Bare Refresh Path - When Context Path Is Blank")
     void shouldBuildCookieScopedToBareRefreshPathWhenContextPathIsBlank() {
         CookieUtil noContextPathCookieUtil = new CookieUtil(60, 7, true, "");

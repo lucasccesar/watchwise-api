@@ -25,6 +25,8 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.platformimport.parser.impl.LetterboxdItemCsvParserImpl;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
+import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,6 +82,9 @@ class ContentReviewControllerIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TestEmailConfirmationSender emailConfirmationSender;
 
     @Autowired
     private ContentRepository contentRepository;
@@ -342,24 +347,10 @@ class ContentReviewControllerIntegrationTest {
 
     private RegisteredUser registerUser() throws Exception {
         String username = "opinion" + UUID.randomUUID().toString().replace("-", "");
-        MvcResult result = mockMvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "username": "%s",
-                                  "name": "Opinion Owner",
-                                  "email": "%s@example.com",
-                                  "password": "Password123",
-                                  "isProfilePublic": true
-                                }
-                                """.formatted(username, username)))
-                .andExpect(status().isCreated())
-                .andReturn();
-        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
-        return new RegisteredUser(
-                user.getId(),
-                result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE),
-                result.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE));
+        TestRegistrationHelper.RegisteredTestUser registered = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender,
+                username, "Opinion Owner", username + "@example.com", true);
+        return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
     private Content persistSeries() {

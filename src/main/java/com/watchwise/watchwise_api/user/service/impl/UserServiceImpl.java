@@ -20,11 +20,13 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import com.watchwise.watchwise_api.user.service.UserAccountDeletionService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
@@ -42,6 +44,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -64,6 +67,7 @@ public class UserServiceImpl implements UserService {
     private final UserVisibilityService userVisibilityService;
     private final UserBlockAccessService userBlockAccessService;
     private final UserAccountDeletionService userAccountDeletionService;
+    private final EmailConfirmationService emailConfirmationService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -73,7 +77,8 @@ public class UserServiceImpl implements UserService {
     static final Set<String> ISO_COUNTRIES = Set.of(Locale.getISOCountries());
 
     @Override
-    public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
+    @Transactional
+    public String startRegistration(PostUserDTO postUserDTO) {
 
         String trimmedUsername = postUserDTO.username().trim();
         validateUsernameLength(trimmedUsername);
@@ -85,31 +90,44 @@ public class UserServiceImpl implements UserService {
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
         mapperUser.setUsername(trimmedUsername);
         mapperUser.setName(trimmedName);
-        mapperUser.setIsEmailVerified(true);
-
+        mapperUser.setIsEmailVerified(false);
         LocalDateTime now = LocalDateTime.now();
         mapperUser.setCreatedAt(now);
         mapperUser.setUpdatedAt(now);
 
-        try {
-            User saved = userRepository.save(mapperUser);
-            return toUserResponseDto(saved, ProfileStats.EMPTY);
-        } catch (DataIntegrityViolationException e) {
-            throw mapUniqueConstraintViolation(e);
+        if (userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate(mapperUser.getEmail()).isPresent()) {
+            throw new ConflictException("Email already in use");
         }
+        if (userRepository.findByUsernameIgnoreCase(mapperUser.getUsername()).isPresent()) {
+            throw new ConflictException("Username already in use");
+        }
+
+        return emailConfirmationService.issueForRegistration(mapperUser);
     }
 
     @Override
     @Transactional
     public UserResponseDTO updateUser(User user, PatchUserDTO patchUserDTO) {
+        User currentUser = userRepository.findByIdForUpdate(user.getId())
+                .orElseThrow(() -> new NotFoundException("User not found"));
         boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic())
-                && !Boolean.TRUE.equals(user.getIsProfilePublic());
-        boolean touchesCredentials = applyPatch(user, patchUserDTO);
-        user.setUpdatedAt(LocalDateTime.now());
+                && !Boolean.TRUE.equals(currentUser.getIsProfilePublic());
+        CredentialChanges credentialChanges = resolveCredentialChanges(currentUser, patchUserDTO);
+        if (credentialChanges.touchesCredentials()) {
+            requireCurrentPassword(currentUser, patchUserDTO.currentPassword());
+        }
+        if (credentialChanges.changesEmail()) {
+            emailConfirmationService.requireDeliveryConfigured();
+            if (userRepository.existsEmailOrPendingEmailByAnotherUser(currentUser.getId(), credentialChanges.newEmail())) {
+                throw new ConflictException("Email already in use");
+            }
+        }
+        applyPatch(currentUser, patchUserDTO, credentialChanges);
+        currentUser.setUpdatedAt(LocalDateTime.now());
 
         UserResponseDTO response;
         try {
-            User saved = userRepository.saveAndFlush(user);
+            User saved = userRepository.saveAndFlush(currentUser);
             if (becamePublic) {
                 followerService.acceptAllPendingFollowRequestsFor(saved);
             }
@@ -118,23 +136,28 @@ public class UserServiceImpl implements UserService {
             throw mapUniqueConstraintViolation(e);
         }
 
-        if (touchesCredentials) {
-            invalidateSessionsAfterCommit(user.getId());
+        if (credentialChanges.changesPassword()) {
+            currentUser.setAuthVersion(currentUser.getAuthVersion() + 1);
+            currentUser.setSessionsInvalidatedAt(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
+            revokeRefreshTokensAfterCommit(currentUser.getId());
+        }
+        if (credentialChanges.changesEmail()) {
+            emailConfirmationService.issueAndSend(currentUser);
         }
 
         return response;
     }
 
-    private void invalidateSessionsAfterCommit(UUID userId) {
+    private void revokeRefreshTokensAfterCommit(UUID userId) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            refreshTokenService.invalidateAllSessions(userId);
+            refreshTokenService.revokeAllRefreshTokens(userId);
             return;
         }
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                refreshTokenService.invalidateAllSessions(userId);
+                refreshTokenService.revokeAllRefreshTokens(userId);
             }
         });
     }
@@ -146,13 +169,7 @@ public class UserServiceImpl implements UserService {
         return new CredentialCheck(user, touchesCredentials);
     }
 
-    private boolean applyPatch(User user, PatchUserDTO patchUserDTO) {
-        CredentialChanges credentialChanges = resolveCredentialChanges(user, patchUserDTO);
-
-        if (credentialChanges.touchesCredentials()) {
-            requireCurrentPassword(user, patchUserDTO.currentPassword());
-        }
-
+    private void applyPatch(User user, PatchUserDTO patchUserDTO, CredentialChanges credentialChanges) {
         if (patchUserDTO.username() != null) {
             String newUsername = patchUserDTO.username().trim();
             validateUsernameLength(newUsername);
@@ -170,7 +187,7 @@ public class UserServiceImpl implements UserService {
         }
 
         if (credentialChanges.changesEmail()) {
-            user.setEmail(credentialChanges.newEmail());
+            user.setPendingEmail(credentialChanges.newEmail());
         }
 
         if (credentialChanges.changesPassword()) {
@@ -203,7 +220,6 @@ public class UserServiceImpl implements UserService {
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
         }
 
-        return credentialChanges.touchesCredentials();
     }
 
     private void validateUsernameLength(String trimmedUsername) {
@@ -236,6 +252,9 @@ public class UserServiceImpl implements UserService {
     }
 
     private CredentialChanges resolveCredentialChanges(User user, PatchUserDTO patchUserDTO) {
+        if (patchUserDTO.email() != null && patchUserDTO.email().isBlank()) {
+            throw new BadRequestException("Email must not be blank");
+        }
         String newEmail = patchUserDTO.email() != null ? patchUserDTO.email().trim().toLowerCase() : null;
         boolean changesEmail = newEmail != null && !newEmail.equals(user.getEmail());
         boolean changesPassword = patchUserDTO.password() != null
@@ -258,6 +277,9 @@ public class UserServiceImpl implements UserService {
         if ("uq_users_email".equals(constraintName)) {
             return new ConflictException("Email already in use");
         }
+        if ("uq_users_effective_email".equals(constraintName)) {
+            return new ConflictException("Email already in use");
+        }
         return new ConflictException("Username or email already in use");
     }
 
@@ -274,7 +296,14 @@ public class UserServiceImpl implements UserService {
                     null, null, null, blockRelationship, true);
         }
 
-        userVisibilityService.assertCanView(viewerId, targetUserId);
+        try {
+            userVisibilityService.assertCanView(viewerId, targetUserId);
+        } catch (ForbiddenException exception) {
+            if (!targetUserId.equals(viewerId) && !Boolean.TRUE.equals(foundUser.getIsProfilePublic())) {
+                return privateProfileWithVisibleBio(foundUser);
+            }
+            throw exception;
+        }
 
         ProfileStats stats = computeProfileStats(targetUserId);
         PublicUserProfileDTO profile = userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
@@ -288,6 +317,13 @@ public class UserServiceImpl implements UserService {
                 profile.totalTheaterVisits(), profile.genreCountsMovies(), profile.genreCountsSeries(),
                 profile.banner(), profile.followersCount(), profile.followingCount(),
                 resolveViewerProfileRelation(viewerId, targetUserId), UserBlockRelationship.NONE, false);
+    }
+
+    private PublicUserProfileDTO privateProfileWithVisibleBio(User user) {
+        return new PublicUserProfileDTO(user.getId(), user.getUsername(), user.getName(), user.getDescription(),
+                user.getProfilePicture(), user.getIsProfilePublic(), null, null, null, null, null, null,
+                null, null, null, null, null, ViewerProfileRelation.NOT_FOLLOWING,
+                UserBlockRelationship.NONE, false);
     }
 
     private ViewerProfileRelation resolveViewerProfileRelation(UUID viewerId, UUID targetUserId) {
@@ -347,6 +383,11 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserResponseDTO login(LoginUserDTO loginUserDTO) {
+        return loginForAuthentication(loginUserDTO).user();
+    }
+
+    @Override
+    public AuthenticatedUser loginForAuthentication(LoginUserDTO loginUserDTO) {
         String identifier = loginUserDTO.identifier().trim();
         Optional<User> maybeUser = userRepository.findByUsernameIgnoreCase(identifier)
                 .or(() -> userRepository.findByEmailIgnoreCase(identifier));
@@ -364,13 +405,32 @@ public class UserServiceImpl implements UserService {
             throw new ForbiddenException("Email not verified");
         }
 
-        return toUserResponseDto(user, computeProfileStats(user.getId()));
+        long authVersion = user.getAuthVersion();
+        UserResponseDTO response = toUserResponseDto(user, computeProfileStats(user.getId()));
+        return new AuthenticatedUser(response, authVersion);
     }
 
     @Override
     public Optional<UserResponseDTO> findByEmail(String email) {
+        return findByEmailForAuthentication(email).map(AuthenticatedUser::user);
+    }
+
+    @Override
+    public Optional<AuthenticatedUser> findByEmailForAuthentication(String email) {
         return userRepository.findByEmailIgnoreCase(email.trim())
-                .map(user -> toUserResponseDto(user, computeProfileStats(user.getId())));
+                .filter(user -> Boolean.TRUE.equals(user.getIsEmailVerified()))
+                .map(user -> {
+                    long authVersion = user.getAuthVersion();
+                    UserResponseDTO response = toUserResponseDto(user, computeProfileStats(user.getId()));
+                    return new AuthenticatedUser(response, authVersion);
+                });
+    }
+
+    @Override
+    public long getAuthVersion(UUID userId) {
+        return userRepository.findById(userId)
+                .map(User::getAuthVersion)
+                .orElseThrow(() -> new NotFoundException("User not found"));
     }
 
     @Override

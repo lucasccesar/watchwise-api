@@ -5,8 +5,10 @@ import jakarta.validation.constraints.Size;
 import org.hibernate.validator.constraints.URL;
 import java.time.LocalDate;
 
-public record PicksTemplatePatchDTO(@Size(max = 120) String name, String description,
-                                     @Size(max = 2048) @URL String coverImage, String instructions,
+public record PicksTemplatePatchDTO(@Size(max = 120) String name,
+                                     @Size(max = 5000) String description,
+                                     @Size(max = 2048) @URL String coverImage,
+                                     @Size(max = 10000) String instructions,
                                      LocalDate eligibilityStartDate, LocalDate eligibilityEndDate,
                                      Boolean clearEligibilityPeriod) {
     @AssertTrue(message = "eligibility dates must be both absent or ordered")

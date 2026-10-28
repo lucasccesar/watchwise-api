@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.PreparedContentReference;
 import com.watchwise.watchwise_api.pick.dto.PickContentTargetDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
@@ -56,9 +57,47 @@ class PickTargetServiceImplTest {
 
     private PickTargetService service;
 
+    @Test
+    void shouldSkipTmdbWhenPreparingAStructurallyInvalidSelection() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        PickSelection selection = selection(category, content("550", ContentType.MOVIE, null, null, null));
+
+        PreparedTargetValidation prepared = service.prepareValidation(selection);
+
+        assertThat(prepared.checked()).isFalse();
+        verifyNoInteractions(tmdbClient, contentService);
+    }
+
+    @Test
+    void shouldSkipTmdbWhenPreparingARemovedFixedSelection() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of());
+        PickSelection selection = selection(category, content("550", ContentType.MOVIE, null, null, null));
+
+        PreparedTargetValidation prepared = service.prepareValidation(selection);
+
+        assertThat(prepared.checked()).isFalse();
+        verifyNoInteractions(tmdbClient, contentService);
+    }
+
+    @Test
+    void shouldRequireNewPreparationWhenCategoryNowNeedsPreviouslySkippedFacts() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        PickSelection selection = selection(category, content("550", ContentType.MOVIE, null, null, null));
+        PreparedTargetValidation skipped = new PreparedTargetValidation(ResolvedPickTarget.keyOf(selection), false, null, false);
+
+        assertThatThrownBy(() -> service.isValidPrepared(template, category, selection, skipped))
+                .isInstanceOf(StalePickPreparationException.class);
+        verifyNoInteractions(tmdbClient, contentService);
+    }
+
     @BeforeEach
     void setUp() {
-        service = new PickTargetServiceImpl(contentService, contentRepository, optionRepository, tmdbClient);
+        service = new PickTargetServiceImpl(contentService, contentRepository, optionRepository, tmdbClient,
+                new com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor());
     }
 
     @Test
@@ -77,7 +116,7 @@ class PickTargetServiceImplTest {
         assertThat(result.personTmdbId()).isNull();
         assertThat(result.key().content()).isEqualTo(new ResolvedPickTarget.ContentKey(ContentType.MOVIE, "550", null, null, null));
         ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
-        verify(contentService).getOrCreateReference(captor.capture());
+        verify(contentService).prepareReference(captor.capture(), eq(false));
         assertThat(captor.getValue()).isEqualTo(new ContentRefCreationDTO("550", ContentType.MOVIE,
                 null, null, null, null, null, null, null, null, null));
     }
@@ -552,7 +591,9 @@ class PickTargetServiceImplTest {
         LocalDateTime now = LocalDateTime.now();
         ContentRefDTO reference = new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(),
                 content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), null, null, now, now);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class))).thenReturn(reference);
+        when(contentService.prepareReference(any(ContentRefCreationDTO.class), eq(false))).thenAnswer(call ->
+                new PreparedContentReference(call.getArgument(0), null));
+        when(contentService.persistPreparedReference(any(PreparedContentReference.class), eq(false))).thenReturn(reference);
         when(contentRepository.getReferenceById(content.getId())).thenReturn(content);
     }
 
