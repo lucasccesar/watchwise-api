@@ -150,6 +150,14 @@ public class FollowerServiceImpl implements FollowerService {
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
     }
 
+    @Override
+    public Page<PublicUserDTO> getSentPendingFollowRequests(UUID requesterId, Integer pageNumber, Integer pageSize) {
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<Follower> requests = followerRepository.findByFollowerIdAndStatus(
+                requesterId, FollowStatus.PENDING, pageRequest);
+        return mapSocialPreviewPage(requesterId, requests, Follower::getFollowed);
+    }
+
     private Page<PublicUserDTO> mapSocialPreviewPage(
             UUID viewerId, Page<Follower> follows, Function<Follower, User> listedUser) {
         List<Follower> content = follows.getContent();

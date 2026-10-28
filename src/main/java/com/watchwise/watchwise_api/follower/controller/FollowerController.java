@@ -80,6 +80,16 @@ public class FollowerController {
         return ResponseEntity.ok(PageResponseDTO.of(requests));
     }
 
+    @GetMapping("/me/follow-requests/sent")
+    public ResponseEntity<PageResponseDTO<PublicUserDTO>> getSentPendingFollowRequests(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<PublicUserDTO> requests = followerService.getSentPendingFollowRequests(
+                getCurrentUserId(), page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(requests));
+    }
+
     @PostMapping("/me/follow-requests/{requesterId}/accept")
     public ResponseEntity<Void> acceptFollowRequest(@PathVariable UUID requesterId) {
         followerService.acceptFollowRequest(getCurrentUserId(), requesterId);
