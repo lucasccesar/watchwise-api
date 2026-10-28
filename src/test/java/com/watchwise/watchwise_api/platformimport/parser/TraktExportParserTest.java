@@ -8,7 +8,9 @@ import com.watchwise.watchwise_api.platformimport.parser.impl.TraktRatingsParser
 import com.watchwise.watchwise_api.platformimport.parser.impl.TraktItemParserImpl;
 import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
-import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
+import com.watchwise.watchwise_api.platformimport.storage.R2StoreFixture;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -34,7 +36,8 @@ class TraktExportParserTest {
     @TempDir Path tempDir;
     private static final String ROOT = "/import/trakt/";
     private static final ImportReadContext CONTEXT = new ImportReadContext(UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "trakt", ZoneId.of("UTC"));
+            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "trakt", ZoneId.of("UTC"),
+            0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     private final ObjectMapper mapper = new ObjectMapper();
     private final TraktHistoryParser history = new TraktHistoryParser(mapper);
     private final TraktRatingsParser ratings = new TraktRatingsParser(mapper);
@@ -69,7 +72,8 @@ class TraktExportParserTest {
     @Test
     void preservesExactRatingPublicationInstantAndUserZoneDate() {
         var context = new ImportReadContext(CONTEXT.ownerId(), CONTEXT.jobId(), CONTEXT.storageKey(),
-                CONTEXT.sourceNamespace(), ZoneId.of("America/Los_Angeles"));
+                CONTEXT.sourceNamespace(), ZoneId.of("America/Los_Angeles"), CONTEXT.expectedBytes(),
+                CONTEXT.expectedSha256());
         String json = "[{\"rating\":8,\"rated_at\":\"2025-06-04T03:30:00Z\","
                 + "\"show\":{\"title\":\"Example\",\"year\":2020,\"ids\":{\"tmdb\":123}}}]";
         List<NormalizedImportRecord> records = new ArrayList<>();
@@ -226,19 +230,25 @@ class TraktExportParserTest {
     @Test
     void archiveEntriesUseNaturalNumericOrderingForRestartStableTraktPages() throws Exception {
         ImportLimits limits = new ImportLimits();
-        PrivateImportFileStore store = new PrivateImportFileStore(tempDir, limits);
         byte[] archive = zip(new String[]{"export/watched-history-10.json", "export/watched-history-2.json",
                         "export/watched-history-1.json"},
                 new String[]{"[]", "[]", "[]"});
-        String key = store.store(new ByteArrayInputStream(archive), limits.maxUploadBytes()).key();
-        SafeImportReader reader = new SafeImportReader(store, limits);
-
-        assertThat(reader.entryNames(key)).containsExactly(
-                "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
-        List<String> streamed = new ArrayList<>();
-        reader.forEachEntry(key, (path, input) -> streamed.add(path));
-        assertThat(streamed).containsExactly(
-                "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
+        String key = UUID.randomUUID().toString();
+        try (var fixture = R2StoreFixture.start(tempDir)) {
+            var stored = fixture.store().store(new ByteArrayInputStream(archive), limits.maxUploadBytes(), key);
+            SafeImportReader reader = new SafeImportReader(limits);
+            var artifactReader = new ImportArtifactReader(fixture.store(), fixture.temporary(), limits);
+            List<String> streamed = new ArrayList<>();
+            try (ReadableImportArtifact artifact = artifactReader.open(
+                    new ImportArtifactReference(key, stored.bytes(), stored.sha256()))) {
+                assertThat(reader.entryNames(artifact)).containsExactly(
+                        "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
+                reader.forEachEntry(artifact, (path, input) -> streamed.add(path));
+            }
+            assertThat(streamed).containsExactly(
+                    "watched-history-1.json", "watched-history-2.json", "watched-history-10.json");
+            assertThat(fixture.server().requestCount("GET", fixture.objectPath(key))).isEqualTo(1);
+        }
     }
 
     @Test
@@ -262,14 +272,20 @@ class TraktExportParserTest {
                         "export/lists-list-42-sample-1.json"},
                 new String[]{metadata, oneItem, oneItem});
         ImportLimits limits = new ImportLimits();
-        PrivateImportFileStore store = new PrivateImportFileStore(tempDir, limits);
-        String key = store.store(new ByteArrayInputStream(archive), limits.maxUploadBytes()).key();
-        SafeImportReader reader = new SafeImportReader(store, limits);
-        TraktArchiveInspector archiveInspector = new TraktArchiveInspector(reader, mapper, limits);
-        ImportReadContext archiveContext = new ImportReadContext(CONTEXT.ownerId(), CONTEXT.jobId(), key,
-                CONTEXT.sourceNamespace(), CONTEXT.timeZone());
-        assertThat(archiveInspector.inspect(archiveContext).lists()).singleElement()
-                .extracting(ImportListInventory::coverage).isEqualTo("INCOMPLETE");
+        String key = UUID.randomUUID().toString();
+        try (var fixture = R2StoreFixture.start(tempDir)) {
+            var stored = fixture.store().store(new ByteArrayInputStream(archive), limits.maxUploadBytes(), key);
+            var archiveContext = new ImportReadContext(CONTEXT.ownerId(), CONTEXT.jobId(), key,
+                    CONTEXT.sourceNamespace(), CONTEXT.timeZone(), stored.bytes(), stored.sha256());
+            SafeImportReader reader = new SafeImportReader(limits);
+            TraktArchiveInspector archiveInspector = new TraktArchiveInspector(reader, mapper, limits);
+            var artifactReader = new ImportArtifactReader(fixture.store(), fixture.temporary(), limits);
+            try (ReadableImportArtifact artifact = artifactReader.open(archiveContext.artifact())) {
+                assertThat(archiveInspector.inspect(archiveContext, artifact).lists()).singleElement()
+                        .extracting(ImportListInventory::coverage).isEqualTo("INCOMPLETE");
+            }
+            assertThat(fixture.server().requestCount("GET", fixture.objectPath(key))).isEqualTo(1);
+        }
     }
 
     @Test

@@ -33,6 +33,7 @@ import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransac
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.service.impl.WatchEventImportApplier;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactIntegrityException;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
@@ -748,7 +749,8 @@ class ImportWorkerIntegrationTest {
                 .selectionJson("{}")
                 .timezone("UTC")
                 .storageKey(UUID.randomUUID().toString())
-                .uploadSizeBytes(8)
+                .uploadSizeBytes(0)
+                .zipDigest("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
                 .workPhase("INSPECT")
                 .workPending(true)
                 .nextRunAt(now.minusSeconds(1))
@@ -808,7 +810,7 @@ class ImportWorkerIntegrationTest {
 
     private void assertFileMissing(String storageKey) {
         assertThatThrownBy(() -> fileStore.open(storageKey))
-                .isInstanceOfAny(IOException.class, BadRequestException.class);
+                .isInstanceOfAny(IOException.class, BadRequestException.class, ImportArtifactIntegrityException.class);
     }
 
     private void assertFileExists(String storageKey) throws IOException {

@@ -26,7 +26,8 @@ class LetterboxdExportParserTest {
     private static final String ROOT = "/import/letterboxd/";
     private static final ImportReadContext CONTEXT = new ImportReadContext(
             UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "letterboxd", ZoneId.of("UTC"));
+            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "letterboxd", ZoneId.of("UTC"),
+            0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
     @Test
     @DisplayName("[parse] Should Preserve Multiline Quoted Review And Distinct Diary Event Uris - When Two Films Were Logged On The Same Day")
@@ -40,7 +41,8 @@ class LetterboxdExportParserTest {
             assertThat(records).extracting(record -> record.sourceKey().sourceId())
                     .containsExactly("https://letterboxd.com/user/film/one/", "https://letterboxd.com/user/film/two/",
                             "https://letterboxd.com/user/film/one/");
-            assertThat(records.get(2).payload().path("review").asString()).isEqualTo("A quoted,\nmultiline review.");
+            assertThat(records.get(2).payload().path("review").asString().replace("\r\n", "\n"))
+                    .isEqualTo("A quoted,\nmultiline review.");
             assertThat(records.get(0).payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
             assertThat(records.get(0).payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
         }

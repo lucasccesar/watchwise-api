@@ -383,7 +383,8 @@ class HistoryNormalizationTest {
         ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.TRAKT_ZIP, "trakt:direct-reference");
         TraktItemParserImpl parser = new TraktItemParserImpl(objectMapper);
         ImportReadContext readContext = new ImportReadContext(owner.getId(), job.getId(), job.getStorageKey(),
-                job.getSourceNamespace(), ZoneId.of("UTC"));
+                job.getSourceNamespace(), ZoneId.of("UTC"), 0,
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         NormalizedImportRecord diary = parseTraktRecord(parser, readContext, ImportRecordKind.DIARY_EVENT,
                 "[{\"id\":\"17\",\"type\":\"movie\",\"movie\":{\"title\":\"Arrival\",\"year\":2016,\"ids\":{\"tmdb\":603}},\"watched_at\":\"2025-01-01T12:00:00Z\",\"rating\":5}]");
         NormalizedImportRecord review = parseTraktRecord(parser, readContext, ImportRecordKind.REVIEW,
@@ -861,7 +862,8 @@ class HistoryNormalizationTest {
     @DisplayName("[parse] Should Leave Letterboxd Content Type Open - When The Title May Be A Series")
     void shouldLeaveLetterboxdContentTypeOpenWhenTheTitleMayBeASeries() {
         var context = new ImportReadContext(UUID.randomUUID(), UUID.randomUUID(), "fixture",
-                "letterboxd:test", ZoneId.of("UTC"));
+                "letterboxd:test", ZoneId.of("UTC"), 0,
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         List<com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord> records = new ArrayList<>();
         var parser = new LetterboxdHistoryCsvParser(new CsvRecordReader(new ImportLimits()));
         String csv = "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"

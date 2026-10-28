@@ -2,10 +2,9 @@ package com.watchwise.watchwise_api.platformimport.parser;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
-import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.FilterInputStream;
@@ -25,26 +24,15 @@ import java.util.zip.CRC32;
 
 @Component
 public class SafeImportReader {
-    private final PrivateImportFileStore store;
     private final ImportLimits limits;
-    private final String storageKey;
 
-    @Autowired
-    public SafeImportReader(PrivateImportFileStore store, ImportLimits limits) {
-        this(store, limits, null);
-    }
-
-    public SafeImportReader(PrivateImportFileStore store, ImportLimits limits, String storageKey) {
-        this.store = store;
+    public SafeImportReader(ImportLimits limits) {
         this.limits = limits;
-        this.storageKey = storageKey;
     }
 
-    public String storageKey() { return storageKey; }
-
-    public List<String> entryNames(String key) {
+    public List<String> entryNames(ReadableImportArtifact artifact) {
         try {
-            Path path = store.pathForReading(key);
+            Path path = artifact.path();
             if (Files.size(path) > limits.maxUploadBytes()) throw new BadRequestException("Import archive exceeds compressed byte limit");
             List<String> javaNames = new ArrayList<>();
             try (java.util.zip.ZipFile javaZip = new java.util.zip.ZipFile(path.toFile())) {
@@ -74,9 +62,9 @@ public class SafeImportReader {
         }
     }
 
-    public void forEachEntry(String key, BiConsumer<String, InputStream> consumer) {
+    public void forEachEntry(ReadableImportArtifact artifact, BiConsumer<String, InputStream> consumer) {
         try {
-            Path path = store.pathForReading(key);
+            Path path = artifact.path();
             if (Files.size(path) > limits.maxUploadBytes()) throw new BadRequestException("Import archive exceeds compressed byte limit");
             List<String> javaNames = new ArrayList<>();
             try (java.util.zip.ZipFile javaZip = new java.util.zip.ZipFile(path.toFile())) {

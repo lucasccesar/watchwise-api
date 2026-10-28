@@ -11,6 +11,8 @@ import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser
 import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
 import com.watchwise.watchwise_api.platformimport.parser.impl.LetterboxdArchiveInspector;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,13 +29,16 @@ public class LetterboxdArchiveImportHandler implements ImportModeHandler {
     private final SafeImportReader reader;
     private final LetterboxdItemCsvParser parser;
     private final ObjectMapper objectMapper;
+    private final ImportArtifactReader artifacts;
 
     public LetterboxdArchiveImportHandler(LetterboxdArchiveInspector inspector, SafeImportReader reader,
-                                          LetterboxdItemCsvParser parser, ObjectMapper objectMapper) {
+                                          LetterboxdItemCsvParser parser, ObjectMapper objectMapper,
+                                          ImportArtifactReader artifacts) {
         this.inspector = inspector;
         this.reader = reader;
         this.parser = parser;
         this.objectMapper = objectMapper;
+        this.artifacts = artifacts;
     }
 
     @Override
@@ -43,34 +48,38 @@ public class LetterboxdArchiveImportHandler implements ImportModeHandler {
 
     @Override
     public com.watchwise.watchwise_api.platformimport.model.ImportInventory inspect(ImportReadContext context) {
-        return inspector.inspect(context);
+        try (ReadableImportArtifact artifact = artifacts.open(context.artifact())) {
+            return inspector.inspect(context, artifact);
+        }
     }
 
     @Override
     public void normalize(ImportReadContext context, ImportSelection selection,
                           Consumer<NormalizedImportRecord> sink) {
         Set<String> selectedLists = selection.listIds();
-        reader.forEachEntry(context.storageKey(), (path, input) -> {
-            String file = path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT);
-            switch (file) {
-                case "diary.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.DIARY_EVENT,
-                        selection, sink);
-                case "reviews.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.REVIEW,
-                        selection, sink);
-                case "watched.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.WATCHED_MARKER,
-                        selection, sink);
-                case "ratings.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.CURRENT_RATING,
-                        selection, sink);
-                case "watchlist.csv" -> {
-                    if (selection.watchlist()) parser.parse(new InputStreamReader(input, StandardCharsets.UTF_8),
-                            context, path, ImportRecordKind.WATCHLIST_ITEM, sink);
+        try (ReadableImportArtifact artifact = artifacts.open(context.artifact())) {
+            reader.forEachEntry(artifact, (path, input) -> {
+                String file = path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT);
+                switch (file) {
+                    case "diary.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.DIARY_EVENT,
+                            selection, sink);
+                    case "reviews.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.REVIEW,
+                            selection, sink);
+                    case "watched.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.WATCHED_MARKER,
+                            selection, sink);
+                    case "ratings.csv" -> parseHistoryFile(input, context, path, ImportRecordKind.CURRENT_RATING,
+                            selection, sink);
+                    case "watchlist.csv" -> {
+                        if (selection.watchlist()) parser.parse(new InputStreamReader(input, StandardCharsets.UTF_8),
+                                context, path, ImportRecordKind.WATCHLIST_ITEM, sink);
+                    }
+                    case "list-v7.csv" -> {
+                        if (!selectedLists.isEmpty()) parseSelectedList(input, context, path, selectedLists, sink);
+                    }
+                    default -> { }
                 }
-                case "list-v7.csv" -> {
-                    if (!selectedLists.isEmpty()) parseSelectedList(input, context, path, selectedLists, sink);
-                }
-                default -> { }
-            }
-        });
+            });
+        }
     }
 
     private void parseHistoryFile(java.io.InputStream input, ImportReadContext context, String path,

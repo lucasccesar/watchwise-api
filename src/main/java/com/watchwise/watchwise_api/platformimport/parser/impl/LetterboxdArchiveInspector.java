@@ -4,8 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.CsvRecordReader;
 import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
-import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
-import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -20,22 +19,19 @@ public class LetterboxdArchiveInspector {
     private final LetterboxdItemCsvParserImpl items;
 
     public LetterboxdArchiveInspector(CsvRecordReader csv) { this(null, csv); }
+    @Autowired
     public LetterboxdArchiveInspector(SafeImportReader reader, CsvRecordReader csv) {
         this.archiveReader = reader;
         this.csv = csv;
         this.items = new LetterboxdItemCsvParserImpl(csv);
     }
 
-    @Autowired
-    public LetterboxdArchiveInspector(PrivateImportFileStore store, ImportLimits limits, CsvRecordReader csv) {
-        this(new SafeImportReader(store, limits), csv);
-    }
-
-    public ImportInventory inspect(ImportReadContext context) {
+    public ImportInventory inspect(ImportReadContext context, ReadableImportArtifact artifact) {
         if (archiveReader == null) throw new IllegalStateException("Archive inspection requires a safe import reader");
         Map<ImportRecordKind, Long> counts = zeroCounts();
         List<ImportListInventory> lists = new ArrayList<>();
-        archiveReader.forEachEntry(context.storageKey(), (path, input) -> inspectEntry(path, input, context, counts, lists));
+        archiveReader.forEachEntry(artifact,
+                (path, input) -> inspectEntry(path, input, context, counts, lists));
         return inventory(counts, lists);
     }
 
@@ -79,7 +75,9 @@ public class LetterboxdArchiveInspector {
     }
 
     private ImportReadContext syntheticContext() {
-        return new ImportReadContext(new UUID(0, 1), new UUID(0, 2), "in-memory", "letterboxd", java.time.ZoneId.of("UTC"));
+        return new ImportReadContext(new UUID(0, 1), new UUID(0, 2), "in-memory", "letterboxd",
+                java.time.ZoneId.of("UTC"), 0,
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     private Map<ImportRecordKind, Long> zeroCounts() {

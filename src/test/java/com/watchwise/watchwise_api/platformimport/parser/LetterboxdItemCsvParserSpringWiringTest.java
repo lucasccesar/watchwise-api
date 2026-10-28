@@ -24,7 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LetterboxdItemCsvParserSpringWiringTest {
     private static final ImportReadContext CONTEXT = new ImportReadContext(
             UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "letterboxd", ZoneId.of("UTC"));
+            UUID.fromString("00000000-0000-0000-0000-000000000002"), "fixture", "letterboxd", ZoneId.of("UTC"),
+            0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
     @Test
     @DisplayName("[spring] Should Create Letterboxd Parser Bean And Parse A CSV Row - When Real Dependencies Are Available")

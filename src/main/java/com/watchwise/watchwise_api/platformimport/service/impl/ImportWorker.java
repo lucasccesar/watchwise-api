@@ -65,7 +65,8 @@ public class ImportWorker {
             WHERE job.id = candidates.id
             RETURNING job.id, job.user_id, job.preview_version, job.selection_json,
                 job.source_namespace, job.input_kind, job.source_format, job.storage_key,
-                job.timezone, job.state, job.work_phase, job.checkpoint, job.lease_token
+                job.upload_size_bytes, job.zip_digest, job.timezone, job.state, job.work_phase,
+                job.checkpoint, job.lease_token
             """;
 
     private final JdbcTemplate jdbc;
@@ -160,6 +161,8 @@ public class ImportWorker {
                         com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat
                                 .valueOf(result.getString("source_format")),
                         result.getString("storage_key"),
+                        result.getLong("upload_size_bytes"),
+                        result.getString("zip_digest"),
                         result.getString("timezone"),
                         ImportJobState.valueOf(result.getString("state")),
                         result.getString("work_phase"),
@@ -596,7 +599,7 @@ public class ImportWorker {
 
     private ImportReadContext readContext(ClaimedJob job) {
         return new ImportReadContext(job.ownerId(), job.id(), job.storageKey(), job.sourceNamespace(),
-                java.time.ZoneId.of(job.timezone()));
+                java.time.ZoneId.of(job.timezone()), job.uploadSizeBytes(), job.zipDigest());
     }
 
     private ImportSelection selection(String selectionJson) {
@@ -638,7 +641,8 @@ public class ImportWorker {
     private record ClaimedJob(UUID id, UUID ownerId, long previewVersion, String selectionJson,
                               String sourceNamespace, ImportInputKind inputKind,
                               com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat sourceFormat,
-                              String storageKey, String timezone, ImportJobState state,
+                              String storageKey, long uploadSizeBytes, String zipDigest,
+                              String timezone, ImportJobState state,
                               String workPhase, String checkpoint, UUID leaseToken) { }
 
     private static final class RecordLimitExceededException extends RuntimeException { }

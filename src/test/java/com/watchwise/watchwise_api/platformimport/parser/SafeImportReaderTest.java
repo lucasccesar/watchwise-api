@@ -1,9 +1,15 @@
 package com.watchwise.watchwise_api.platformimport.parser;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.platformimport.model.ImportArtifactReference;
 import com.watchwise.watchwise_api.platformimport.model.StoredImportFile;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.R2StoreFixture;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -12,9 +18,12 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -22,6 +31,14 @@ import static org.assertj.core.api.Assertions.*;
 
 class SafeImportReaderTest {
     @TempDir Path root;
+    private final Map<SafeImportReader, ReadableImportArtifact> artifacts = new IdentityHashMap<>();
+    private final List<ImportTemporaryFiles> temporaryFiles = new ArrayList<>();
+
+    @AfterEach
+    void closeArtifacts() {
+        artifacts.values().forEach(ReadableImportArtifact::close);
+        temporaryFiles.forEach(ImportTemporaryFiles::close);
+    }
 
     private byte[] zip(String[] names, byte[][] contents) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -61,15 +78,28 @@ class SafeImportReaderTest {
         List<String> seen = new ArrayList<>();
         SafeImportReader reader = reader(archive, new ImportLimits(), seen);
 
-        assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> seen.add(name)))
+        assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (name, input) -> seen.add(name)))
                 .isInstanceOf(BadRequestException.class);
         assertThat(seen).isEmpty();
     }
 
     private SafeImportReader reader(byte[] bytes, ImportLimits limits, List<String> names) throws Exception {
-        PrivateImportFileStore store = new PrivateImportFileStore(root, limits);
+        String fixtureId = UUID.randomUUID().toString();
+        PrivateImportFileStore store = new PrivateImportFileStore(root.resolve("durable-" + fixtureId), limits);
         StoredImportFile stored = store.store(new ByteArrayInputStream(bytes), limits.maxUploadBytes());
-        return new SafeImportReader(store, limits, stored.key());
+        ImportTemporaryFiles temporary = new ImportTemporaryFiles(root.resolve("temporary-" + fixtureId),
+                limits.maxUploadBytes(), 51L * 1024 * 1024, limits.maxConcurrentUploadsPerProcess(),
+                limits.maxConcurrentArtifactReadsPerProcess());
+        temporaryFiles.add(temporary);
+        ReadableImportArtifact artifact = new ImportArtifactReader(store, temporary, limits).open(
+                new ImportArtifactReference(stored.key(), stored.bytes(), stored.sha256()));
+        SafeImportReader reader = new SafeImportReader(limits);
+        artifacts.put(reader, artifact);
+        return reader;
+    }
+
+    private ReadableImportArtifact artifact(SafeImportReader reader) {
+        return artifacts.get(reader);
     }
 
     @Test
@@ -79,7 +109,7 @@ class SafeImportReaderTest {
         List<String> names = new ArrayList<>();
         SafeImportReader reader = reader(zip(new String[]{"export/diary.csv", "export/deleted/diary.csv", "export/orphaned/reviews.csv"},
                 new byte[][]{{1}, {2}, {3}}), limits, names);
-        reader.forEachEntry(reader.storageKey(), (name, input) -> names.add(name));
+        reader.forEachEntry(artifact(reader), (name, input) -> names.add(name));
         assertThat(names).containsExactlyInAnyOrder("diary.csv", "deleted/diary.csv", "orphaned/reviews.csv");
         assertThat(names).doesNotContain("reviews.csv");
     }
@@ -90,7 +120,7 @@ class SafeImportReaderTest {
         for (String name : List.of("../a.csv", "/a.csv", "C:/a.csv", "a\\b.csv", "./a.csv", "x.zip")) {
             List<String> seen = new ArrayList<>();
             SafeImportReader reader = reader(zip(new String[]{"safe.csv", name}, new byte[][]{{1}, {2}}), new ImportLimits(), seen);
-            assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (n, input) -> seen.add(n)))
+            assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (n, input) -> seen.add(n)))
                     .as(name).isInstanceOf(BadRequestException.class);
             assertThat(seen).isEmpty();
         }
@@ -102,12 +132,12 @@ class SafeImportReaderTest {
         byte[] archive = zip(new String[]{"a.csv", "b.csv"}, new byte[][]{new byte[6], new byte[6]});
         ImportLimits entryLimit = new ImportLimits(1024, 100, 5, 20, 10, 1024, 32, 3, 1024, 4096, 2);
         SafeImportReader entryReader = reader(archive, entryLimit, new ArrayList<>());
-        assertThatThrownBy(() -> entryReader.forEachEntry(entryReader.storageKey(), (n, input) -> {
+        assertThatThrownBy(() -> entryReader.forEachEntry(artifact(entryReader), (n, input) -> {
             try { input.transferTo(java.io.OutputStream.nullOutputStream()); } catch (java.io.IOException e) { throw new RuntimeException(e); }
         })).isInstanceOf(BadRequestException.class);
         ImportLimits totalLimit = new ImportLimits(1024, 10, 8, 20, 10, 1024, 32, 3, 1024, 4096, 2);
         SafeImportReader totalReader = reader(archive, totalLimit, new ArrayList<>());
-        assertThatThrownBy(() -> totalReader.forEachEntry(totalReader.storageKey(), (n, input) -> {
+        assertThatThrownBy(() -> totalReader.forEachEntry(artifact(totalReader), (n, input) -> {
             try { input.transferTo(java.io.OutputStream.nullOutputStream()); } catch (java.io.IOException e) { throw new RuntimeException(e); }
         })).isInstanceOf(BadRequestException.class);
     }
@@ -119,7 +149,7 @@ class SafeImportReaderTest {
         byte[] archive = zip(new String[]{"caf\u00e9.csv", "cafe\u0301.csv"}, new byte[][]{{1}, {2}});
         SafeImportReader reader = reader(archive, new ImportLimits(), seen);
 
-        assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> seen.add(name)))
+        assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (name, input) -> seen.add(name)))
                 .isInstanceOf(BadRequestException.class);
         assertThat(seen).isEmpty();
     }
@@ -139,7 +169,7 @@ class SafeImportReaderTest {
         List<String> seen = new ArrayList<>();
         SafeImportReader reader = reader(archive, new ImportLimits(), seen);
 
-        assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> seen.add(name)))
+        assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (name, input) -> seen.add(name)))
                 .isInstanceOf(BadRequestException.class);
         assertThat(seen).isEmpty();
     }
@@ -157,15 +187,10 @@ class SafeImportReaderTest {
         }
         assertThat(Files.size(archivePath)).isLessThan(limits.maxUploadBytes());
 
-        PrivateImportFileStore store = new PrivateImportFileStore(root, limits);
-        StoredImportFile stored;
-        try (var input = Files.newInputStream(archivePath)) {
-            stored = store.store(input, limits.maxUploadBytes());
-        }
-        SafeImportReader reader = new SafeImportReader(store, limits);
+        SafeImportReader reader = reader(Files.readAllBytes(archivePath), limits, new ArrayList<>());
         List<String> seen = new ArrayList<>();
 
-        assertThatThrownBy(() -> reader.forEachEntry(stored.key(), (name, input) -> seen.add(name)))
+        assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (name, input) -> seen.add(name)))
                 .isInstanceOf(BadRequestException.class);
         assertThat(seen).isEmpty();
     }
@@ -222,7 +247,7 @@ class SafeImportReaderTest {
         Arrays.fill(archive, centralDirectoryOffset + 16, centralDirectoryOffset + 20, (byte) 0);
 
         SafeImportReader reader = reader(archive, new ImportLimits(), new ArrayList<>());
-        assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> {}))
+        assertThatThrownBy(() -> reader.forEachEntry(artifact(reader), (name, input) -> {}))
                 .isInstanceOf(BadRequestException.class);
     }
 
@@ -232,7 +257,7 @@ class SafeImportReaderTest {
         SafeImportReader reader = reader(zip(new String[]{"a.csv"}, new byte[][]{{1, 2, 3}}),
                 new ImportLimits(), new ArrayList<>());
 
-        assertThatCode(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> {
+        assertThatCode(() -> reader.forEachEntry(artifact(reader), (name, input) -> {
             try {
                 input.read();
                 input.close();
@@ -240,5 +265,26 @@ class SafeImportReaderTest {
                 throw new java.io.UncheckedIOException(ex);
             }
         })).doesNotThrowAnyException();
+    }
+
+    @Test
+    void readsNamesAndEntriesWithOneRemoteDownload() throws Exception {
+        String key = UUID.randomUUID().toString();
+        byte[] archive = zip(new String[]{"watchlist.csv"},
+                new byte[][]{"Name,Year\nMovie,2020\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)});
+        try (var fixture = R2StoreFixture.start(root)) {
+            StoredImportFile stored = fixture.store().store(new ByteArrayInputStream(archive), 1024 * 1024, key);
+            var artifactReader = new ImportArtifactReader(fixture.store(), fixture.temporary(), new ImportLimits());
+            var safeReader = new SafeImportReader(new ImportLimits());
+            List<String> consumed = new ArrayList<>();
+            try (ReadableImportArtifact artifact = artifactReader.open(
+                    new ImportArtifactReference(key, stored.bytes(), stored.sha256()))) {
+                List<String> names = safeReader.entryNames(artifact);
+                safeReader.forEachEntry(artifact, (name, input) -> consumed.add(name));
+                assertThat(consumed).containsAll(names);
+            }
+            assertThat(fixture.server().requestCount("GET", fixture.objectPath(key))).isEqualTo(1);
+            assertThat(fixture.temporary().reservedBytes()).isZero();
+        }
     }
 }

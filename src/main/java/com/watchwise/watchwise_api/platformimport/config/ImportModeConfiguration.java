@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.platformimport.service.impl.LetterboxdArchive
 import com.watchwise.watchwise_api.platformimport.service.impl.TraktArchiveImportHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleListImportHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleWatchlistImportHandler;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -57,8 +58,8 @@ public class ImportModeConfiguration {
             havingValue = "true", matchIfMissing = true)
     TraktArchiveImportHandler traktArchiveImportHandler(TraktArchiveInspector inspector,
                                                         SafeImportReader reader, TraktItemParser parser,
-                                                        ObjectMapper objectMapper) {
-        return new TraktArchiveImportHandler(inspector, reader, parser, objectMapper);
+                                                        ObjectMapper objectMapper, ImportArtifactReader artifacts) {
+        return new TraktArchiveImportHandler(inspector, reader, parser, objectMapper, artifacts);
     }
 
     @Bean
@@ -67,8 +68,9 @@ public class ImportModeConfiguration {
     LetterboxdArchiveImportHandler letterboxdArchiveImportHandler(LetterboxdArchiveInspector inspector,
                                                                   SafeImportReader reader,
                                                                   LetterboxdItemCsvParser parser,
-                                                                  ObjectMapper objectMapper) {
-        return new LetterboxdArchiveImportHandler(inspector, reader, parser, objectMapper);
+                                                                  ObjectMapper objectMapper,
+                                                                  ImportArtifactReader artifacts) {
+        return new LetterboxdArchiveImportHandler(inspector, reader, parser, objectMapper, artifacts);
     }
 
     @Bean

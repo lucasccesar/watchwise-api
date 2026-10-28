@@ -4,7 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
-import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 import tools.jackson.core.JacksonException;
@@ -28,22 +28,22 @@ public class TraktArchiveInspector {
 
     public TraktArchiveInspector(ObjectMapper mapper) { this.reader = null; this.mapper = mapper; this.limits = new ImportLimits(); }
     @Autowired
-    public TraktArchiveInspector(PrivateImportFileStore store, ImportLimits limits, ObjectMapper mapper) {
-        this(new SafeImportReader(store, limits), mapper, limits);
+    public TraktArchiveInspector(SafeImportReader reader, ImportLimits limits, ObjectMapper mapper) {
+        this(reader, mapper, limits);
     }
     public TraktArchiveInspector(SafeImportReader reader, ObjectMapper mapper) { this(reader, mapper, new ImportLimits()); }
     public TraktArchiveInspector(SafeImportReader reader, ObjectMapper mapper, ImportLimits limits) {
         this.reader = reader; this.mapper = mapper; this.limits = limits;
     }
 
-    public ImportInventory inspect(ImportReadContext context) {
+    public ImportInventory inspect(ImportReadContext context, ReadableImportArtifact artifact) {
         List<ImportListInventory> lists = new ArrayList<>();
         Map<String, Long> itemCounts = new HashMap<>();
         Map<String, Set<Integer>> pagesByList = new HashMap<>();
         Set<String> presentIds = new HashSet<>();
         long[] history = {0}, ratings = {0}, watched = {0}, watchlist = {0};
-        Map<String, Integer> listPages = listPages(reader.entryNames(context.storageKey()), limits.maxEntries());
-        reader.forEachEntry(context.storageKey(), (path, input) -> {
+        Map<String, Integer> listPages = listPages(reader.entryNames(artifact), limits.maxEntries());
+        reader.forEachEntry(artifact, (path, input) -> {
             String file = path.toLowerCase(Locale.ROOT);
             if (file.matches("(?:.*/)?watched-history(?:-\\d+)?\\.json")) history[0] += countArray(input, path);
             else if (file.matches("(?:.*/)?ratings-(?:movies|shows|episodes|seasons)(?:-\\d+)?\\.json")) ratings[0] += countArray(input, path);

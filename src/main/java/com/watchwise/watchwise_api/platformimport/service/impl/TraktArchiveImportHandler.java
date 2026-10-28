@@ -12,6 +12,8 @@ import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
 import com.watchwise.watchwise_api.platformimport.parser.TraktItemParser;
 import com.watchwise.watchwise_api.platformimport.parser.impl.TraktArchiveInspector;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -33,13 +35,16 @@ public class TraktArchiveImportHandler implements ImportModeHandler {
     private final SafeImportReader reader;
     private final TraktItemParser parser;
     private final ObjectMapper objectMapper;
+    private final ImportArtifactReader artifacts;
 
     public TraktArchiveImportHandler(TraktArchiveInspector inspector, SafeImportReader reader,
-                                     TraktItemParser parser, ObjectMapper objectMapper) {
+                                     TraktItemParser parser, ObjectMapper objectMapper,
+                                     ImportArtifactReader artifacts) {
         this.inspector = inspector;
         this.reader = reader;
         this.parser = parser;
         this.objectMapper = objectMapper;
+        this.artifacts = artifacts;
     }
 
     @Override
@@ -49,7 +54,9 @@ public class TraktArchiveImportHandler implements ImportModeHandler {
 
     @Override
     public com.watchwise.watchwise_api.platformimport.model.ImportInventory inspect(ImportReadContext context) {
-        return inspector.inspect(context);
+        try (ReadableImportArtifact artifact = artifacts.open(context.artifact())) {
+            return inspector.inspect(context, artifact);
+        }
     }
 
     @Override
@@ -57,58 +64,67 @@ public class TraktArchiveImportHandler implements ImportModeHandler {
                           Consumer<NormalizedImportRecord> sink) {
         Set<String> selectedLists = canonicalListIds(selection.listIds());
         Set<String> emittedListMetadata = new HashSet<>();
-        reader.forEachEntry(context.storageKey(), (path, input) -> {
-            String file = path.toLowerCase(Locale.ROOT);
-            if (LIST_METADATA.matcher(file).matches() && !selectedLists.isEmpty()) {
-                inspector.parseSelectedListMetadata(input, path, context, selectedLists, record -> {
-                    if (emittedListMetadata.add(record.sourceKey().sourceId())) sink.accept(record);
-                });
-                return;
-            }
-
-            if (matches(file, "watched-history")) {
-                if (selection.history()) {
-                    parser.parse(input, context, path, ImportRecordKind.DIARY_EVENT, sink);
-                } else if (selection.watchlist()) {
-                    parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+        try (ReadableImportArtifact artifact = artifacts.open(context.artifact())) {
+            reader.forEachEntry(artifact, (path, input) -> {
+                String file = path.toLowerCase(Locale.ROOT);
+                if (LIST_METADATA.matcher(file).matches() && !selectedLists.isEmpty()) {
+                    inspector.parseSelectedListMetadata(input, path, context, selectedLists, record -> {
+                        if (emittedListMetadata.add(record.sourceKey().sourceId())) sink.accept(record);
+                    });
+                    return;
                 }
-                return;
-            }
 
-            if (matches(file, "watched-movies") || matches(file, "watched-shows")) {
-                if (selection.history()) {
-                    parser.parse(input, context, path, ImportRecordKind.WATCHED_SUMMARY, sink);
-                } else if (selection.watchlist()) {
-                    parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                if (matches(file, "watched-history")) {
+                    if (selection.history()) {
+                        parser.parse(input, context, path, ImportRecordKind.DIARY_EVENT, sink);
+                    } else if (selection.watchlist()) {
+                        parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            if (matches(file, "watched-episodes") || matches(file, "watched-seasons")) {
-                if (selection.history() || selection.watchlist()) {
-                    if (selection.history()) parser.parse(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
-                    else parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                if (matches(file, "watched-movies") || matches(file, "watched-shows")) {
+                    if (selection.history()) {
+                        parser.parse(input, context, path, ImportRecordKind.WATCHED_SUMMARY, sink);
+                    } else if (selection.watchlist()) {
+                        parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            if (matches(file, "ratings-movies") || matches(file, "ratings-shows")
-                    || matches(file, "ratings-episodes") || matches(file, "ratings-seasons")) {
-                if (selection.history()) parser.parse(input, context, path, ImportRecordKind.CURRENT_RATING, sink);
-                return;
-            }
+                if (matches(file, "watched-episodes") || matches(file, "watched-seasons")) {
+                    if (selection.history() || selection.watchlist()) {
+                        if (selection.history()) {
+                            parser.parse(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                        } else {
+                            parseAuxiliary(input, context, path, ImportRecordKind.WATCHED_MARKER, sink);
+                        }
+                    }
+                    return;
+                }
 
-            if (matches(file, "lists-watchlist")) {
-                if (selection.watchlist()) parser.parse(input, context, path, ImportRecordKind.WATCHLIST_ITEM, sink);
-                return;
-            }
+                if (matches(file, "ratings-movies") || matches(file, "ratings-shows")
+                        || matches(file, "ratings-episodes") || matches(file, "ratings-seasons")) {
+                    if (selection.history()) {
+                        parser.parse(input, context, path, ImportRecordKind.CURRENT_RATING, sink);
+                    }
+                    return;
+                }
 
-            String listId = listId(path);
-            if (listId != null && selectedLists.contains(listId)) {
-                parser.parse(input, context, path, ImportRecordKind.LIST_ITEM,
-                        record -> sink.accept(withParent(record, listId)));
-            }
-        });
+                if (matches(file, "lists-watchlist")) {
+                    if (selection.watchlist()) {
+                        parser.parse(input, context, path, ImportRecordKind.WATCHLIST_ITEM, sink);
+                    }
+                    return;
+                }
+
+                String listId = listId(path);
+                if (listId != null && selectedLists.contains(listId)) {
+                    parser.parse(input, context, path, ImportRecordKind.LIST_ITEM,
+                            record -> sink.accept(withParent(record, listId)));
+                }
+            });
+        }
     }
 
     private void parseAuxiliary(InputStream input, ImportReadContext context, String path,

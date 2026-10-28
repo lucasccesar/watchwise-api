@@ -42,7 +42,9 @@ import static org.mockito.Mockito.when;
 class SingleFileItemHandlerTest {
     private static final UUID OWNER = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID JOB = UUID.fromString("00000000-0000-0000-0000-000000000002");
-    private static final ImportReadContext CONTEXT = new ImportReadContext(OWNER, JOB, "synthetic", "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC);
+    private static final ImportReadContext CONTEXT = new ImportReadContext(OWNER, JOB, "synthetic",
+            "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC, 0,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     private static final ImportSelection SELECTION = new ImportSelection(false, false, Set.of(), null);
     private static final String TRAKT = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Example\",\"year\":2001,\"ids\":{\"tmdb\":11,\"trakt\":22}}}]";
     private static final String LIST = "7\nDate,Name,Tags,URL,Description\n2026-01-01,Favorites,curated,https://letterboxd.com/alice/list/favorites/,Notes\nPosition,Name,Year,URL,Description\n1,Example,2001,https://boxd.it/AbC,Item note\n";
@@ -63,7 +65,8 @@ class SingleFileItemHandlerTest {
     @Test
     @DisplayName("[normalize] Should Keep Trakt Item Namespace Shared With ZIP - When Source Account Is Bound")
     void shouldKeepTraktItemNamespaceSharedWithZipWhenSourceAccountIsBound() throws Exception {
-        var accountContext = new ImportReadContext(OWNER, JOB, "synthetic", "TRAKT:ACCOUNT:alice", ZoneOffset.UTC);
+        var accountContext = new ImportReadContext(OWNER, JOB, "synthetic", "TRAKT:ACCOUNT:alice", ZoneOffset.UTC,
+                0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         var metadata = new ObjectMapper().createObjectNode().put("name", "Favorites").put("sourceListId", "42");
         List<NormalizedImportRecord> records = new ArrayList<>();
 

@@ -1298,7 +1298,8 @@ class ImportPreviewServiceTest {
         };
         ImportModeRegistry registry = new ImportModeRegistry(List.of(handler));
         ImportReadContext context = new ImportReadContext(UUID.randomUUID(), UUID.randomUUID(), "private-key",
-                "test", ZoneId.of("UTC"));
+                "test", ZoneId.of("UTC"), 0,
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         List<NormalizedImportRecord> emitted = new ArrayList<>();
 
         registry.normalize(mode, context, new ImportSelection(false, false, Set.of("selected-list"), null), emitted::add);

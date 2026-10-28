@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 
-final class R2StoreFixture implements AutoCloseable {
+public final class R2StoreFixture implements AutoCloseable {
     private final S3StubServer server;
     private final ImportTemporaryFiles temporary;
     private final AnnotationConfigApplicationContext context;
@@ -22,11 +22,11 @@ final class R2StoreFixture implements AutoCloseable {
         this.context = context;
     }
 
-    static R2StoreFixture start(Path root) throws IOException {
+    public static R2StoreFixture start(Path root) throws IOException {
         return start(root, Duration.ofSeconds(20));
     }
 
-    static R2StoreFixture start(Path root, Duration operationTimeout) throws IOException {
+    public static R2StoreFixture start(Path root, Duration operationTimeout) throws IOException {
         S3StubServer server = S3StubServer.start("test-imports");
         ImportLimits limits = new ImportLimits();
         ImportTemporaryFiles temporary = new ImportTemporaryFiles(root.resolve("r2-work"),
@@ -55,19 +55,19 @@ final class R2StoreFixture implements AutoCloseable {
         return new R2StoreFixture(server, temporary, context);
     }
 
-    ImportFileStore store() {
+    public ImportFileStore store() {
         return context.getBean(ImportFileStore.class);
     }
 
-    S3StubServer server() {
+    public S3StubServer server() {
         return server;
     }
 
-    ImportTemporaryFiles temporary() {
+    public ImportTemporaryFiles temporary() {
         return temporary;
     }
 
-    String objectPath(String generatedKey) {
+    public String objectPath(String generatedKey) {
         return server.objectPath(generatedKey);
     }
 
