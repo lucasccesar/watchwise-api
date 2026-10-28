@@ -41,6 +41,16 @@ class CacheMemoryPropertiesTest {
     }
 
     @Test
+    void treatsAnEmptyOptionalTotalAsUnconfigured() {
+        new ApplicationContextRunner().withUserConfiguration(CachePropertiesConfiguration.class)
+                .withPropertyValues("app.cache.memory.max-estimated-bytes=")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(CacheMemoryProperties.class).maxEstimatedBytes()).isNull();
+                });
+    }
+
+    @Test
     void rejectsAnUnknownModeDuringBinding() {
         new ApplicationContextRunner().withUserConfiguration(CachePropertiesConfiguration.class)
                 .withPropertyValues("app.cache.memory.mode=unbounded")

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
+import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
@@ -393,7 +394,7 @@ class DailyGamePlayServiceImplTest {
                     new TmdbImageBytes(bytes.toByteArray(), MediaType.IMAGE_PNG)));
         }
         var realMedia = new DailyGameMediaServiceImpl(tmdb, challenges, CLOCK,
-                "test-daily-game-media-jwt-key-at-least-32-bytes");
+                "test-daily-game-media-jwt-key-at-least-32-bytes", TestCacheFactory.entries());
         var play = new DailyGamePlayServiceImpl(challenges, results, mutations, realMedia,
                 new DailyGameAttemptDetailsCodec(), new DailyGameFilmographyPlayAssembler(), CLOCK);
 

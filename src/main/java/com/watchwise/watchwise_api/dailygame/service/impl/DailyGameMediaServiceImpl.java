@@ -1,7 +1,7 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
+import com.watchwise.watchwise_api.common.cache.BudgetedCacheFactory;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
@@ -47,17 +47,17 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
     private final DailyChallengeRepository challenges;
     private final Clock clock;
     private final DailyGameMediaGrantCodec grants;
-    private final Cache<MediaKey, DailyGameMediaResponseDTO> transformed = Caffeine.newBuilder()
-            .maximumWeight(50L * 1024 * 1024)
-            .weigher((MediaKey key, DailyGameMediaResponseDTO value) -> value.body().length)
-            .expireAfterWrite(Duration.ofMinutes(10)).build();
+    private final Cache<MediaKey, DailyGameMediaResponseDTO> transformed;
 
     public DailyGameMediaServiceImpl(TmdbClient tmdbClient, DailyChallengeRepository challenges, Clock clock,
-                                     @Value("${app.jwt.secret}") String jwtSecret) {
+                                     @Value("${app.jwt.secret}") String jwtSecret,
+                                     BudgetedCacheFactory cacheFactory) {
         this.tmdbClient = tmdbClient;
         this.challenges = challenges;
         this.clock = clock;
         this.grants = new DailyGameMediaGrantCodec(jwtSecret);
+        this.transformed = cacheFactory.media(Duration.ofMinutes(10), 50L * 1024 * 1024,
+                (MediaKey key, DailyGameMediaResponseDTO value) -> value.body().length);
     }
 
     @Override

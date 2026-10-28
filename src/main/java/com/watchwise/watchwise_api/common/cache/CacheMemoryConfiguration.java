@@ -10,6 +10,16 @@ import java.util.Map;
 @EnableConfigurationProperties(CacheMemoryProperties.class)
 public class CacheMemoryConfiguration {
     @Bean
+    CacheEntryWeigher cacheEntryWeigher() {
+        return new CacheEntryWeigher();
+    }
+
+    @Bean
+    CacheDiagnostics cacheDiagnostics() {
+        return new CacheDiagnostics();
+    }
+
+    @Bean
     CacheBudgetAllocator cacheBudgetAllocator() {
         return new CacheBudgetAllocator();
     }
@@ -18,5 +28,11 @@ public class CacheMemoryConfiguration {
     Map<String, Long> allocatedCacheMemoryBudgets(CacheMemoryProperties properties,
                                                   CacheBudgetAllocator allocator) {
         return allocator.allocate(properties);
+    }
+
+    @Bean
+    BudgetedCacheFactory budgetedCacheFactory(CacheMemoryProperties properties, CacheBudgetAllocator allocator,
+                                               CacheEntryWeigher weigher, CacheDiagnostics diagnostics) {
+        return new BudgetedCacheFactory(properties, allocator, weigher, diagnostics);
     }
 }

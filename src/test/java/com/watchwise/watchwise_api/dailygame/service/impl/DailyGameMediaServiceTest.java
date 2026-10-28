@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -49,7 +50,8 @@ class DailyGameMediaServiceTest {
     @BeforeEach
     void setUp() {
         when(challenges.findById(challenge)).thenAnswer(ignored -> Optional.ofNullable(currentChallenge.get()));
-        service = new DailyGameMediaServiceImpl(tmdb, challenges, clock, TEST_JWT_SECRET);
+        service = new DailyGameMediaServiceImpl(tmdb, challenges, clock, TEST_JWT_SECRET,
+                TestCacheFactory.entries());
     }
 
     @Test
@@ -73,7 +75,7 @@ class DailyGameMediaServiceTest {
                 new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
         DailyGameMediaRefDTO ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_9, "/clue.png");
         DailyGameMediaServiceImpl anotherInstance = new DailyGameMediaServiceImpl(
-                tmdb, challenges, clock, TEST_JWT_SECRET);
+                tmdb, challenges, clock, TEST_JWT_SECRET, TestCacheFactory.entries());
 
         assertNotNull(anotherInstance.fetch(user, token(ref)));
         verify(tmdb).getImageBytes("/clue.png");

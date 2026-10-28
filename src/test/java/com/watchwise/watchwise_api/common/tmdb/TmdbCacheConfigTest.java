@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
+import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -16,7 +17,7 @@ class TmdbCacheConfigTest {
 
     @Test
     void appliesConfiguredMaximumSizeToDetailsCache() {
-        var cache = new TmdbCacheConfig().tmdbMovieFullDetailsCache(24, 2);
+        var cache = new TmdbCacheConfig(TestCacheFactory.entries()).tmdbMovieFullDetailsCache(24, 2);
         var notFound = new TmdbLookupResult.NotFound<TmdbMovieFullDetails>();
 
         cache.put("movie-1", notFound);
@@ -29,7 +30,7 @@ class TmdbCacheConfigTest {
 
     @Test
     void limitsEpisodeRatingsMetadataWorkersAndQueue() throws Exception {
-        ExecutorService executor = new TmdbCacheConfig().episodeRatingsMetadataExecutor();
+        ExecutorService executor = new TmdbCacheConfig(TestCacheFactory.entries()).episodeRatingsMetadataExecutor();
         try {
             assertThat(executor).isInstanceOf(ThreadPoolExecutor.class);
             ThreadPoolExecutor pool = (ThreadPoolExecutor) executor;
@@ -43,7 +44,7 @@ class TmdbCacheConfigTest {
 
     @Test
     void blocksEpisodeRatingsMetadataSubmissionWhenWorkersAndQueueAreFull() throws Exception {
-        ExecutorService executor = new TmdbCacheConfig().episodeRatingsMetadataExecutor();
+        ExecutorService executor = new TmdbCacheConfig(TestCacheFactory.entries()).episodeRatingsMetadataExecutor();
         ExecutorService submitter = Executors.newSingleThreadExecutor();
         CountDownLatch workersRunning = new CountDownLatch(4);
         CountDownLatch releaseWorkers = new CountDownLatch(1);
@@ -79,7 +80,7 @@ class TmdbCacheConfigTest {
 
     @Test
     void keepsSeasonFetchesRunnableWhenTheBoundedRefreshExecutorIsSaturated() throws Exception {
-        TmdbCacheConfig config = new TmdbCacheConfig();
+        TmdbCacheConfig config = new TmdbCacheConfig(TestCacheFactory.entries());
         ExecutorService refreshExecutor = config.calendarScheduleRefreshExecutor();
         ExecutorService seasonExecutor = config.tmdbSeasonFetchExecutor();
         CountDownLatch refreshesRunning = new CountDownLatch(4);

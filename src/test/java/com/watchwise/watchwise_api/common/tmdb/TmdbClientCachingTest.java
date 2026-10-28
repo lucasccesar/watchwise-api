@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
 import com.github.benmanes.caffeine.cache.Cache;
+import com.watchwise.watchwise_api.common.cache.CacheMemoryConfiguration;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.impl.CalendarScheduleProviderImpl;
 import com.watchwise.watchwise_api.content.service.impl.ContentScheduleReaderImpl;
@@ -48,7 +49,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 @SpringJUnitConfig
-@ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
+@ContextConfiguration(classes = {CacheMemoryConfiguration.class, TmdbCacheConfig.class,
+        TmdbClientCachingTest.Config.class})
 @TestPropertySource(properties = {
         "app.tmdb.details-cache-ttl-hours=24",
         "app.tmdb.person-aggregate-cache-max-size=10000",

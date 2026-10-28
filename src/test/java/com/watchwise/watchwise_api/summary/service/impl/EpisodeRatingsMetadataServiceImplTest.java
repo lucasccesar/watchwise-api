@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.summary.service.impl;
 
+import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
@@ -43,7 +44,7 @@ class EpisodeRatingsMetadataServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        metadataExecutor = new TmdbCacheConfig().episodeRatingsMetadataExecutor();
+        metadataExecutor = new TmdbCacheConfig(TestCacheFactory.entries()).episodeRatingsMetadataExecutor();
         service = new EpisodeRatingsMetadataServiceImpl(tmdbClient, metadataExecutor);
     }
 

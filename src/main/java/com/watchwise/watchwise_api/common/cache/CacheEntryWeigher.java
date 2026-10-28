@@ -42,6 +42,9 @@ public final class CacheEntryWeigher {
     private static final int MAX_NODES = 10_000;
     private static final String CACHE_PACKAGE = "com.watchwise.watchwise_api.common.cache";
     private static final String TMDB_PACKAGE = "com.watchwise.watchwise_api.common.tmdb";
+    private static final String DAILY_GAME_MEDIA_DTO_PACKAGE = "com.watchwise.watchwise_api.dailygame.dto";
+    private static final String DAILY_GAME_MEDIA_KEY =
+            "com.watchwise.watchwise_api.dailygame.service.impl.DailyGameMediaServiceImpl$MediaKey";
     private static final Set<Class<?>> SCALAR_TYPES = Set.of(
             Boolean.class, Byte.class, Short.class, Integer.class, Long.class,
             Float.class, Double.class, Character.class);
@@ -206,7 +209,8 @@ public final class CacheEntryWeigher {
 
     private static boolean isTrustedRecord(Class<?> type) {
         String packageName = type.getPackageName();
-        return CACHE_PACKAGE.equals(packageName) || TMDB_PACKAGE.equals(packageName);
+        return CACHE_PACKAGE.equals(packageName) || TMDB_PACKAGE.equals(packageName)
+                || DAILY_GAME_MEDIA_DTO_PACKAGE.equals(packageName) || DAILY_GAME_MEDIA_KEY.equals(type.getName());
     }
 
     private static boolean isKnownList(List<?> list) {

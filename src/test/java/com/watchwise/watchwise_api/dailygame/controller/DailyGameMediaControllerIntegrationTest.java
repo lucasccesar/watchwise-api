@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.controller;
 
+import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
@@ -109,7 +110,7 @@ class DailyGameMediaControllerIntegrationTest {
         when(challenges.findById(challengeId)).thenReturn(Optional.of(
                 DailyChallenge.builder().id(challengeId).imagePath("/clue.png").build()));
         var service = new DailyGameMediaServiceImpl(tmdbClient, challenges, Clock.systemUTC(),
-                "test-daily-game-media-jwt-key-at-least-32-bytes");
+                "test-daily-game-media-jwt-key-at-least-32-bytes", TestCacheFactory.entries());
         String url = service.issue(user, challengeId, DailyGameMediaSlot.CLUE,
                 DailyGameImageVariant.BLUR_26, "/clue.png").url();
         var mvc = MockMvcBuilders.standaloneSetup(new DailyGameMediaController(
