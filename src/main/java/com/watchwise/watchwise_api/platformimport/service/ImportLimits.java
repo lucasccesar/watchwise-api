@@ -20,6 +20,7 @@ public class ImportLimits {
     private long maxPendingUploadBytesPerUser = 157286400;
     private long maxPendingUploadBytesGlobal = 2147483648L;
     private int maxConcurrentUploadsPerProcess = 2;
+    private int maxConcurrentArtifactReadsPerProcess = 2;
     private int maxConcurrentTmdbSearchesPerProcess = 4;
 
     public ImportLimits() {}
@@ -55,6 +56,7 @@ public class ImportLimits {
     public long maxPendingUploadBytesPerUser() { return maxPendingUploadBytesPerUser; }
     public long maxPendingUploadBytesGlobal() { return maxPendingUploadBytesGlobal; }
     public int maxConcurrentUploadsPerProcess() { return maxConcurrentUploadsPerProcess; }
+    public int maxConcurrentArtifactReadsPerProcess() { return maxConcurrentArtifactReadsPerProcess; }
     public int maxConcurrentTmdbSearchesPerProcess() { return maxConcurrentTmdbSearchesPerProcess; }
 
     public void setMaxUploadBytes(long value) { maxUploadBytes = value; }
@@ -71,6 +73,7 @@ public class ImportLimits {
     public void setMaxPendingUploadBytesPerUser(long value) { maxPendingUploadBytesPerUser = value; }
     public void setMaxPendingUploadBytesGlobal(long value) { maxPendingUploadBytesGlobal = value; }
     public void setMaxConcurrentUploadsPerProcess(int value) { maxConcurrentUploadsPerProcess = value; }
+    public void setMaxConcurrentArtifactReadsPerProcess(int value) { maxConcurrentArtifactReadsPerProcess = value; }
     public void setMaxConcurrentTmdbSearchesPerProcess(int value) { maxConcurrentTmdbSearchesPerProcess = value; }
 
     public long getMaxUploadBytes() { return maxUploadBytes; }
@@ -87,5 +90,6 @@ public class ImportLimits {
     public long getMaxPendingUploadBytesPerUser() { return maxPendingUploadBytesPerUser; }
     public long getMaxPendingUploadBytesGlobal() { return maxPendingUploadBytesGlobal; }
     public int getMaxConcurrentUploadsPerProcess() { return maxConcurrentUploadsPerProcess; }
+    public int getMaxConcurrentArtifactReadsPerProcess() { return maxConcurrentArtifactReadsPerProcess; }
     public int getMaxConcurrentTmdbSearchesPerProcess() { return maxConcurrentTmdbSearchesPerProcess; }
 }
