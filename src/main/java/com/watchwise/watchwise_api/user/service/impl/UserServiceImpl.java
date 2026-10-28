@@ -194,6 +194,11 @@ public class UserServiceImpl implements UserService {
             user.setPassword(passwordEncoder.encode(patchUserDTO.password()));
         }
 
+        if (credentialChanges.touchesCredentials()) {
+            user.setPasswordResetTokenHash(null);
+            user.setPasswordResetExpiresAt(null);
+        }
+
         if (patchUserDTO.description() != null && !patchUserDTO.description().equals(user.getDescription())) {
             user.setDescription(patchUserDTO.description());
         }

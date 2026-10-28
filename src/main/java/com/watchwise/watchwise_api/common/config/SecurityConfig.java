@@ -125,7 +125,8 @@ public class SecurityConfig {
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
                         .sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
                         .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh",
-                                "/auth/logout", "/auth/confirm-email", "/auth/confirm-email/resend"))
+                                "/auth/logout", "/auth/confirm-email", "/auth/confirm-email/resend",
+                                "/auth/password-reset/request", "/auth/password-reset/confirm"))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/logout-all").authenticated()

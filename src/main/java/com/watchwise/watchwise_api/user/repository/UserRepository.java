@@ -76,6 +76,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT u.pendingEmail FROM User u WHERE u.emailConfirmationTokenHash = :tokenHash")
     Optional<String> findPendingEmailByEmailConfirmationTokenHash(@Param("tokenHash") String tokenHash);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.passwordResetTokenHash = :tokenHash")
+    Optional<User> findByPasswordResetTokenHashForUpdate(@Param("tokenHash") String tokenHash);
+
     @Query(
             value = """
         SELECT u FROM User u

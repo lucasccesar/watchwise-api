@@ -21,6 +21,8 @@ public interface UserMapper {
     @Mapping(target = "isEmailVerified", ignore = true)
     @Mapping(target = "emailConfirmationTokenHash", ignore = true)
     @Mapping(target = "emailConfirmationExpiresAt", ignore = true)
+    @Mapping(target = "passwordResetTokenHash", ignore = true)
+    @Mapping(target = "passwordResetExpiresAt", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "sessionsInvalidatedAt", ignore = true)

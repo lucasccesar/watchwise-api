@@ -56,9 +56,7 @@ public class EmailConfirmationService {
     private int maxPendingAttemptsPerEmail;
 
     public void requireDeliveryConfigured() {
-        if (senderProvider.getIfAvailable() == null) {
-            throw new ServiceUnavailableException("Email confirmation is not configured");
-        }
+        requireSender();
     }
 
     @Transactional
@@ -69,10 +67,7 @@ public class EmailConfirmationService {
 
     @Transactional
     public void issueAndSend(User user) {
-        EmailConfirmationSender sender = senderProvider.getIfAvailable();
-        if (sender == null) {
-            throw new ServiceUnavailableException("Email confirmation is not configured");
-        }
+        EmailConfirmationSender sender = requireSender();
         if (Boolean.TRUE.equals(user.getIsEmailVerified()) && user.getPendingEmail() == null) {
             throw new BadRequestException("Email is already confirmed");
         }
@@ -87,10 +82,7 @@ public class EmailConfirmationService {
 
     @Transactional
     public String issueForRegistration(User registration) {
-        EmailConfirmationSender sender = senderProvider.getIfAvailable();
-        if (sender == null) {
-            throw new ServiceUnavailableException("Email confirmation is not configured");
-        }
+        EmailConfirmationSender sender = requireSender();
 
         String email = registration.getEmail().trim().toLowerCase(java.util.Locale.ROOT);
         LocalDateTime now = LocalDateTime.now(clock);
@@ -165,6 +157,8 @@ public class EmailConfirmationService {
         if (emailChangeConfirmation) {
             user.setEmail(user.getPendingEmail());
             user.setPendingEmail(null);
+            user.setPasswordResetTokenHash(null);
+            user.setPasswordResetExpiresAt(null);
             user.setAuthVersion(user.getAuthVersion() + 1);
             user.setSessionsInvalidatedAt(now.truncatedTo(ChronoUnit.SECONDS));
         }
@@ -219,8 +213,7 @@ public class EmailConfirmationService {
 
     @Transactional
     public boolean resend(String email, String rawRegistrationProof) {
-        requireDeliveryConfigured();
-        EmailConfirmationSender sender = senderProvider.getIfAvailable();
+        EmailConfirmationSender sender = requireSender();
         String normalizedEmail = email.trim().toLowerCase(java.util.Locale.ROOT);
         LocalDateTime now = LocalDateTime.now(clock);
         if (rawRegistrationProof == null || rawRegistrationProof.isBlank()) {
@@ -269,6 +262,14 @@ public class EmailConfirmationService {
         } else {
             delivery.run();
         }
+    }
+
+    private EmailConfirmationSender requireSender() {
+        EmailConfirmationSender sender = senderProvider.getIfAvailable();
+        if (sender == null || !sender.isConfigured()) {
+            throw new ServiceUnavailableException("Email delivery is not configured");
+        }
+        return sender;
     }
 
     private void revokeRefreshTokensAfterCommit(java.util.UUID userId) {

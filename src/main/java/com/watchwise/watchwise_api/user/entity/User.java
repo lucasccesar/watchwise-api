@@ -76,6 +76,14 @@ public class User {
     @Setter
     private LocalDateTime emailConfirmationExpiresAt;
 
+    @Column(name = "password_reset_token_hash", length = 64)
+    @Setter
+    private String passwordResetTokenHash;
+
+    @Column(name = "password_reset_expires_at")
+    @Setter
+    private LocalDateTime passwordResetExpiresAt;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;

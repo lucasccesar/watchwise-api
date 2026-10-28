@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.ConfirmEmailDTO;
+import com.watchwise.watchwise_api.user.dto.PasswordResetConfirmDTO;
+import com.watchwise.watchwise_api.user.dto.PasswordResetRequestDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthLoginDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
@@ -20,6 +22,7 @@ import com.watchwise.watchwise_api.user.dto.ResendEmailConfirmationDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
 import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
+import com.watchwise.watchwise_api.user.service.PasswordResetService;
 import com.watchwise.watchwise_api.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -59,6 +62,7 @@ public class AuthController {
     private final AttemptLockout attemptLockout;
     private final RequestThrottler requestThrottler;
     private final EmailConfirmationService emailConfirmationService;
+    private final PasswordResetService passwordResetService;
 
     @Value("${app.rate-limit.login.max-attempts}")
     private int loginMaxAttempts;
@@ -86,6 +90,11 @@ public class AuthController {
     private int refreshMaxRequests;
     @Value("${app.rate-limit.refresh.window-minutes}")
     private long refreshWindowMinutes;
+
+    @Value("${app.rate-limit.password-reset.max-requests:5}")
+    private int passwordResetMaxRequests;
+    @Value("${app.rate-limit.password-reset.window-minutes:15}")
+    private long passwordResetWindowMinutes;
 
     @PostMapping("/register")
     public ResponseEntity<Void> register(
@@ -138,6 +147,26 @@ public class AuthController {
         if (registrationProofRenewalAllowed) {
             cookieUtil.addCookie(response, cookieUtil.buildRegistrationProofCookie(registrationProof));
         }
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/password-reset/request")
+    public ResponseEntity<Void> requestPasswordReset(
+            @Valid @RequestBody PasswordResetRequestDTO request,
+            HttpServletRequest servletRequest) {
+        requestThrottler.checkAllowed(throttleKey("password-reset", servletRequest),
+                passwordResetMaxRequests, Duration.ofMinutes(passwordResetWindowMinutes));
+        passwordResetService.requestPasswordReset(request.email());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/password-reset/confirm")
+    public ResponseEntity<Void> confirmPasswordReset(
+            @Valid @RequestBody PasswordResetConfirmDTO request,
+            HttpServletRequest servletRequest) {
+        requestThrottler.checkAllowed(throttleKey("password-reset-confirm", servletRequest),
+                passwordResetMaxRequests, Duration.ofMinutes(passwordResetWindowMinutes));
+        passwordResetService.resetPassword(request.token(), request.password());
         return ResponseEntity.noContent().build();
     }
 
