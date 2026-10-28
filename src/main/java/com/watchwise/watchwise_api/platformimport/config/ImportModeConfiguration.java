@@ -13,7 +13,6 @@ import com.watchwise.watchwise_api.platformimport.service.impl.TraktArchiveImpor
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleListImportHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleWatchlistImportHandler;
 import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
-import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -23,33 +22,33 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration(proxyBeanMethods = false)
 public class ImportModeConfiguration {
     @Bean
-    SingleListImportHandler traktSingleListImportHandler(ImportFileStore store, TraktItemParser traktParser,
+    SingleListImportHandler traktSingleListImportHandler(ImportArtifactReader artifacts, TraktItemParser traktParser,
                                                          LetterboxdItemCsvParser letterboxdParser,
                                                          ObjectMapper objectMapper) {
-        return new SingleListImportHandler(ImportSourceFormat.TRAKT_JSON, store, traktParser,
+        return new SingleListImportHandler(ImportSourceFormat.TRAKT_JSON, artifacts, traktParser,
                 letterboxdParser, objectMapper);
     }
 
     @Bean
-    SingleListImportHandler letterboxdSingleListImportHandler(ImportFileStore store, TraktItemParser traktParser,
+    SingleListImportHandler letterboxdSingleListImportHandler(ImportArtifactReader artifacts, TraktItemParser traktParser,
                                                               LetterboxdItemCsvParser letterboxdParser,
                                                               ObjectMapper objectMapper) {
-        return new SingleListImportHandler(ImportSourceFormat.LETTERBOXD_CSV, store, traktParser,
+        return new SingleListImportHandler(ImportSourceFormat.LETTERBOXD_CSV, artifacts, traktParser,
                 letterboxdParser, objectMapper);
     }
 
     @Bean
-    SingleWatchlistImportHandler traktSingleWatchlistImportHandler(ImportFileStore store,
+    SingleWatchlistImportHandler traktSingleWatchlistImportHandler(ImportArtifactReader artifacts,
                                                                    TraktItemParser traktParser,
                                                                    LetterboxdItemCsvParser letterboxdParser) {
-        return new SingleWatchlistImportHandler(ImportSourceFormat.TRAKT_JSON, store, traktParser, letterboxdParser);
+        return new SingleWatchlistImportHandler(ImportSourceFormat.TRAKT_JSON, artifacts, traktParser, letterboxdParser);
     }
 
     @Bean
-    SingleWatchlistImportHandler letterboxdSingleWatchlistImportHandler(ImportFileStore store,
+    SingleWatchlistImportHandler letterboxdSingleWatchlistImportHandler(ImportArtifactReader artifacts,
                                                                         TraktItemParser traktParser,
                                                                         LetterboxdItemCsvParser letterboxdParser) {
-        return new SingleWatchlistImportHandler(ImportSourceFormat.LETTERBOXD_CSV, store,
+        return new SingleWatchlistImportHandler(ImportSourceFormat.LETTERBOXD_CSV, artifacts,
                 traktParser, letterboxdParser);
     }
 

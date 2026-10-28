@@ -114,7 +114,7 @@ class ImportArtifactReaderTest {
 
             assertThat(path).doesNotExist();
             assertThat(fixture.temporary().reservedBytes()).isZero();
-            assertThatThrownBy(child::read).isInstanceOf(java.io.IOException.class);
+            assertThatThrownBy(child::read).isInstanceOf(ImportStorageUnavailableException.class);
         }
     }
 

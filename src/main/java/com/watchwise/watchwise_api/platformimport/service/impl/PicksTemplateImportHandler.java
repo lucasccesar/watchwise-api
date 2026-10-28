@@ -18,7 +18,8 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepositor
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
-import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -48,7 +49,7 @@ public class PicksTemplateImportHandler implements ImportModeHandler {
     private static final String OVERLAY_MARKER = "_watchwiseResolution";
     private static final String PREPARED_PLAN_KEY = "preparedTemplate";
 
-    private final ImportFileStore files;
+    private final ImportArtifactReader artifacts;
     private final PicksTemplateJsonParser parser;
     private final TemplateNomineeResolver nomineeResolver;
     private final ImportedTemplateAdapter adapter;
@@ -60,7 +61,7 @@ public class PicksTemplateImportHandler implements ImportModeHandler {
     private final ObjectMapper mapper;
     private final Clock clock;
 
-    public PicksTemplateImportHandler(ImportFileStore files, PicksTemplateJsonParser parser,
+    public PicksTemplateImportHandler(ImportArtifactReader artifacts, PicksTemplateJsonParser parser,
                                       TemplateNomineeResolver nomineeResolver,
                                       ImportedTemplateAdapter adapter,
                                       PreparedTemplateCreationService preparedCreations,
@@ -68,7 +69,7 @@ public class PicksTemplateImportHandler implements ImportModeHandler {
                                       ImportItemRepository items, ImportUnitTransaction unitTransactions,
                                       ImportLedger ledger,
                                       ObjectMapper mapper, Clock clock) {
-        this.files = files;
+        this.artifacts = artifacts;
         this.parser = parser;
         this.nomineeResolver = nomineeResolver;
         this.adapter = adapter;
@@ -100,10 +101,10 @@ public class PicksTemplateImportHandler implements ImportModeHandler {
     public void normalize(ImportReadContext context, ImportSelection selection,
                           Consumer<NormalizedImportRecord> sink) {
         TemplateImportDocument document;
-        try (InputStream input = files.open(context.storageKey())) {
+        try (var artifact = artifacts.open(context.artifact()); InputStream input = artifact.openStream()) {
             document = parser.parse(input);
         } catch (IOException exception) {
-            throw new BadRequestException("Picks template file could not be read");
+            throw new ImportStorageUnavailableException(exception);
         }
 
         int ordinal = 0;

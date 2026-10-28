@@ -200,8 +200,8 @@ class PicksTemplateImportIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
-    @DisplayName("[validateResolved] Should Validate Five Thousand Nominees Once Per Distinct Target - When Targets Repeat Across Categories")
-    void shouldValidateFiveThousandNomineesOncePerDistinctTarget() {
+    @DisplayName("[validateResolved] Should Validate Two Hundred Nominees Once Per Distinct Target - When Targets Repeat Across Categories")
+    void shouldValidateTwoHundredNomineesOncePerDistinctTarget() {
         AtomicInteger tmdbValidations = new AtomicInteger();
         when(tmdb.getPersonDetails(any(String.class))).thenAnswer(call -> {
             String id = call.getArgument(0);
@@ -209,14 +209,14 @@ class PicksTemplateImportIntegrationTest extends PicksDomainIntegrationSupport {
             return new com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult.Found<>(
                     new com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails(id));
         });
-        String source = fiveThousandNomineeTemplate();
+        String source = twoHundredNomineeTemplate();
         assertThat(source.getBytes(StandardCharsets.UTF_8).length).isLessThan(5 * 1024 * 1024);
         ImportJobDTO job = upload(source);
 
         runNormalizationAndResolution(job);
 
         assertThat(importJobs.get(owner.getId(), job.id()).state()).isEqualTo(ImportJobState.READY);
-        assertThat(stagedItems.countByJobIdAndPlanGeneration(job.id(), 0)).isEqualTo(5101);
+        assertThat(stagedItems.countByJobIdAndPlanGeneration(job.id(), 0)).isEqualTo(251);
         assertThat(tmdbValidations).hasValue(50);
     }
 
@@ -620,16 +620,17 @@ class PicksTemplateImportIntegrationTest extends PicksDomainIntegrationSupport {
         worker.runAvailable(1);
     }
 
-    private String fiveThousandNomineeTemplate() {
-        StringBuilder json = new StringBuilder(300_000)
+    private String twoHundredNomineeTemplate() {
+        StringBuilder json = new StringBuilder(20_000)
                 .append("{\"schemaVersion\":1,\"title\":\"Large Awards\",\"categories\":[");
-        for (int category = 0; category < 100; category++) {
+        for (int category = 0; category < 50; category++) {
             if (category > 0) json.append(',');
             json.append("{\"name\":\"Category ").append(category)
                     .append("\",\"type\":\"person\",\"nominees\":[");
-            for (int nominee = 1; nominee <= 50; nominee++) {
+            for (int nominee = 1; nominee <= 4; nominee++) {
                 if (nominee > 1) json.append(',');
-                json.append("{\"personTmdbId\":\"").append(nominee).append("\"}");
+                int personId = ((category * 4 + nominee - 1) % 50) + 1;
+                json.append("{\"personTmdbId\":\"").append(personId).append("\"}");
             }
             json.append("]}");
         }

@@ -117,7 +117,13 @@ public final class ImportArtifactReader {
             if (childStreams.size() >= maxOpenStreams) {
                 throw new ServiceUnavailableException("Import artifact stream capacity is full");
             }
-            TrackedStream stream = new TrackedStream(Files.newInputStream(materialized.path(), StandardOpenOption.READ));
+            final InputStream input;
+            try {
+                input = Files.newInputStream(materialized.path(), StandardOpenOption.READ);
+            } catch (IOException exception) {
+                throw new ImportStorageUnavailableException(exception);
+            }
+            TrackedStream stream = new TrackedStream(input);
             childStreams.add(stream);
             return stream;
         }
@@ -141,16 +147,22 @@ public final class ImportArtifactReader {
                 streams = new ArrayList<>(childStreams);
             }
 
-            IOException closeFailure = null;
+            Throwable closeFailure = null;
             for (TrackedStream stream : streams) {
                 try {
                     stream.close();
-                } catch (IOException exception) {
+                } catch (IOException | RuntimeException exception) {
                     if (closeFailure == null) closeFailure = exception;
                     else closeFailure.addSuppressed(exception);
                 }
             }
-            materialized.close();
+            try {
+                materialized.close();
+            } catch (RuntimeException exception) {
+                if (closeFailure == null) closeFailure = exception;
+                else closeFailure.addSuppressed(exception);
+            }
+            if (closeFailure instanceof RuntimeException runtimeException) throw runtimeException;
             if (closeFailure != null) throw new ImportStorageUnavailableException(closeFailure);
         }
 
@@ -162,6 +174,51 @@ public final class ImportArtifactReader {
             }
 
             @Override
+            public int read() throws IOException {
+                try {
+                    return super.read();
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
+                }
+            }
+
+            @Override
+            public int read(byte[] bytes, int offset, int length) throws IOException {
+                try {
+                    return super.read(bytes, offset, length);
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
+                }
+            }
+
+            @Override
+            public long skip(long count) throws IOException {
+                try {
+                    return super.skip(count);
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
+                }
+            }
+
+            @Override
+            public int available() throws IOException {
+                try {
+                    return super.available();
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
+                }
+            }
+
+            @Override
+            public synchronized void reset() throws IOException {
+                try {
+                    super.reset();
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
+                }
+            }
+
+            @Override
             public void close() throws IOException {
                 synchronized (this) {
                     if (streamClosed) return;
@@ -169,6 +226,8 @@ public final class ImportArtifactReader {
                 }
                 try {
                     super.close();
+                } catch (IOException exception) {
+                    throw new ImportStorageUnavailableException(exception);
                 } finally {
                     release(this);
                 }

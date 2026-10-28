@@ -6,12 +6,18 @@ import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.CsvRecordReader;
+import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser;
+import com.watchwise.watchwise_api.platformimport.parser.TraktItemParser;
 import com.watchwise.watchwise_api.platformimport.parser.impl.LetterboxdItemCsvParserImpl;
 import com.watchwise.watchwise_api.platformimport.parser.impl.TraktItemParserImpl;
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleListImportHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.SingleWatchlistImportHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.StandaloneListIdentityResolver;
-import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
+import com.watchwise.watchwise_api.platformimport.storage.ReadableImportArtifact;
+import com.watchwise.watchwise_api.platformimport.storage.R2StoreFixture;
+import org.junit.jupiter.api.io.TempDir;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -24,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -38,17 +45,95 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 class SingleFileItemHandlerTest {
+    @TempDir Path tempDir;
     private static final UUID OWNER = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID JOB = UUID.fromString("00000000-0000-0000-0000-000000000002");
-    private static final ImportReadContext CONTEXT = new ImportReadContext(OWNER, JOB, "synthetic",
+    private static final ImportReadContext CONTEXT = new ImportReadContext(OWNER, JOB,
+            "00000000-0000-0000-0000-000000000003",
             "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC, 0,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     private static final ImportSelection SELECTION = new ImportSelection(false, false, Set.of(), null);
     private static final String TRAKT = "[{\"type\":\"movie\",\"movie\":{\"title\":\"Example\",\"year\":2001,\"ids\":{\"tmdb\":11,\"trakt\":22}}}]";
     private static final String LIST = "7\nDate,Name,Tags,URL,Description\n2026-01-01,Favorites,curated,https://letterboxd.com/alice/list/favorites/,Notes\nPosition,Name,Year,URL,Description\n1,Example,2001,https://boxd.it/AbC,Item note\n";
     private static final String WATCHLIST = "Date,Name,Year,Letterboxd URI\n2026-01-01,Example,2001,https://boxd.it/AbC\n";
+
+    @Test
+    void preservesStorageFailureDuringStandaloneNormalization() {
+        var artifacts = mock(ImportArtifactReader.class);
+        var context = new ImportReadContext(OWNER, JOB, "00000000-0000-0000-0000-000000000006",
+                "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC, 3, "0".repeat(64));
+        var failure = new ImportStorageUnavailableException(new java.io.IOException("remote unavailable"));
+        when(artifacts.open(context.artifact())).thenThrow(failure);
+        var handler = new SingleWatchlistImportHandler(ImportSourceFormat.TRAKT_JSON, artifacts,
+                mock(TraktItemParser.class), mock(LetterboxdItemCsvParser.class));
+
+        assertThatThrownBy(() -> handler.normalize(context,
+                new ImportSelection(false, true, Set.of(), null), record -> {})).isSameAs(failure);
+    }
+
+    @Test
+    void preservesStorageFailureDuringStandaloneListNormalization() {
+        var artifacts = mock(ImportArtifactReader.class);
+        var context = new ImportReadContext(OWNER, JOB, "00000000-0000-0000-0000-000000000006",
+                "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC, 3, "0".repeat(64));
+        var failure = new ImportStorageUnavailableException(new java.io.IOException("remote unavailable"));
+        when(artifacts.open(context.artifact())).thenThrow(failure);
+        var handler = new SingleListImportHandler(ImportSourceFormat.TRAKT_JSON, artifacts,
+                mock(TraktItemParser.class), mock(LetterboxdItemCsvParser.class), new ObjectMapper());
+
+        assertThatThrownBy(() -> handler.normalize(context,
+                new ImportSelection(false, true, Set.of(), null), record -> {})).isSameAs(failure);
+    }
+
+    @Test
+    void doesNotTreatStorageReadFailureAsNonTraktListContent() throws Exception {
+        var artifacts = mock(ImportArtifactReader.class);
+        var artifact = mock(ReadableImportArtifact.class);
+        var context = new ImportReadContext(OWNER, JOB, "00000000-0000-0000-0000-000000000007",
+                "TRAKT:OWNER:" + OWNER, ZoneOffset.UTC, 3, "0".repeat(64));
+        when(artifacts.open(context.artifact())).thenReturn(artifact);
+        when(artifact.openStream()).thenThrow(new java.io.IOException("disk read failed"));
+        var handler = new SingleListImportHandler(ImportSourceFormat.TRAKT_JSON, artifacts,
+                mock(TraktItemParser.class), mock(LetterboxdItemCsvParser.class), new ObjectMapper());
+
+        assertThatThrownBy(() -> handler.normalize(context,
+                new ImportSelection(false, true, Set.of(), null), record -> {}))
+                .isInstanceOf(ImportStorageUnavailableException.class);
+    }
+
+    @Test
+    void rejectsTruncatedTraktJsonAfterFormatDetection() throws Exception {
+        assertThatThrownBy(() -> listHandler(ImportSourceFormat.TRAKT_JSON, "[{\"name\":\"Favorites\"")
+                .normalize(CONTEXT, SELECTION, record -> {}))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void reusesOneRemoteDownloadAcrossStandaloneListDetectionAndParsing() throws Exception {
+        ImportLimits limits = new ImportLimits();
+        String key = UUID.randomUUID().toString();
+        byte[] bytes = LIST.getBytes(StandardCharsets.UTF_8);
+        try (var fixture = R2StoreFixture.start(tempDir)) {
+            var stored = fixture.store().store(new ByteArrayInputStream(bytes), limits.maxUploadBytes(), key);
+            var context = new ImportReadContext(OWNER, JOB, key, "LETTERBOXD:OWNER:" + OWNER, ZoneOffset.UTC,
+                    stored.bytes(), stored.sha256());
+            var artifacts = new ImportArtifactReader(fixture.store(), fixture.temporary(), limits);
+            var handler = new SingleListImportHandler(ImportSourceFormat.LETTERBOXD_CSV, artifacts,
+                    new TraktItemParserImpl(new ObjectMapper()),
+                    new LetterboxdItemCsvParserImpl(new CsvRecordReader(limits)), new ObjectMapper());
+            List<NormalizedImportRecord> records = new ArrayList<>();
+
+            handler.normalize(context, SELECTION, records::add);
+
+            assertThat(records).extracting(NormalizedImportRecord::kind)
+                    .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM);
+            assertThat(fixture.server().requestCount("GET", fixture.objectPath(key))).isEqualTo(1);
+            assertThat(fixture.temporary().reservedBytes()).isZero();
+        }
+    }
 
     @Test
     @DisplayName("[normalize] Should Emit Only List Members - When Trakt Array Uses Single List Mode")
@@ -65,7 +150,7 @@ class SingleFileItemHandlerTest {
     @Test
     @DisplayName("[normalize] Should Keep Trakt Item Namespace Shared With ZIP - When Source Account Is Bound")
     void shouldKeepTraktItemNamespaceSharedWithZipWhenSourceAccountIsBound() throws Exception {
-        var accountContext = new ImportReadContext(OWNER, JOB, "synthetic", "TRAKT:ACCOUNT:alice", ZoneOffset.UTC,
+        var accountContext = new ImportReadContext(OWNER, JOB, CONTEXT.storageKey(), "TRAKT:ACCOUNT:alice", ZoneOffset.UTC,
                 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         var metadata = new ObjectMapper().createObjectNode().put("name", "Favorites").put("sourceListId", "42");
         List<NormalizedImportRecord> records = new ArrayList<>();
@@ -224,7 +309,7 @@ class SingleFileItemHandlerTest {
         try (var context = new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test",
                     Map.of("app.import.platform-archive-handlers-enabled", "false")));
-            context.registerBean(ImportFileStore.class, () -> mock(ImportFileStore.class));
+            context.registerBean(ImportArtifactReader.class, () -> mock(ImportArtifactReader.class));
             context.registerBean(TraktItemParserImpl.class, () -> new TraktItemParserImpl(new ObjectMapper()));
             context.registerBean(LetterboxdItemCsvParserImpl.class,
                     () -> new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits())));
@@ -358,19 +443,21 @@ class SingleFileItemHandlerTest {
     private record IdentityFixture(StandaloneListIdentityResolver resolver, UserListRepository lists, UUID parentId) {}
 
     private SingleListImportHandler listHandler(ImportSourceFormat format, String data) throws Exception {
-        return new SingleListImportHandler(format, store(data), new TraktItemParserImpl(new ObjectMapper()),
+        return new SingleListImportHandler(format, artifacts(data), new TraktItemParserImpl(new ObjectMapper()),
                 new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits())), new ObjectMapper());
     }
 
     private SingleWatchlistImportHandler watchlistHandler(ImportSourceFormat format, String data) throws Exception {
-        return new SingleWatchlistImportHandler(format, store(data), new TraktItemParserImpl(new ObjectMapper()),
+        return new SingleWatchlistImportHandler(format, artifacts(data), new TraktItemParserImpl(new ObjectMapper()),
                 new LetterboxdItemCsvParserImpl(new CsvRecordReader(new ImportLimits())));
     }
 
-    private ImportFileStore store(String data) throws Exception {
-        ImportFileStore store = mock(ImportFileStore.class);
-        when(store.open("synthetic")).thenAnswer(invocation ->
-                new ByteArrayInputStream(data.getBytes(StandardCharsets.UTF_8)));
-        return store;
+    private ImportArtifactReader artifacts(String data) throws Exception {
+        byte[] bytes = data.getBytes(StandardCharsets.UTF_8);
+        ReadableImportArtifact artifact = mock(ReadableImportArtifact.class);
+        when(artifact.openStream()).thenAnswer(invocation -> new ByteArrayInputStream(bytes));
+        ImportArtifactReader artifacts = mock(ImportArtifactReader.class);
+        when(artifacts.open(any())).thenReturn(artifact);
+        return artifacts;
     }
 }
