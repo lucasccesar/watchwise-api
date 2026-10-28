@@ -86,6 +86,21 @@ class PrivateImportFileStoreTest {
     }
 
     @Test
+    void shouldPreserveTheExistingObjectWhenAStoredKeyCollides() throws Exception {
+        PrivateImportFileStore store = new PrivateImportFileStore(root, new ImportLimits());
+        String key = java.util.UUID.randomUUID().toString();
+        byte[] original = "original".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        store.store(new ByteArrayInputStream(original), 1024, key);
+
+        assertThatThrownBy(() -> store.store(
+                new ByteArrayInputStream("replacement".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                1024, key)).isInstanceOf(ImportStorageKeyCollisionException.class);
+        try (InputStream input = store.open(key)) {
+            assertThat(input.readAllBytes()).containsExactly(original);
+        }
+    }
+
+    @Test
     @DisplayName("[store] Should Leave No File - When Limit Or Stream Failure Occurs")
     void shouldLeaveNoFileWhenLimitOrStreamFailureOccurs() throws Exception {
         PrivateImportFileStore store = new PrivateImportFileStore(root, new ImportLimits());

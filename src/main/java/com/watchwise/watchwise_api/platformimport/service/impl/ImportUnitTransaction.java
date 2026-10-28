@@ -515,8 +515,9 @@ public class ImportUnitTransaction {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean failDeterministically(ImportExecutionContext context) {
-        ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
-        if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
+        ImportJob job = lockRunnableJob(context, null);
+        if (job == null || (!"INSPECT".equals(job.getWorkPhase())
+                && !"NORMALIZE".equals(job.getWorkPhase()))) return false;
         job.setState(ImportJobState.FAILED);
         job.setWorkPhase(null);
         job.setWorkPending(false);

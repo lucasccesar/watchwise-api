@@ -42,7 +42,7 @@ public class ImportCleanupJob {
             SET ready_at = ?
             FROM candidate
             WHERE task.id = candidate.id
-            RETURNING task.id, task.storage_key, task.attempts
+            RETURNING task.id, task.storage_key, task.attempts, task.ready_at
             """;
 
     private final JdbcTemplate jdbc;
@@ -126,7 +126,8 @@ public class ImportCleanupJob {
     private CleanupTask claimReadyTask(LocalDateTime now) {
         return transactionTemplate.execute(status -> jdbc.query(CLAIM_TASK_SQL,
                 (result, row) -> new CleanupTask(result.getObject("id", UUID.class),
-                        result.getString("storage_key"), result.getInt("attempts")),
+                        result.getString("storage_key"), result.getInt("attempts"),
+                        result.getObject("ready_at", LocalDateTime.class)),
                 now, now.plus(CLEANUP_LEASE)).stream().findFirst().orElse(null));
     }
 
@@ -142,14 +143,19 @@ public class ImportCleanupJob {
             fileStore.validateKey(task.storageKey());
             fileStore.delete(task.storageKey());
             transactionTemplate.executeWithoutResult(status -> {
-                cleanupTaskRepository.deleteById(task.id());
-                jdbc.update("""
-                        UPDATE import_jobs SET upload_size_bytes = 0, updated_at = ?
-                        WHERE storage_key = ? AND (
-                            state IN ('EXPIRED', 'COMPLETED', 'COMPLETED_WITH_WARNINGS', 'CANCELLED')
-                            OR (state = 'FAILED' AND work_phase IS NULL)
-                        )
-                        """, now, task.storageKey());
+                int acknowledged = jdbc.update("""
+                        DELETE FROM import_file_cleanup_tasks
+                        WHERE id = ? AND ready_at = ? AND storage_key = ?
+                        """, task.id(), task.claimedUntil(), task.storageKey());
+                if (acknowledged == 1) {
+                    jdbc.update("""
+                            UPDATE import_jobs SET upload_size_bytes = 0, updated_at = ?
+                            WHERE storage_key = ? AND (
+                                state IN ('EXPIRED', 'COMPLETED', 'COMPLETED_WITH_WARNINGS', 'CANCELLED')
+                                OR (state = 'FAILED' AND work_phase IS NULL)
+                            )
+                            """, now, task.storageKey());
+                }
             });
         } catch (BadRequestException exception) {
             deferTask(task, now);
@@ -186,9 +192,9 @@ public class ImportCleanupJob {
         transactionTemplate.executeWithoutResult(status -> jdbc.update("""
                 UPDATE import_file_cleanup_tasks
                 SET attempts = attempts + 1, ready_at = ?
-                WHERE id = ?
-                """, now.plusMinutes(delayMinutes), task.id()));
+                WHERE id = ? AND ready_at = ?
+                """, now.plusMinutes(delayMinutes), task.id(), task.claimedUntil()));
     }
 
-    private record CleanupTask(UUID id, String storageKey, int attempts) { }
+    private record CleanupTask(UUID id, String storageKey, int attempts, LocalDateTime claimedUntil) { }
 }

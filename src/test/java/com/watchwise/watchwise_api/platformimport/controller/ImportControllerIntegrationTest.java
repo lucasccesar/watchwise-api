@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepositor
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageKeyCollisionException;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -57,6 +59,9 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -163,6 +168,28 @@ class ImportControllerIntegrationTest {
         assertThat(job.getUploadSizeBytes()).isEqualTo(2);
         assertThat(job.getZipDigest()).matches("[a-f0-9]{64}");
         assertThat(job.isWorkPending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createImport] Should Not Schedule Deletion - When Generated Storage Key Collides")
+    void shouldNotScheduleDeletionWhenGeneratedStorageKeyCollides() throws Exception {
+        RegisteredUser owner = createUser();
+        clearInvocations(importFileStore);
+        doThrow(new ImportStorageKeyCollisionException()).when(importFileStore)
+                .store(any(java.io.InputStream.class), anyLong(), anyString());
+
+        mockMvc.perform(upload(owner, "list.json", "application/json", new byte[]{'[', ']'}))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.message").value("Import file storage is temporarily unavailable"));
+
+        ImportJob failed = importJobRepository.findAll().getFirst();
+        assertThat(failed.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(failed.getUploadSizeBytes()).isZero();
+        assertThat(failed.getZipDigest()).isNull();
+        assertThat(failed.getWorkPhase()).isNull();
+        assertThat(cleanupTaskRepository.findAll()).isEmpty();
+        verify(importFileStore, never()).delete(anyString());
     }
 
     @Test
@@ -464,6 +491,60 @@ class ImportControllerIntegrationTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.state").value("ANALYZING"));
         assertThat(importJobRepository.findById(jobId).orElseThrow().isWorkPending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Return 503 Without Changing The Job - When Storage Is Unavailable")
+    void shouldReturn503WithoutChangingTheJobWhenStorageIsUnavailable() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob failed = importJobRepository.findById(jobId).orElseThrow();
+        failed.setState(ImportJobState.FAILED);
+        failed.setWorkPending(false);
+        failed.setNextRunAt(null);
+        importJobRepository.saveAndFlush(failed);
+        String phase = failed.getWorkPhase();
+        doThrow(new ImportStorageUnavailableException(new IOException("remote storage is down")))
+                .when(importFileStore).open(failed.getStorageKey());
+
+        mockMvc.perform(post("/imports/{importId}/retry", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.message").value("Import file storage is temporarily unavailable"));
+
+        ImportJob unchanged = importJobRepository.findById(jobId).orElseThrow();
+        assertThat(unchanged.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(unchanged.isWorkPending()).isFalse();
+        assertThat(unchanged.getWorkPhase()).isEqualTo(phase);
+        assertThat(unchanged.getNextRunAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Return Generic 500 - When A Confirmed Source File Is Missing")
+    void shouldReturnGeneric500WhenConfirmedSourceFileIsMissing() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob failed = importJobRepository.findById(jobId).orElseThrow();
+        failed.setState(ImportJobState.FAILED);
+        failed.setWorkPending(false);
+        failed.setNextRunAt(null);
+        importJobRepository.saveAndFlush(failed);
+        String phase = failed.getWorkPhase();
+        importFileStore.delete(failed.getStorageKey());
+
+        mockMvc.perform(post("/imports/{importId}/retry", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
+
+        ImportJob unchanged = importJobRepository.findById(jobId).orElseThrow();
+        assertThat(unchanged.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(unchanged.isWorkPending()).isFalse();
+        assertThat(unchanged.getWorkPhase()).isEqualTo(phase);
     }
 
     @Test

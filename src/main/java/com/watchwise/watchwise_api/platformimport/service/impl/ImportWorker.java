@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepositor
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeRegistry;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactIntegrityException;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -139,6 +141,12 @@ public class ImportWorker {
             } catch (RecordLimitExceededException exception) {
                 unitTransaction.failDeterministically(context);
                 log.warn("Import job {} exceeded its deterministic record limit", job.id());
+            } catch (ImportStorageUnavailableException exception) {
+                unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, false);
+                log.warn("Import storage is unavailable for job {}; retry is scheduled", job.id(), exception);
+            } catch (ImportArtifactIntegrityException exception) {
+                unitTransaction.failDeterministically(context);
+                log.error("Stored import artifact failed integrity validation for job {}", job.id());
             } catch (RuntimeException exception) {
                 boolean terminal = !"RESOLVE".equals(job.workPhase());
                 unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, terminal);

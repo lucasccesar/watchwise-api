@@ -17,6 +17,8 @@ public interface ImportUploadQuotaService {
 
     void markFailed(UUID ownerId, UUID jobId);
 
+    void markStorageCollision(UUID ownerId, UUID jobId);
+
     void reactivate(UUID ownerId, UUID jobId);
 
     void prepareAccountDeletion(UUID ownerId);

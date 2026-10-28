@@ -34,6 +34,7 @@ import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.service.impl.WatchEventImportApplier;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
 import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactIntegrityException;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
@@ -85,6 +86,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -127,6 +129,7 @@ class ImportWorkerIntegrationTest {
     @Autowired private ImportLedger ledger;
     @Autowired private com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService uploadQuotaService;
     @Autowired private ImportWorker worker;
+    @MockitoSpyBean private ImportModeRegistry registry;
     @MockitoSpyBean private ImportUnitTransaction unitTransaction;
     @MockitoBean private WatchEventImportApplier watchEventImportApplier;
     @MockitoSpyBean private ImportItemRepository itemRepositorySpy;
@@ -145,6 +148,77 @@ class ImportWorkerIntegrationTest {
     private static final AtomicInteger NORMALIZE_PAGE_RESET_AT = new AtomicInteger(-1);
     private static final java.util.concurrent.atomic.AtomicBoolean EMIT_UNRESOLVED = new java.util.concurrent.atomic.AtomicBoolean();
     private static final AtomicReference<String> NORMALIZE_NAMESPACE_OVERRIDE = new AtomicReference<>();
+
+    @Test
+    void retriesStorageOutageDuringInspectionWithoutChangingThePhase() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        doThrow(new ImportStorageUnavailableException(new IOException("storage unavailable")))
+                .when(registry).inspect(any(ImportModeKey.class), any(ImportReadContext.class));
+
+        worker.runAvailable(1);
+
+        ImportJob after = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(after.isWorkPending()).isTrue();
+        assertThat(after.getWorkPhase()).isEqualTo("INSPECT");
+        assertThat(after.getState()).isEqualTo(ImportJobState.ANALYZING);
+        assertThat(after.getNextRunAt()).isNotNull();
+    }
+
+    @Test
+    void retriesStorageOutageDuringNormalizationWithoutDiscardingTheCheckpoint() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setWorkPhase("NORMALIZE");
+        job.setCheckpoint("NORMALIZE:23");
+        jobRepository.saveAndFlush(job);
+        doThrow(new ImportStorageUnavailableException(new IOException("storage unavailable")))
+                .when(registry).normalize(any(ImportModeKey.class), any(ImportReadContext.class),
+                        any(ImportSelection.class), any(Consumer.class));
+
+        worker.runAvailable(1);
+
+        ImportJob after = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(after.isWorkPending()).isTrue();
+        assertThat(after.getWorkPhase()).isEqualTo("NORMALIZE");
+        assertThat(after.getCheckpoint()).isEqualTo("NORMALIZE:23");
+        assertThat(after.getNextRunAt()).isNotNull();
+    }
+
+    @Test
+    void marksAnArtifactIntegrityFailureTerminalDuringInspection() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        doThrow(new ImportArtifactIntegrityException(ImportArtifactIntegrityException.Reason.CORRUPT,
+                new IllegalStateException("digest mismatch")))
+                .when(registry).inspect(any(ImportModeKey.class), any(ImportReadContext.class));
+
+        worker.runAvailable(1);
+
+        ImportJob after = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(after.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(after.isWorkPending()).isFalse();
+        assertThat(after.getWorkPhase()).isNull();
+        assertThat(after.getLeaseToken()).isNull();
+    }
+
+    @Test
+    void storageCollisionReleasesReservationWithoutQueueingDeletion() {
+        User owner = createUser();
+        String storageKey = UUID.randomUUID().toString();
+        ImportJob reservation = uploadQuotaService.reserve(owner.getId(), ImportInputKind.SINGLE_LIST,
+                ImportSourceFormat.TRAKT_JSON, ImportPlatform.TRAKT, null, "UTC", storageKey, 5);
+
+        uploadQuotaService.markStorageCollision(owner.getId(), reservation.getId());
+
+        ImportJob failed = jobRepository.findById(reservation.getId()).orElseThrow();
+        assertThat(failed.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(failed.isWorkPending()).isFalse();
+        assertThat(failed.getWorkPhase()).isNull();
+        assertThat(failed.getUploadSizeBytes()).isZero();
+        assertThat(failed.getZipDigest()).isNull();
+        assertThat(cleanupTaskRepository.existsByStorageKey(storageKey)).isFalse();
+    }
 
     @BeforeEach
     void setUp() {
@@ -539,6 +613,60 @@ class ImportWorkerIntegrationTest {
         assertThatCode(() -> assertFileExists(storageKey)).doesNotThrowAnyException();
         assertThat(cleanupTaskRepository.existsByStorageKey(storageKey)).isTrue();
         assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.FAILED);
+    }
+
+    @Test
+    void staleCleanupAcknowledgementCannotReleaseQuotaForANewerClaim() throws Exception {
+        User owner = createUser();
+        String storageKey = storeFile("cleanup-claim-race");
+        ImportJob job = createStoredJob(owner.getId(), storageKey, 20, LocalDateTime.now(clock).plusDays(1));
+        job.setState(ImportJobState.FAILED);
+        job.setWorkPhase(null);
+        jobRepository.saveAndFlush(job);
+        uploadQuotaService.enqueueCleanup(storageKey);
+
+        CountDownLatch deleteStarted = new CountDownLatch(1);
+        CountDownLatch releaseDelete = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean blockFirstDelete = new java.util.concurrent.atomic.AtomicBoolean(true);
+        doAnswer(invocation -> {
+            if (blockFirstDelete.compareAndSet(true, false)) {
+                deleteStarted.countDown();
+                if (!releaseDelete.await(10, TimeUnit.SECONDS)) throw new IOException("cleanup test timed out");
+            }
+            return invocation.callRealMethod();
+        }).when(privateImportFileStore).delete(anyString());
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime newerClaim;
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<?> cleanup = executor.submit(() -> cleanupJob.runOnce(now.atZone(clock.getZone()).toInstant()));
+            assertThat(deleteStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            UUID cleanupTaskId = jdbc.queryForObject(
+                    "SELECT id FROM import_file_cleanup_tasks WHERE storage_key = ?", UUID.class, storageKey);
+            LocalDateTime claimedUntil = jdbc.queryForObject(
+                    "SELECT ready_at FROM import_file_cleanup_tasks WHERE id = ?", LocalDateTime.class, cleanupTaskId);
+            newerClaim = claimedUntil.plusSeconds(1);
+            jdbc.update("UPDATE import_file_cleanup_tasks SET ready_at = ? WHERE id = ?",
+                    newerClaim, cleanupTaskId);
+
+            releaseDelete.countDown();
+            cleanup.get(10, TimeUnit.SECONDS);
+        } finally {
+            releaseDelete.countDown();
+        }
+
+        UUID cleanupTaskId = jdbc.queryForObject(
+                "SELECT id FROM import_file_cleanup_tasks WHERE storage_key = ?", UUID.class, storageKey);
+        assertThat(jdbc.queryForObject("SELECT ready_at FROM import_file_cleanup_tasks WHERE id = ?",
+                LocalDateTime.class, cleanupTaskId)).isEqualTo(newerClaim);
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getUploadSizeBytes()).isEqualTo(20);
+        assertFileMissing(storageKey);
+
+        jdbc.update("UPDATE import_file_cleanup_tasks SET ready_at = ? WHERE id = ?",
+                now.minusSeconds(1), cleanupTaskId);
+        cleanupJob.runOnce(now.atZone(clock.getZone()).toInstant());
+        assertThat(cleanupTaskRepository.existsByStorageKey(storageKey)).isFalse();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getUploadSizeBytes()).isZero();
     }
 
     @Test

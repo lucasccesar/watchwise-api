@@ -154,6 +154,28 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
 
     @Override
     @Transactional
+    public void markStorageCollision(UUID ownerId, UUID jobId) {
+        lockQuota(ownerId);
+        ImportJob job = lockOwnedJob(ownerId, jobId);
+        if (job.getState() == ImportJobState.FAILED && job.getUploadSizeBytes() == 0
+                && job.getZipDigest() == null && job.getWorkPhase() == null) return;
+        if (job.isWorkPending() || job.getZipDigest() != null || job.getUploadSizeBytes() <= 0) {
+            throw new IllegalStateException("Import storage collision does not match a pending reservation");
+        }
+        job.setState(ImportJobState.FAILED);
+        job.setWorkPending(false);
+        job.setWorkPhase(null);
+        job.setNextRunAt(null);
+        job.setUploadSizeBytes(0);
+        job.setZipDigest(null);
+        job.setCheckpoint(null);
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
+        job.setUpdatedAt(LocalDateTime.now(clock));
+    }
+
+    @Override
+    @Transactional
     public void reactivate(UUID ownerId, UUID jobId) {
         lockQuota(ownerId);
         ImportJob job = lockOwnedJob(ownerId, jobId);

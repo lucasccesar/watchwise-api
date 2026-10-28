@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportSelectionDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.mapper.ImportJobMapper;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
+import com.watchwise.watchwise_api.platformimport.model.ImportArtifactReference;
 import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportModeKey;
@@ -27,6 +28,9 @@ import com.watchwise.watchwise_api.platformimport.service.ImportModeRegistry;
 import com.watchwise.watchwise_api.platformimport.service.ImportPreviewService;
 import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.ImportArtifactReader;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageUnavailableException;
+import com.watchwise.watchwise_api.platformimport.storage.ImportStorageKeyCollisionException;
 import org.springframework.data.domain.Page;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -54,6 +58,7 @@ public class ImportJobServiceImpl implements ImportJobService {
     private final ImportPreviewService importPreviewService;
     private final ImportUploadQuotaService uploadQuotaService;
     private final ImportFileStore importFileStore;
+    private final ImportArtifactReader importArtifactReader;
     private final ImportJobMapper importJobMapper;
     private final ImportLimits importLimits;
     private final Clock clock;
@@ -62,6 +67,7 @@ public class ImportJobServiceImpl implements ImportJobService {
     public ImportJobServiceImpl(ImportJobRepository importJobRepository, ImportModeRegistry importModeRegistry,
                                 ImportPreviewService importPreviewService,
                                 ImportUploadQuotaService uploadQuotaService, ImportFileStore importFileStore,
+                                ImportArtifactReader importArtifactReader,
                                 ImportJobMapper importJobMapper, ImportLimits importLimits, Clock clock,
                                 ObjectMapper objectMapper) {
         this.importJobRepository = importJobRepository;
@@ -69,6 +75,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         this.importPreviewService = importPreviewService;
         this.uploadQuotaService = uploadQuotaService;
         this.importFileStore = importFileStore;
+        this.importArtifactReader = importArtifactReader;
         this.importJobMapper = importJobMapper;
         this.importLimits = importLimits;
         this.clock = clock;
@@ -98,6 +105,14 @@ public class ImportJobServiceImpl implements ImportJobService {
             }
             uploadQuotaService.markStored(ownerId, reservation.getId(), storedFile);
         } catch (IOException | RuntimeException failure) {
+            if (failure instanceof ImportStorageKeyCollisionException) {
+                try {
+                    uploadQuotaService.markStorageCollision(ownerId, reservation.getId());
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw new ImportStorageUnavailableException(failure);
+            }
             try {
                 uploadQuotaService.markFailed(ownerId, reservation.getId());
             } catch (RuntimeException cleanupFailure) {
@@ -217,10 +232,15 @@ public class ImportJobServiceImpl implements ImportJobService {
             throw new ConflictException("The import source file is no longer available");
         }
         importModeRegistry.require(new ImportModeKey(job.getInputKind(), job.getSourceFormat()));
-        try (InputStream ignored = importFileStore.open(job.getStorageKey())) {
-        } catch (IOException exception) {
-            throw new ConflictException("The import source file is no longer available");
+        ImportArtifactReference artifact;
+        try {
+            artifact = new ImportArtifactReference(job.getStorageKey(), job.getUploadSizeBytes(), job.getZipDigest());
+        } catch (RuntimeException exception) {
+            throw new com.watchwise.watchwise_api.platformimport.storage.ImportArtifactIntegrityException(
+                    com.watchwise.watchwise_api.platformimport.storage.ImportArtifactIntegrityException.Reason.CORRUPT,
+                    exception);
         }
+        try (var ignored = importArtifactReader.open(artifact)) { }
         uploadQuotaService.reactivate(ownerId, jobId);
         return get(ownerId, jobId);
     }

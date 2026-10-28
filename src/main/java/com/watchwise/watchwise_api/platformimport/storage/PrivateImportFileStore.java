@@ -61,7 +61,7 @@ public class PrivateImportFileStore implements ImportFileStore {
     public StoredImportFile store(InputStream input, long limit, String generatedKey) throws IOException {
         if (limit <= 0 || limit > limits.maxUploadBytes()) throw new BadRequestException("Invalid import upload limit");
         Path target = resolve(generatedKey);
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Import storage key already exists");
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) throw new ImportStorageKeyCollisionException();
         if (!uploadSlots.tryAcquire()) throw new TooManyRequestsException("Too many concurrent import uploads");
         Path temporary = null;
         try {
