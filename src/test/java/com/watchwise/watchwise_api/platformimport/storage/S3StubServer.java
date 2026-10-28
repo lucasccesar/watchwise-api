@@ -37,6 +37,7 @@ public final class S3StubServer implements AutoCloseable {
     private final Map<String, ConcurrentLinkedQueue<Integer>> failures = new ConcurrentHashMap<>();
     private final AtomicBoolean disconnectNextPut = new AtomicBoolean();
     private final AtomicReference<Duration> delayNextGetBody = new AtomicReference<>();
+    private final AtomicReference<Integer> truncateNextGetBody = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
 
     private S3StubServer(String bucket) throws IOException {
@@ -82,6 +83,11 @@ public final class S3StubServer implements AutoCloseable {
             throw new IllegalArgumentException("S3 response delay must be positive");
         }
         delayNextGetBody.set(delay);
+    }
+
+    public void truncateNextGetBody(int afterBytes) {
+        if (afterBytes < 0) throw new IllegalArgumentException("Truncated response size cannot be negative");
+        truncateNextGetBody.set(afterBytes);
     }
 
     public byte[] storedBody(String path) {
@@ -184,8 +190,9 @@ public final class S3StubServer implements AutoCloseable {
     private Reply get(Request request) {
         StoredObject stored = objects.get(request.path());
         if (stored == null) return errorReply(404, "NoSuchKey");
+        Integer truncateAfter = truncateNextGetBody.getAndSet(null);
         return new Reply(200, objectHeaders(stored), stored.body().clone(), false,
-                delayNextGetBody.getAndSet(null));
+                delayNextGetBody.getAndSet(null), truncateAfter == null ? -1 : truncateAfter);
     }
 
     private Reply head(Request request) {
@@ -210,7 +217,7 @@ public final class S3StubServer implements AutoCloseable {
         String body = "<Error><Code>" + code + "</Code><Message>stub error</Message>"
                 + "<RequestId>s3-stub</RequestId></Error>";
         return new Reply(status, Map.of("Content-Type", "application/xml"),
-                body.getBytes(StandardCharsets.UTF_8), false, null);
+                body.getBytes(StandardCharsets.UTF_8), false, null, -1);
     }
 
     private void writeResponse(BufferedOutputStream output, String requestMethod, Reply reply) throws IOException {
@@ -239,7 +246,9 @@ public final class S3StubServer implements AutoCloseable {
                 throw new IOException("S3 test response was interrupted", exception);
             }
         }
-        output.write(reply.body());
+        int bodyBytes = reply.truncateAfterBytes() < 0
+                ? reply.body().length : Math.min(reply.body().length, reply.truncateAfterBytes());
+        output.write(reply.body(), 0, bodyBytes);
         output.flush();
     }
 
@@ -343,13 +352,13 @@ public final class S3StubServer implements AutoCloseable {
     private record StoredObject(byte[] body, Map<String, String> metadata, String etag) { }
 
     private record Reply(int status, Map<String, String> headers, byte[] body,
-                         boolean disconnect, Duration delay) {
+                         boolean disconnect, Duration delay, int truncateAfterBytes) {
         static Reply empty(int status, Map<String, String> headers) {
-            return new Reply(status, headers, new byte[0], false, null);
+            return new Reply(status, headers, new byte[0], false, null, -1);
         }
 
         static Reply disconnected() {
-            return new Reply(0, Map.of(), new byte[0], true, null);
+            return new Reply(0, Map.of(), new byte[0], true, null, -1);
         }
     }
 }

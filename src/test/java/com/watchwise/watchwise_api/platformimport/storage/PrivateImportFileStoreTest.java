@@ -24,6 +24,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Value;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.*;
@@ -39,6 +40,7 @@ class PrivateImportFileStoreTest {
                 .withUserConfiguration(ImportReaderTestConfiguration.class)
                 .withPropertyValues(
                         "app.import.storage-directory=" + storageDirectory,
+                        "app.import.staging-directory=" + storageDirectory.resolveSibling("component-scan-work"),
                         "app.import.max-upload-bytes=12345",
                         "app.import.max-concurrent-uploads-per-process=1")
                 .run(context -> {
@@ -160,6 +162,15 @@ class PrivateImportFileStoreTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean(destroyMethod = "close")
+        ImportTemporaryFiles importTemporaryFiles(ImportLimits limits,
+                                                  @Value("${app.import.staging-directory}") String stagingDirectory)
+                throws IOException {
+            return new ImportTemporaryFiles(Path.of(stagingDirectory), limits.maxUploadBytes(),
+                    51L * 1024 * 1024, limits.maxConcurrentUploadsPerProcess(),
+                    limits.maxConcurrentArtifactReadsPerProcess());
         }
     }
 }
