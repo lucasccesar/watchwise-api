@@ -74,6 +74,16 @@ class PrivateImportFileStoreTest {
     }
 
     @Test
+    void shouldClassifyMissingValidKeyAsArtifactIntegrityFailure() throws Exception {
+        PrivateImportFileStore store = new PrivateImportFileStore(root, new ImportLimits());
+        String missingKey = java.util.UUID.randomUUID().toString();
+        assertThatThrownBy(() -> store.open(missingKey))
+                .isInstanceOfSatisfying(ImportArtifactIntegrityException.class,
+                        failure -> assertThat(failure.reason())
+                                .isEqualTo(ImportArtifactIntegrityException.Reason.MISSING));
+    }
+
+    @Test
     @DisplayName("[store] Should Leave No File - When Limit Or Stream Failure Occurs")
     void shouldLeaveNoFileWhenLimitOrStreamFailureOccurs() throws Exception {
         PrivateImportFileStore store = new PrivateImportFileStore(root, new ImportLimits());

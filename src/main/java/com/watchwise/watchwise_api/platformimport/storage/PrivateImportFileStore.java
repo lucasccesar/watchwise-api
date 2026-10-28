@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.platformimport.model.StoredImportFile;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -26,6 +28,7 @@ import java.util.UUID;
 import java.util.concurrent.Semaphore;
 
 @Component
+@ConditionalOnProperty(prefix = "app.import.storage", name = "backend", havingValue = "local", matchIfMissing = true)
 public class PrivateImportFileStore implements ImportFileStore {
     private static final FileAttribute<?> PRIVATE_FILE_PERMISSIONS = PosixFilePermissions.asFileAttribute(
             java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
@@ -98,7 +101,11 @@ public class PrivateImportFileStore implements ImportFileStore {
 
     @Override
     public InputStream open(String generatedKey) throws IOException {
-        return Files.newInputStream(pathForReading(generatedKey), StandardOpenOption.READ);
+        try {
+            return Files.newInputStream(pathForReading(generatedKey), StandardOpenOption.READ);
+        } catch (NoSuchFileException exception) {
+            throw new ImportArtifactIntegrityException(ImportArtifactIntegrityException.Reason.MISSING, exception);
+        }
     }
 
     @Override
@@ -108,6 +115,10 @@ public class PrivateImportFileStore implements ImportFileStore {
 
     public Path pathForReading(String generatedKey) throws IOException {
         Path path = resolve(generatedKey);
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new ImportArtifactIntegrityException(ImportArtifactIntegrityException.Reason.MISSING,
+                    new NoSuchFileException(path.toString()));
+        }
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !path.toRealPath().startsWith(root)) {
             throw new BadRequestException("Invalid import storage key");
         }
@@ -126,9 +137,7 @@ public class PrivateImportFileStore implements ImportFileStore {
     }
 
     private Path resolve(String key) {
-        if (key == null || !key.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")) {
-            throw new BadRequestException("Invalid import storage key");
-        }
+        ImportStorageKeys.validate(key);
         Path path = root.resolve(key).normalize();
         if (!path.getParent().equals(root)) throw new BadRequestException("Invalid import storage key");
         return path;
