@@ -104,7 +104,7 @@ class TmdbClientDisplayDetailsTest {
         return new TmdbClient(restClient,
                 cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(),
                 searchCache(), searchCache(), searchCache(), searchCache(),
-                cache(), cache(), cache(), cache(), cache(), cache(), cache());
+                cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache());
     }
 
     private static <T> Cache<String, T> cache() {

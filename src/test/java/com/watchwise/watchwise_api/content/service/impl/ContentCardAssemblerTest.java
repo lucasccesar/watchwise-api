@@ -275,7 +275,7 @@ class ContentCardAssemblerTest {
         TmdbClient tmdbClient = new TmdbClient(
                 restClientBuilder.build(),
                 cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(),
-                cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache());
+                cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache());
         TmdbCardMetadataResolver realResolver = new TmdbCardMetadataResolver(tmdbClient);
 
         ContentCoordinate coordinate = movie("550");
