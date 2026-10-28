@@ -147,6 +147,11 @@ public final class ImportTemporaryFiles implements AutoCloseable {
         return multipartDirectory;
     }
 
+    public Path rootDirectory() {
+        ensureOpen();
+        return root;
+    }
+
     public MultipartUploadReservation admitMultipart() {
         settleMultipartFiles();
         synchronized (monitor) {

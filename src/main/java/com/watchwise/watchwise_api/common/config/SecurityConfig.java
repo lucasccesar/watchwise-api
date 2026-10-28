@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.common.security.PickCreationThrottleFilter;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.SpaCsrfTokenRequestHandler;
 import com.watchwise.watchwise_api.platformimport.config.ImportMultipartRequestGateFilter;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
@@ -75,8 +76,8 @@ public class SecurityConfig {
 
     @Bean
     public ImportMultipartRequestGateFilter importMultipartRequestGateFilter(
-            ImportLimits importLimits, ObjectMapper objectMapper, Clock clock) {
-        return new ImportMultipartRequestGateFilter(importLimits, objectMapper, clock);
+            ImportTemporaryFiles temporaryFiles, ObjectMapper objectMapper, Clock clock) {
+        return new ImportMultipartRequestGateFilter(temporaryFiles, objectMapper, clock);
     }
 
     @Bean

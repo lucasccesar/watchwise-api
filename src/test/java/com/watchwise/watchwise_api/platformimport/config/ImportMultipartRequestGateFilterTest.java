@@ -1,15 +1,18 @@
 package com.watchwise.watchwise_api.platformimport.config;
 
-import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
 import jakarta.servlet.ServletException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -21,12 +24,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ImportMultipartRequestGateFilterTest {
 
     private ImportMultipartRequestGateFilter filter;
+    private ImportTemporaryFiles temporaryFiles;
+
+    @TempDir
+    Path root;
 
     @BeforeEach
-    void setUp() {
-        ImportLimits limits = new ImportLimits();
-        limits.setMaxConcurrentUploadsPerProcess(1);
-        filter = new ImportMultipartRequestGateFilter(limits, new ObjectMapper(), Clock.systemUTC());
+    void setUp() throws Exception {
+        temporaryFiles = new ImportTemporaryFiles(root.resolve("work"), 1024, 2048, 1, 1);
+        filter = new ImportMultipartRequestGateFilter(temporaryFiles, new ObjectMapper(), Clock.systemUTC());
+    }
+
+    @AfterEach
+    void closeTemporaryFiles() {
+        temporaryFiles.close();
     }
 
     @Test
@@ -55,6 +66,7 @@ class ImportMultipartRequestGateFilterTest {
         firstRequest.start();
 
         assertThat(firstRequestEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(temporaryFiles.reservedBytes()).isEqualTo(2048);
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(importMultipartRequest(), response, (request, servletResponse) -> {
             throw new AssertionError("A saturated upload must not reach the multipart resolver");
@@ -69,6 +81,7 @@ class ImportMultipartRequestGateFilterTest {
         firstRequest.join(TimeUnit.SECONDS.toMillis(5));
         assertThat(firstRequest.isAlive()).isFalse();
         assertThat(firstFailure.get()).isNull();
+        assertThat(temporaryFiles.reservedBytes()).isZero();
     }
 
     @Test
@@ -95,6 +108,7 @@ class ImportMultipartRequestGateFilterTest {
         });
         firstRequest.start();
         assertThat(firstRequestEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(temporaryFiles.reservedBytes()).isEqualTo(2048);
 
         MockHttpServletRequest unrelatedRequest = new MockHttpServletRequest("POST", "/api/v1/other");
         unrelatedRequest.setContextPath("/api/v1");
@@ -122,6 +136,7 @@ class ImportMultipartRequestGateFilterTest {
         releaseFirstRequest.countDown();
         firstRequest.join(TimeUnit.SECONDS.toMillis(5));
         assertThat(firstRequest.isAlive()).isFalse();
+        assertThat(temporaryFiles.reservedBytes()).isZero();
     }
 
     @Test
@@ -131,12 +146,14 @@ class ImportMultipartRequestGateFilterTest {
                 (request, response) -> { throw new ServletException("resolver failed"); }))
                 .isInstanceOf(ServletException.class)
                 .hasMessage("resolver failed");
+        assertThat(temporaryFiles.reservedBytes()).isZero();
 
         MockHttpServletResponse response = new MockHttpServletResponse();
         assertThatCode(() -> filter.doFilter(importMultipartRequest(), response,
                 (request, servletResponse) -> ((jakarta.servlet.http.HttpServletResponse) servletResponse).setStatus(204)))
                 .doesNotThrowAnyException();
         assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(temporaryFiles.reservedBytes()).isZero();
     }
 
     private MockHttpServletRequest importMultipartRequest() {

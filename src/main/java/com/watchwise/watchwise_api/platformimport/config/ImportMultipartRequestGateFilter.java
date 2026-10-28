@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.platformimport.config;
 
-import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
+import com.watchwise.watchwise_api.platformimport.storage.MultipartUploadReservation;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,18 +18,15 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Semaphore;
 
 public final class ImportMultipartRequestGateFilter extends OncePerRequestFilter {
-    private final Semaphore uploadSlots;
+    private final ImportTemporaryFiles temporaryFiles;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    public ImportMultipartRequestGateFilter(ImportLimits importLimits, ObjectMapper objectMapper, Clock clock) {
-        if (importLimits.maxConcurrentUploadsPerProcess() < 1) {
-            throw new IllegalArgumentException("Import upload concurrency limit must be positive");
-        }
-        this.uploadSlots = new Semaphore(importLimits.maxConcurrentUploadsPerProcess());
+    public ImportMultipartRequestGateFilter(ImportTemporaryFiles temporaryFiles,
+                                            ObjectMapper objectMapper, Clock clock) {
+        this.temporaryFiles = temporaryFiles;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -51,22 +50,29 @@ public final class ImportMultipartRequestGateFilter extends OncePerRequestFilter
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!uploadSlots.tryAcquire()) {
-            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            objectMapper.writeValue(response.getOutputStream(), Map.of(
-                    "timestamp", LocalDateTime.now(clock).toString(),
-                    "status", HttpStatus.TOO_MANY_REQUESTS.value(),
-                    "error", "Too Many Requests",
-                    "message", "Too many concurrent import uploads",
-                    "path", request.getRequestURI()));
+        MultipartUploadReservation reservation;
+        try {
+            reservation = temporaryFiles.admitMultipart();
+        } catch (TooManyRequestsException exception) {
+            writeTooManyRequests(request, response);
             return;
         }
         try {
             filterChain.doFilter(request, response);
         } finally {
-            uploadSlots.release();
+            reservation.close();
         }
+    }
+
+    private void writeTooManyRequests(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        objectMapper.writeValue(response.getOutputStream(), Map.of(
+                "timestamp", LocalDateTime.now(clock).toString(),
+                "status", HttpStatus.TOO_MANY_REQUESTS.value(),
+                "error", "Too Many Requests",
+                "message", "Too many concurrent import uploads",
+                "path", request.getRequestURI()));
     }
 }

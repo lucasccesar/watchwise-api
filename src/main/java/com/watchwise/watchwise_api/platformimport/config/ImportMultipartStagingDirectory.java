@@ -1,59 +1,41 @@
 package com.watchwise.watchwise_api.platformimport.config;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.DependsOn;
-import org.springframework.stereotype.Component;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileAttribute;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.nio.file.attribute.PosixFilePermission;
-import java.util.Set;
+import java.util.Locale;
 
-@Component
-@DependsOn("privateImportFileStore")
 public final class ImportMultipartStagingDirectory {
-    private static final Set<PosixFilePermission> PRIVATE_PERMISSIONS =
-            PosixFilePermissions.fromString("rwx------");
-
     private final Path directory;
 
     public ImportMultipartStagingDirectory(
-            @Value("${app.import.staging-directory}") String configuredPath,
-            @Value("${app.import.storage-directory}") String configuredStoragePath) throws IOException {
-        Path path = Path.of(configuredPath);
-        Path storagePath = Path.of(configuredStoragePath);
-        if (!path.isAbsolute() || !storagePath.isAbsolute()) {
-            throw new IllegalArgumentException("Import storage directories must be absolute");
+            ImportTemporaryFiles temporaryFiles, String storageBackend, String configuredStoragePath) throws IOException {
+        if (temporaryFiles == null || storageBackend == null) {
+            throw new IllegalArgumentException("Import temporary storage configuration is required");
         }
-        Path normalizedPath = path.normalize();
-        Path normalizedStoragePath = storagePath.normalize();
-        Path temporaryRoot = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
-        if (normalizedPath.getParent() == null || normalizedPath.equals(temporaryRoot)
-                || temporaryRoot.startsWith(normalizedPath) || overlaps(normalizedPath, normalizedStoragePath)) {
-            throw new IllegalArgumentException("Import multipart staging directory must be dedicated and separate from durable storage");
+        String backend = storageBackend.toLowerCase(Locale.ROOT);
+        if (!backend.equals("local") && !backend.equals("r2")) {
+            throw new IllegalArgumentException("Unsupported import storage backend");
         }
 
-        Path durableRoot = storagePath.toRealPath();
-        Path existingAncestor = normalizedPath;
-        while (existingAncestor != null && !Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS)) {
-            existingAncestor = existingAncestor.getParent();
-        }
-        if (existingAncestor == null) throw new IllegalArgumentException("Import multipart staging path has no existing ancestor");
-        Path prospectivePath = existingAncestor.toRealPath()
-                .resolve(existingAncestor.relativize(normalizedPath)).normalize();
-        if (overlaps(prospectivePath, durableRoot)) {
-            throw new IllegalArgumentException("Import multipart staging directory must be separate from durable storage");
+        Path temporaryRoot = temporaryFiles.rootDirectory().toRealPath();
+        this.directory = temporaryFiles.multipartDirectory().toRealPath();
+        if (!directory.startsWith(temporaryRoot)) {
+            throw new IllegalArgumentException("Import multipart directory must be inside its private root");
         }
 
-        createPrivateDirectory(normalizedPath);
-        this.directory = normalizedPath.toRealPath();
-        if (overlaps(directory, durableRoot)) {
-            throw new IllegalArgumentException("Import multipart staging directory must be separate from durable storage");
+        if (backend.equals("local")) {
+            if (configuredStoragePath == null || configuredStoragePath.isBlank()) {
+                throw new IllegalArgumentException("Local import storage directory is required");
+            }
+            Path durableRoot = prospectivePath(Path.of(configuredStoragePath));
+            if (overlaps(temporaryRoot, durableRoot)) {
+                throw new IllegalArgumentException(
+                        "Import temporary root must be separate from durable local storage");
+            }
         }
     }
 
@@ -61,30 +43,31 @@ public final class ImportMultipartStagingDirectory {
         return directory;
     }
 
-    private void createPrivateDirectory(Path path) throws IOException {
-        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            if (Files.isSymbolicLink(path) || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IllegalArgumentException("Import multipart staging path must be a real directory");
-            }
-            requirePrivatePermissions(path);
-            return;
+    private Path prospectivePath(Path path) throws IOException {
+        if (!path.isAbsolute()) throw new IllegalArgumentException("Local import storage path must be absolute");
+        Path normalized = path.normalize();
+        if (normalized.getParent() == null) {
+            throw new IllegalArgumentException("Local import storage path must be a dedicated directory");
         }
+        rejectSymlinkAncestors(normalized);
 
-        Path parent = path.getParent();
-        Files.createDirectories(parent);
-        if (Files.getFileAttributeView(parent, PosixFileAttributeView.class) != null) {
-            FileAttribute<?> permissions = PosixFilePermissions.asFileAttribute(PRIVATE_PERMISSIONS);
-            Files.createDirectory(path, permissions);
-        } else {
-            Files.createDirectory(path);
+        Path existing = normalized;
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
         }
+        if (existing == null) {
+            throw new IllegalArgumentException("Local import storage path has no existing ancestor");
+        }
+        return existing.toRealPath().resolve(existing.relativize(normalized)).normalize();
     }
 
-    private void requirePrivatePermissions(Path path) throws IOException {
-        if (Files.getFileAttributeView(path, PosixFileAttributeView.class) == null) return;
-        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
-        if (!permissions.equals(PRIVATE_PERMISSIONS)) {
-            throw new IllegalStateException("Existing import multipart staging directory must already have private permissions");
+    private void rejectSymlinkAncestors(Path path) {
+        Path current = path.getRoot();
+        for (Path part : path) {
+            current = current.resolve(part);
+            if (Files.isSymbolicLink(current)) {
+                throw new IllegalArgumentException("Local import storage path cannot contain symbolic links");
+            }
         }
     }
 

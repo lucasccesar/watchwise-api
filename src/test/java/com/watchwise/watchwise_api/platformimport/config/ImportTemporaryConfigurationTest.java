@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ImportTemporaryConfigurationTest {
     @TempDir
@@ -21,12 +22,34 @@ class ImportTemporaryConfigurationTest {
         var configuration = new ImportTemporaryConfiguration();
 
         try (ImportTemporaryFiles files = configuration.importTemporaryFiles(
-                new ImportLimits(), configuredRoot.toString(), DataSize.ofMegabytes(51))) {
+                new ImportLimits(), configuredRoot.toString(), "", DataSize.ofMegabytes(51))) {
+            assertThat(files.rootDirectory()).isEqualTo(configuredRoot);
             assertThat(files.multipartDirectory()).isDirectory();
             assertThat(files.multipartDirectory()).startsWith(configuredRoot);
             assertThat(Files.isSymbolicLink(files.multipartDirectory())).isFalse();
         }
 
         assertThat(configuredRoot.resolveSibling("work")).isDirectory();
+    }
+
+    @Test
+    void usesTheStagingBaseWhenTheTemporaryRootIsNotConfigured() throws Exception {
+        Path stagingBase = root.resolve("staging-base");
+        var configuration = new ImportTemporaryConfiguration();
+
+        try (var files = configuration.importTemporaryFiles(
+                new ImportLimits(), "", stagingBase.toString(), DataSize.ofMegabytes(51))) {
+            assertThat(files.rootDirectory()).isEqualTo(stagingBase);
+            assertThat(files.multipartDirectory()).startsWith(stagingBase);
+        }
+    }
+
+    @Test
+    void rejectsConflictingTemporaryAndStagingRoots() {
+        var configuration = new ImportTemporaryConfiguration();
+        assertThatThrownBy(() -> configuration.importTemporaryFiles(new ImportLimits(),
+                root.resolve("temporary").toString(), root.resolve("staging").toString(),
+                DataSize.ofMegabytes(51)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

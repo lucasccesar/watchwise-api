@@ -1,48 +1,56 @@
 package com.watchwise.watchwise_api.platformimport.config;
 
-import org.junit.jupiter.api.DisplayName;
+import com.watchwise.watchwise_api.platformimport.storage.ImportTemporaryFiles;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ImportMultipartStagingDirectoryTest {
-
     @TempDir
     Path tempDirectory;
 
     @Test
-    @DisplayName("[ImportMultipartStagingDirectory] Should Refuse Broad Existing Permissions Without Changing Them - When Staging Path Is Shared")
-    void shouldRefuseBroadExistingPermissionsWithoutChangingThemWhenStagingPathIsShared() throws IOException {
-        assumeTrue(Files.getFileAttributeView(tempDirectory, PosixFileAttributeView.class) != null);
-        Path staging = Files.createDirectory(tempDirectory.resolve("shared-staging"));
-        Set<PosixFilePermission> sharedPermissions = PosixFilePermissions.fromString("rwxr-xr-x");
-        Files.setPosixFilePermissions(staging, sharedPermissions);
-        Path storage = Files.createDirectory(tempDirectory.resolve("durable-storage"));
-
-        assertThatThrownBy(() -> new ImportMultipartStagingDirectory(staging.toString(), storage.toString()))
-                .isInstanceOf(IllegalStateException.class);
-
-        assertThat(Files.getPosixFilePermissions(staging)).isEqualTo(sharedPermissions);
+    void usesTheManagerOwnedMultipartDirectoryWithR2() throws Exception {
+        try (var temporary = newTemporaryFiles("r2")) {
+            var staging = new ImportMultipartStagingDirectory(temporary, "r2", "");
+            assertThat(staging.directory()).isEqualTo(temporary.multipartDirectory().toRealPath());
+            assertThat(staging.directory()).isDirectory();
+            assertThat(Files.isSymbolicLink(staging.directory())).isFalse();
+        }
     }
 
     @Test
-    @DisplayName("[ImportMultipartStagingDirectory] Should Reject Overlapping Staging And Durable Roots - When Configured Paths Nest")
-    void shouldRejectOverlappingStagingAndDurableRootsWhenConfiguredPathsNest() throws IOException {
-        Path staging = Files.createDirectory(tempDirectory.resolve("shared-import-root"));
-        Path storage = Files.createDirectory(staging.resolve("durable"));
+    void allowsLocalDurableStorageOutsideTheTemporaryRoot() throws Exception {
+        Path durable = Files.createDirectory(tempDirectory.resolve("durable-imports"));
+        try (var temporary = newTemporaryFiles("local")) {
+            var staging = new ImportMultipartStagingDirectory(temporary, "local", durable.toString());
+            assertThat(staging.directory()).isEqualTo(temporary.multipartDirectory().toRealPath());
+        }
+    }
 
-        assertThatThrownBy(() -> new ImportMultipartStagingDirectory(staging.toString(), storage.toString()))
-                .isInstanceOf(IllegalArgumentException.class);
+    @Test
+    void rejectsLocalDurableStorageNestedUnderTheTemporaryRoot() throws Exception {
+        try (var temporary = newTemporaryFiles("nested")) {
+            Path durable = temporary.multipartDirectory().getParent().getParent().resolve("durable");
+            assertThatThrownBy(() -> new ImportMultipartStagingDirectory(temporary, "local", durable.toString()))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void requiresLocalDurableStorageWhenLocalBackendIsSelected() throws Exception {
+        try (var temporary = newTemporaryFiles("missing-durable")) {
+            assertThatThrownBy(() -> new ImportMultipartStagingDirectory(temporary, "local", ""))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    private ImportTemporaryFiles newTemporaryFiles(String name) throws Exception {
+        return new ImportTemporaryFiles(tempDirectory.resolve(name), 1024, 2048, 1, 1);
     }
 }
