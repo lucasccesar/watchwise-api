@@ -4,11 +4,13 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsClea
 import com.watchwise.watchwise_api.dailygame.service.DailyChallengeGenerationService;
 import com.watchwise.watchwise_api.dailygame.generation.DailyGameGenerationJob;
 import com.watchwise.watchwise_api.dailygame.tracking.DailyGameAttemptDetailsCleanupJob;
+import com.watchwise.watchwise_api.platformimport.config.ImportWorkerProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -32,11 +34,13 @@ class DailyGameProductionConfigurationTest {
                     .isEqualTo("0 */10 * * * *");
             assertThat(context.getEnvironment().getProperty("app.daily-games.attempt-details-cleanup.cron"))
                     .isEqualTo("0 5 0 * * *");
+            assertThat(context.getBean(ImportWorkerProperties.class).fixedDelayMs()).isEqualTo(5000);
         }
     }
 
     @Configuration
     @EnableScheduling
+    @EnableConfigurationProperties(ImportWorkerProperties.class)
     @PropertySource("classpath:application-prod.properties")
     static class ProductionSchedulingConfiguration {
 
