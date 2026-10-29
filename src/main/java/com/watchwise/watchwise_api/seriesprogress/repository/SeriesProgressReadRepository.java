@@ -135,6 +135,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                        ee.season_number,
                        ee.episode_number,
                        ee.effective_date,
+                       ee.created_at,
                        ROW_NUMBER() OVER (
                            PARTITION BY ee.series_tmdb_id
                            ORDER BY ee.effective_date DESC, ee.created_at DESC, ee.diary_entry_id DESC
@@ -150,6 +151,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                        mp.max_season_number,
                        mpe.max_episode_number,
                        lw.effective_date AS last_watched_date,
+                       lw.created_at AS last_watched_created_at,
                        lw.season_number AS last_watched_season_number,
                        lw.episode_number AS last_watched_episode_number,
                        metadata.regular_released_episode_count AS total_released_episode_count,
@@ -193,7 +195,9 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             FROM candidate_rows
             ORDER BY
                 CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'ASC' THEN last_watched_date END ASC NULLS LAST,
+                CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'ASC' THEN last_watched_created_at END ASC NULLS LAST,
                 CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'DESC' THEN last_watched_date END DESC NULLS LAST,
+                CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'DESC' THEN last_watched_created_at END DESC NULLS LAST,
                 CASE WHEN :sort = 'LAST_RELEASED' AND :direction = 'ASC' THEN last_released_episode_date END ASC NULLS LAST,
                 CASE WHEN :sort = 'LAST_RELEASED' AND :direction = 'DESC' THEN last_released_episode_date END DESC NULLS LAST,
                 CASE WHEN :sort = 'REMAINING_EPISODES' AND :direction = 'ASC' THEN remaining_episode_count END ASC NULLS LAST,
