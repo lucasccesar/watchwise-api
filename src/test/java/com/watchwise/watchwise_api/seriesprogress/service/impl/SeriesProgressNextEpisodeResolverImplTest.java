@@ -50,6 +50,7 @@ class SeriesProgressNextEpisodeResolverImplTest {
         assertThat(result.seasonNumber()).isEqualTo(1);
         assertThat(result.episodeNumber()).isEqualTo(2);
         assertThat(result.title()).isEqualTo("Two");
+        assertThat(result.tmdbVoteAverage()).isEqualTo(8.4);
         assertThat(result.availableToWatch()).isTrue();
     }
 
@@ -153,6 +154,6 @@ class SeriesProgressNextEpisodeResolverImplTest {
     }
 
     private TmdbEpisodeSummary episode(Integer number, String name, String airDate) {
-        return new TmdbEpisodeSummary(number, name, null, airDate, 50, "/still.jpg", null);
+        return new TmdbEpisodeSummary(number, name, null, airDate, 50, "/still.jpg", null, 8.4);
     }
 }

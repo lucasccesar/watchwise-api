@@ -454,8 +454,10 @@ class SummaryServiceImplTest {
         DiaryEntry episodeEntry = buildDiaryEntry(episodeContent, now);
         when(diaryEntryRepository.findRecentHomeEntries(eq(lucasId), any(), any()))
                 .thenReturn(List.of(episodeEntry, movieEntry));
-        ContentCardDTO movieCard = cardFor(movieContent, "Fight Club", "https://image.tmdb.org/t/p/w342/lucas-movie.png");
-        ContentCardDTO episodeCard = cardFor(episodeContent, "Pilot", "https://image.tmdb.org/t/p/w342/lucas-episode.png");
+        ContentCardDTO movieCard = cardFor(
+                movieContent, "Fight Club", "https://image.tmdb.org/t/p/w342/lucas-movie.png", 7.5);
+        ContentCardDTO episodeCard = cardFor(
+                episodeContent, "Pilot", "https://image.tmdb.org/t/p/w342/lucas-episode.png", 8.4);
         ContentRefDTO socialContent = new ContentRefDTO(movieContent.getId(), movieContent.getTmdbId(),
                 movieContent.getType(), movieContent.getSeriesTmdbId(), movieContent.getSeasonNumber(),
                 movieContent.getEpisodeNumber(), false, false, now, now);
@@ -478,6 +480,7 @@ class SummaryServiceImplTest {
         JsonNode json = serialize(result);
         JsonNode recentlyWatchedCard = json.get("recentlyWatched").get(0).get("card");
         assertThat(recentlyWatchedCard.get("title").asString()).isEqualTo("Pilot");
+        assertThat(recentlyWatchedCard.get("tmdbVoteAverage").asDouble()).isEqualTo(8.4);
         assertThat(recentlyWatchedCard.get("stats").isNull()).isTrue();
         assertThat(recentlyWatchedCard.get("viewerState").isNull()).isTrue();
         assertThat(json.get("socialActivities").get(0).get("card").get("title").asString())
@@ -489,13 +492,20 @@ class SummaryServiceImplTest {
         assertThat(context.getValue().posterUserId()).isEqualTo(lucasId);
         assertThat(context.getValue().viewerId()).isNull();
         assertThat(fields.getValue()).containsExactlyInAnyOrder(
-                ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.SOCIAL_METADATA);
+                ContentCardFieldSet.BASIC_METADATA,
+                ContentCardFieldSet.TMDB_VOTE_AVERAGE,
+                ContentCardFieldSet.SOCIAL_METADATA);
     }
 
     private ContentCardDTO cardFor(Content content, String title, String customPosterUrl) {
+        return cardFor(content, title, customPosterUrl, null);
+    }
+
+    private ContentCardDTO cardFor(
+            Content content, String title, String customPosterUrl, Double tmdbVoteAverage) {
         return new ContentCardDTO(content.getId(), content.getType(), content.getTmdbId(),
                 content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), title,
-                "/poster.jpg", customPosterUrl, LocalDate.of(1999, 10, 15), 1999,
+                "/poster.jpg", customPosterUrl, LocalDate.of(1999, 10, 15), 1999, tmdbVoteAverage,
                 content.getRuntimeMinutes(), null, null, null, null, null, null,
                 ContentPreviewStatus.AVAILABLE);
     }

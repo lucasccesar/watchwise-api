@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -192,7 +193,13 @@ public class ContentCardAssembler {
         if (fields == null || fields.isEmpty()) {
             return Set.of();
         }
-        return fields.stream().filter(Objects::nonNull).collect(Collectors.toUnmodifiableSet());
+        Set<ContentCardFieldSet> normalized = fields.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(ContentCardFieldSet.class)));
+        if (normalized.contains(ContentCardFieldSet.TMDB_VOTE_AVERAGE)) {
+            normalized.add(ContentCardFieldSet.BASIC_METADATA);
+        }
+        return Set.copyOf(normalized);
     }
 
     private Map<UUID, ContentStatsResponseDTO> statsByContentId(Collection<UUID> contentIds) {
@@ -287,6 +294,9 @@ public class ContentCardAssembler {
         List<String> genres = spec.genres() != null
                 ? spec.genres()
                 : metadata == null ? null : metadata.genres();
+        Double tmdbVoteAverage = requestedFields.contains(ContentCardFieldSet.TMDB_VOTE_AVERAGE)
+                ? metadata == null ? null : metadata.voteAverage()
+                : null;
         ContentCardStatsDTO stats = requestedFields.contains(ContentCardFieldSet.STATS)
                 ? toStats(data.contentId(), data.contentId() == null
                         ? null
@@ -311,6 +321,7 @@ public class ContentCardAssembler {
                 customPosterUrl,
                 releaseDate,
                 releaseDate == null ? null : releaseDate.getYear(),
+                tmdbVoteAverage,
                 runtimeMinutes,
                 null,
                 numberOfSeasons,

@@ -108,6 +108,7 @@ public class SeriesProgressNextEpisodeResolverImpl implements SeriesProgressNext
                 releaseDate,
                 episode.runtime(),
                 episode.stillPath(),
+                episode.voteAverage(),
                 releaseDate == null || !releaseDate.isAfter(today));
     }
 

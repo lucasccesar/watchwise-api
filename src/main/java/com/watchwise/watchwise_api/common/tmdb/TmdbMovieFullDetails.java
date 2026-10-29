@@ -28,7 +28,36 @@ public record TmdbMovieFullDetails(
         String status,
         @JsonProperty("external_ids") TmdbExternalIds externalIds,
         @JsonProperty("release_dates") TmdbMovieReleaseDates releaseDates,
-        String homepage) {
+        String homepage,
+        @JsonProperty("vote_average") Double voteAverage) {
+
+    public TmdbMovieFullDetails(
+            String id,
+            String title,
+            String originalTitle,
+            String originalLanguage,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String releaseDate,
+            Integer runtime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            TmdbCredits credits,
+            TmdbWatchProviders watchProviders,
+            TmdbMovieAlternativeTitles alternativeTitles,
+            Long budget,
+            Long revenue,
+            List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos,
+            String status,
+            TmdbExternalIds externalIds,
+            TmdbMovieReleaseDates releaseDates,
+            String homepage) {
+        this(id, title, originalTitle, originalLanguage, overview, posterPath, backdropPath, releaseDate, runtime,
+                genres, productionCountries, credits, watchProviders, alternativeTitles, budget, revenue,
+                productionCompanies, videos, status, externalIds, releaseDates, homepage, null);
+    }
 
     public TmdbMovieFullDetails(String id, String title, TmdbMovieReleaseDates releaseDates) {
         this(id, title, null, null, null, null, null, null, null, null, null,

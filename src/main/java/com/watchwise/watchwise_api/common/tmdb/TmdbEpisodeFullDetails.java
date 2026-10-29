@@ -16,7 +16,23 @@ public record TmdbEpisodeFullDetails(
         Integer runtime,
         @JsonProperty("still_path") String stillPath,
         @JsonProperty("guest_stars") List<TmdbGuestStar> guestStars,
-        @JsonProperty("external_ids") TmdbExternalIds externalIds) {
+        @JsonProperty("external_ids") TmdbExternalIds externalIds,
+        @JsonProperty("vote_average") Double voteAverage) {
+
+    public TmdbEpisodeFullDetails(
+            Integer id,
+            String name,
+            String overview,
+            String airDate,
+            Integer episodeNumber,
+            Integer seasonNumber,
+            Integer runtime,
+            String stillPath,
+            List<TmdbGuestStar> guestStars,
+            TmdbExternalIds externalIds) {
+        this(id, name, overview, airDate, episodeNumber, seasonNumber, runtime, stillPath, guestStars,
+                externalIds, null);
+    }
 
     public TmdbEpisodeFullDetails(
             Integer id,
@@ -28,6 +44,6 @@ public record TmdbEpisodeFullDetails(
             Integer runtime,
             String stillPath,
             List<TmdbGuestStar> guestStars) {
-        this(id, name, overview, airDate, episodeNumber, seasonNumber, runtime, stillPath, guestStars, null);
+        this(id, name, overview, airDate, episodeNumber, seasonNumber, runtime, stillPath, guestStars, null, null);
     }
 }

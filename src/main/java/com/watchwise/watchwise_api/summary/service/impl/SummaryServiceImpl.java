@@ -106,7 +106,9 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
     private static final Set<ContentType> HOME_WATCHED_CONTENT_TYPES = Set.of(ContentType.MOVIE, ContentType.EPISODE);
     private static final Set<ContentCardFieldSet> HOME_CARD_FIELDS = Set.of(
-            ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.SOCIAL_METADATA);
+            ContentCardFieldSet.BASIC_METADATA,
+            ContentCardFieldSet.TMDB_VOTE_AVERAGE,
+            ContentCardFieldSet.SOCIAL_METADATA);
     private static final int MONTH_TOP_LIMIT = 6;
     private static final int YEAR_TOP_LIMIT = 10;
     private static final int ALL_TIME_TOP_LIMIT = 10;

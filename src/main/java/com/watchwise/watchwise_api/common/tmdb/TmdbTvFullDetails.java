@@ -31,7 +31,40 @@ public record TmdbTvFullDetails(
         String status,
         @JsonProperty("external_ids") TmdbExternalIds externalIds,
         List<TmdbNetwork> networks,
-        String homepage) {
+        String homepage,
+        @JsonProperty("vote_average") Double voteAverage) {
+
+    public TmdbTvFullDetails(
+            String id,
+            String name,
+            String originalName,
+            String originalLanguage,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String firstAirDate,
+            List<Integer> episodeRunTime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            List<TmdbCreator> createdBy,
+            List<TmdbSeasonSummary> seasons,
+            TmdbNextEpisode nextEpisodeToAir,
+            TmdbAggregateCredits aggregateCredits,
+            TmdbWatchProviders watchProviders,
+            TmdbTvAlternativeTitles alternativeTitles,
+            Integer numberOfSeasons,
+            Integer numberOfEpisodes,
+            List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos,
+            String status,
+            TmdbExternalIds externalIds,
+            List<TmdbNetwork> networks,
+            String homepage) {
+        this(id, name, originalName, originalLanguage, overview, posterPath, backdropPath, firstAirDate,
+                episodeRunTime, genres, productionCountries, createdBy, seasons, nextEpisodeToAir,
+                aggregateCredits, watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes,
+                productionCompanies, videos, status, externalIds, networks, homepage, null);
+    }
 
     public TmdbTvFullDetails(
             String id,

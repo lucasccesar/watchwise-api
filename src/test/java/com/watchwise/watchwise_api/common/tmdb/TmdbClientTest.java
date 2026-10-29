@@ -546,6 +546,7 @@ class TmdbClientTest {
                 .andRespond(withSuccess("""
                         {"id": 603, "title": "The Matrix", "poster_path": "/matrix.jpg",
                          "release_date": "1999-03-31", "runtime": 136,
+                         "vote_average": 8.7,
                          "genres": [{"id":878,"name":"Science Fiction"},{"id":28,"name":"Action"}]}
                         """, MediaType.APPLICATION_JSON));
 
@@ -555,7 +556,7 @@ class TmdbClientTest {
         assertThat(result).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found -> {
             assertThat(found.value()).isEqualTo(new TmdbCardMetadata(
                     "The Matrix", "/matrix.jpg", "1999-03-31", 136,
-                    List.of("Science Fiction", "Action"), null));
+                    List.of("Science Fiction", "Action"), null, null, 8.7));
         });
         mockServer.verify();
     }
@@ -568,6 +569,7 @@ class TmdbClientTest {
                         {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg",
                          "first_air_date":"2008-01-20","episode_run_time":[47],
                          "genres":[{"id":18,"name":"Drama"},{"id":80,"name":"Crime"}],
+                         "vote_average":9.1,
                          "number_of_seasons":5}
                         """, MediaType.APPLICATION_JSON));
 
@@ -577,7 +579,7 @@ class TmdbClientTest {
         assertThat(result).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found ->
                 assertThat(found.value()).isEqualTo(new TmdbCardMetadata(
                         "Breaking Bad", "/breaking-bad.jpg", "2008-01-20", 47,
-                        List.of("Drama", "Crime"), 5)));
+                        List.of("Drama", "Crime"), 5, null, 9.1)));
         mockServer.verify();
     }
 
@@ -633,14 +635,17 @@ class TmdbClientTest {
         mockServer.expect(requestTo(
                         "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=aggregate_credits,watch/providers&language=en-US"))
                 .andRespond(withSuccess("""
-                        {"id": 3572, "name": "Season 1", "season_number": 1, "episodes": []}
+                        {"id": 3572, "name": "Season 1", "season_number": 1, "vote_average": 8.4,
+                         "episodes": [{"episode_number": 1, "vote_average": 9.1}]}
                         """, MediaType.APPLICATION_JSON));
 
         Optional<TmdbSeasonFullDetails> result = tmdbClient.getSeasonFullDetails("1396", 1, "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Season 1");
-        assertThat(result.get().episodes()).isEmpty();
+        assertThat(result.get().voteAverage()).isEqualTo(8.4);
+        assertThat(result.get().episodes()).singleElement()
+                .satisfies(episode -> assertThat(episode.voteAverage()).isEqualTo(9.1));
     }
 
     @Test
@@ -650,6 +655,7 @@ class TmdbClientTest {
                         "https://api.themoviedb.org/3/tv/1396/season/1/episode/1?append_to_response=external_ids&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": 62085, "name": "Pilot", "episode_number": 1, "season_number": 1,
+                         "vote_average": 8.6,
                          "guest_stars": [{"id": 17419, "name": "John Doe", "character": "Neighbor"}]}
                         """, MediaType.APPLICATION_JSON));
 
@@ -657,6 +663,7 @@ class TmdbClientTest {
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Pilot");
+        assertThat(result.get().voteAverage()).isEqualTo(8.6);
         assertThat(result.get().guestStars()).extracting(TmdbGuestStar::name).containsExactly("John Doe");
     }
 

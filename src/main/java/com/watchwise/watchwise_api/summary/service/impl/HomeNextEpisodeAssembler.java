@@ -55,6 +55,7 @@ public class HomeNextEpisodeAssembler {
                 progress.seriesTmdbId(), episode.seasonNumber(), episode.episodeNumber(), progress.lastWatchedDate(),
                 progress.watchedEpisodeCount(), progress.totalEpisodeCount(), progress.watchedPercentage(),
                 progress.seriesTitle(), episode.title(), episode.stillPath(), episode.runtimeMinutes(),
-                episode.releaseDate(), contentId, communityAverageScore, episode.availableToWatch()));
+                episode.releaseDate(), contentId, communityAverageScore, episode.tmdbVoteAverage(),
+                episode.availableToWatch()));
     }
 }

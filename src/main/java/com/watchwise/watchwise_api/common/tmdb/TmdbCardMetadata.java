@@ -9,11 +9,23 @@ public record TmdbCardMetadata(
         Integer runtimeMinutes,
         List<String> genres,
         Integer numberOfSeasons,
-        String backdropPath) {
+        String backdropPath,
+        Double voteAverage) {
+
+    public TmdbCardMetadata(
+            String title,
+            String posterPath,
+            String releaseDate,
+            Integer runtimeMinutes,
+            List<String> genres,
+            Integer numberOfSeasons,
+            String backdropPath) {
+        this(title, posterPath, releaseDate, runtimeMinutes, genres, numberOfSeasons, backdropPath, null);
+    }
 
     public TmdbCardMetadata(
             String title, String posterPath, String releaseDate, Integer runtimeMinutes) {
-        this(title, posterPath, releaseDate, runtimeMinutes, null, null, null);
+        this(title, posterPath, releaseDate, runtimeMinutes, null, null, null, null);
     }
 
     public TmdbCardMetadata(
@@ -23,7 +35,7 @@ public record TmdbCardMetadata(
             Integer runtimeMinutes,
             List<String> genres,
             Integer numberOfSeasons) {
-        this(title, posterPath, releaseDate, runtimeMinutes, genres, numberOfSeasons, null);
+        this(title, posterPath, releaseDate, runtimeMinutes, genres, numberOfSeasons, null, null);
     }
 
     public TmdbCardMetadata {

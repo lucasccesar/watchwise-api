@@ -54,8 +54,8 @@ class ContentCardDTOTest {
         assertThat(fieldNames(json)).containsExactlyInAnyOrder(
                 "contentId", "type", "tmdbId", "seriesTmdbId", "seasonNumber", "episodeNumber",
                 "title", "posterPath", "customPosterUrl", "releaseDate", "releaseYear", "runtimeMinutes",
-                "totalRuntimeMinutes", "numberOfSeasons", "numberOfEpisodes", "genres", "stats", "viewerState",
-                "previewStatus");
+                "tmdbVoteAverage", "totalRuntimeMinutes", "numberOfSeasons", "numberOfEpisodes", "genres",
+                "stats", "viewerState", "previewStatus");
         assertThat(json.get("contentId").asString()).isEqualTo("bd072932-47a6-4ef2-9752-475c228107d4");
         assertThat(json.get("type").asString()).isEqualTo("MOVIE");
         assertThat(json.get("tmdbId").asString()).isEqualTo("550");
@@ -63,6 +63,7 @@ class ContentCardDTOTest {
         assertThat(json.get("posterPath").asString()).isEqualTo("/fight-club.jpg");
         assertThat(json.get("releaseDate").asString()).isEqualTo("1999-10-15");
         assertThat(json.get("releaseYear").asInt()).isEqualTo(1999);
+        assertThat(json.get("tmdbVoteAverage").isNull()).isTrue();
         assertThat(json.get("runtimeMinutes").asInt()).isEqualTo(139);
         assertThat(json.get("previewStatus").asString()).isEqualTo("AVAILABLE");
         assertThat(json.get("seriesTmdbId").isNull()).isTrue();
@@ -197,6 +198,7 @@ class ContentCardDTOTest {
     void shouldExposeOnlySupportedSelectiveCardFacets() {
         assertThat(ContentCardFieldSet.values()).containsExactly(
                 ContentCardFieldSet.BASIC_METADATA,
+                ContentCardFieldSet.TMDB_VOTE_AVERAGE,
                 ContentCardFieldSet.STATS,
                 ContentCardFieldSet.VIEWER_STATE,
                 ContentCardFieldSet.WATCHLIST_PROGRESS,

@@ -44,7 +44,7 @@ class HomeNextEpisodeAssemblerTest {
                 .withPresentation(
                         "The Last of Us", "/poster.jpg", null,
                         new ProgressEpisodeDTO(2, 5, "Next episode", java.time.LocalDate.of(2026, 10, 10),
-                                55, "/still.jpg", false));
+                                55, "/still.jpg", 8.4, false));
         Content content = Content.builder().id(contentId).seriesTmdbId("1399").seasonNumber(2)
                 .episodeNumber(5).build();
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
@@ -63,6 +63,7 @@ class HomeNextEpisodeAssemblerTest {
             assertThat(item.watchedPercentage()).isEqualTo(50.0);
             assertThat(item.contentId()).isEqualTo(contentId);
             assertThat(item.communityAverageScore()).isEqualTo(8.5);
+            assertThat(item.tmdbVoteAverage()).isEqualTo(8.4);
             assertThat(item.availableToWatch()).isFalse();
         });
     }

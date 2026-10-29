@@ -411,7 +411,7 @@ public class TmdbClient {
     private TmdbCardMetadata movieCardMetadata(TmdbMovieFullDetails details) {
         return new TmdbCardMetadata(
                 details.title(), details.posterPath(), details.releaseDate(), details.runtime(),
-                genreNames(details.genres()), null, details.backdropPath());
+                genreNames(details.genres()), null, details.backdropPath(), details.voteAverage());
     }
 
     private TmdbCardMetadata tvCardMetadata(TmdbTvFullDetails details) {
@@ -420,17 +420,18 @@ public class TmdbClient {
                 : (int) Math.round(details.episodeRunTime().stream().mapToInt(Integer::intValue).average().orElse(0));
         return new TmdbCardMetadata(
                 details.name(), details.posterPath(), details.firstAirDate(), runtime,
-                genreNames(details.genres()), details.numberOfSeasons(), details.backdropPath());
+                genreNames(details.genres()), details.numberOfSeasons(), details.backdropPath(), details.voteAverage());
     }
 
     private TmdbCardMetadata seasonCardMetadata(TmdbSeasonFullDetails details) {
-        return new TmdbCardMetadata(details.name(), details.posterPath(), details.airDate(), null, null, null);
+        return new TmdbCardMetadata(
+                details.name(), details.posterPath(), details.airDate(), null, null, null, null, details.voteAverage());
     }
 
     private TmdbCardMetadata episodeCardMetadata(TmdbEpisodeFullDetails details) {
         return new TmdbCardMetadata(
                 details.name(), details.stillPath(), details.airDate(), details.runtime(), null, null,
-                details.stillPath());
+                details.stillPath(), details.voteAverage());
     }
 
     private List<String> genreNames(List<TmdbGenre> genres) {

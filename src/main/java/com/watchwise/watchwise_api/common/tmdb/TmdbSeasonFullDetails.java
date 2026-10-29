@@ -15,5 +15,20 @@ public record TmdbSeasonFullDetails(
         @JsonProperty("season_number") Integer seasonNumber,
         List<TmdbEpisodeSummary> episodes,
         @JsonProperty("aggregate_credits") TmdbAggregateCredits aggregateCredits,
-        @JsonProperty("watch/providers") TmdbWatchProviders watchProviders) {
+        @JsonProperty("watch/providers") TmdbWatchProviders watchProviders,
+        @JsonProperty("vote_average") Double voteAverage) {
+
+    public TmdbSeasonFullDetails(
+            Integer id,
+            String name,
+            String overview,
+            String posterPath,
+            String airDate,
+            Integer seasonNumber,
+            List<TmdbEpisodeSummary> episodes,
+            TmdbAggregateCredits aggregateCredits,
+            TmdbWatchProviders watchProviders) {
+        this(id, name, overview, posterPath, airDate, seasonNumber, episodes, aggregateCredits,
+                watchProviders, null);
+    }
 }

@@ -102,23 +102,25 @@ class ContentCardAssemblerTest {
     }
 
     @Test
-    @DisplayName("[assemble] Should Resolve Only Basic Metadata - When Basic Metadata Is Requested")
-    void shouldResolveOnlyBasicMetadataWhenBasicMetadataIsRequested() {
+    @DisplayName("[assemble] Should Include TMDB Vote Average - When Requested With Basic Metadata")
+    void shouldIncludeTmdbVoteAverageWhenRequestedWithBasicMetadata() {
         ContentCoordinate coordinate = movie("603");
         when(contentViewerStateService.resolve(isNull(), eq(List.of(coordinate)), eq(Map.of())))
                 .thenReturn(resolution(coordinate, UUID.randomUUID(), emptyState()));
         when(tmdbCardMetadataResolver.resolve(coordinate, "pt-BR"))
                 .thenReturn(new TmdbLookupResult.Found<>(
-                        new TmdbCardMetadata("The Matrix", "/matrix.jpg", "1999-03-30", 136)));
+                        new TmdbCardMetadata("The Matrix", "/matrix.jpg", "1999-03-30", 136,
+                                null, null, "/backdrop.jpg", 8.7)));
 
         ContentCardDTO card = assembler().assemble(
                 List.of(new ContentCardSpec(coordinate, null, null, null, null)),
                 new ContentCardContext("pt-BR", "BR", POSTER_USER_ID, null),
-                Set.of(ContentCardFieldSet.BASIC_METADATA)).get(coordinate);
+                Set.of(ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.TMDB_VOTE_AVERAGE)).get(coordinate);
 
         assertThat(card.title()).isEqualTo("The Matrix");
         assertThat(card.posterPath()).isEqualTo("/matrix.jpg");
         assertThat(card.releaseDate()).isEqualTo(LocalDate.of(1999, 3, 30));
+        assertThat(card.tmdbVoteAverage()).isEqualTo(8.7);
         assertThat(card.runtimeMinutes()).isEqualTo(136);
         assertThat(card.stats()).isNull();
         assertThat(card.viewerState()).isNull();

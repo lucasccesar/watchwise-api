@@ -17,7 +17,29 @@ public record SeriesInProgressPreviewDTO(
         java.time.LocalDate releaseDate,
         java.util.UUID contentId,
         Double communityAverageScore,
+        Double tmdbVoteAverage,
         Boolean availableToWatch) {
+
+    public SeriesInProgressPreviewDTO(
+            String seriesTmdbId,
+            Integer maxSeasonNumber,
+            Integer maxEpisodeNumber,
+            LocalDate lastWatchedDate,
+            Long watchedEpisodeCount,
+            Integer totalEpisodeCount,
+            Double watchedPercentage,
+            String seriesTitle,
+            String episodeTitle,
+            String stillPath,
+            Integer runtimeMinutes,
+            LocalDate releaseDate,
+            java.util.UUID contentId,
+            Double communityAverageScore,
+            Boolean availableToWatch) {
+        this(seriesTmdbId, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate, watchedEpisodeCount,
+                totalEpisodeCount, watchedPercentage, seriesTitle, episodeTitle, stillPath, runtimeMinutes,
+                releaseDate, contentId, communityAverageScore, null, availableToWatch);
+    }
 
     public SeriesInProgressPreviewDTO(
             String seriesTmdbId,
@@ -28,6 +50,6 @@ public record SeriesInProgressPreviewDTO(
             Integer totalEpisodeCount,
             Double watchedPercentage) {
         this(seriesTmdbId, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate, watchedEpisodeCount,
-                totalEpisodeCount, watchedPercentage, null, null, null, null, null, null, null, null);
+                totalEpisodeCount, watchedPercentage, null, null, null, null, null, null, null, null, null);
     }
 }
