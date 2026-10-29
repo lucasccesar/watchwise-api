@@ -75,12 +75,14 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -170,14 +172,7 @@ public class SummaryServiceImpl implements SummaryService {
         long totalEpisodesWatched = aggregate.getTotalEpisodesWatched();
         long distinctSeriesWatched = aggregate.getDistinctSeriesWatched();
 
-        List<SeriesInProgressResponseDTO> progress;
-        try {
-            progress = diaryEntryService
-                    .getSeriesInProgress(viewerId, userId, 1, HOME_NEXT_EPISODES_LIMIT).getContent();
-        } catch (TmdbUnavailableException exception) {
-            progress = List.of();
-        }
-        List<SeriesInProgressPreviewDTO> nextEpisodes = homeNextEpisodeAssembler.assemble(target, progress);
+        List<SeriesInProgressPreviewDTO> nextEpisodes = loadHomeNextEpisodes(viewerId, userId, target);
 
         List<CalendarEventDTO> upcomingReleases;
         try {
@@ -220,6 +215,54 @@ public class SummaryServiceImpl implements SummaryService {
                 genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
                 notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities,
                 latestWatchedBackdropPath);
+    }
+
+    private List<SeriesInProgressPreviewDTO> loadHomeNextEpisodes(UUID viewerId, UUID userId, User target) {
+        List<SeriesInProgressPreviewDTO> previews = new ArrayList<>(HOME_NEXT_EPISODES_LIMIT);
+        Set<String> appendedSeriesTmdbIds = new LinkedHashSet<>();
+        int pageNumber = 1;
+
+        while (previews.size() < HOME_NEXT_EPISODES_LIMIT) {
+            Page<SeriesInProgressResponseDTO> page;
+            try {
+                page = diaryEntryService.getSeriesInProgress(
+                        viewerId, userId, pageNumber, HOME_NEXT_EPISODES_LIMIT);
+            } catch (TmdbUnavailableException exception) {
+                break;
+            }
+
+            List<SeriesInProgressResponseDTO> candidates = page.getContent();
+            if (candidates.isEmpty()) {
+                break;
+            }
+
+            for (SeriesInProgressResponseDTO candidate : candidates) {
+                if (previews.size() >= HOME_NEXT_EPISODES_LIMIT) {
+                    break;
+                }
+                if (appendedSeriesTmdbIds.contains(candidate.seriesTmdbId())) {
+                    continue;
+                }
+
+                List<SeriesInProgressPreviewDTO> candidatePreviews = homeNextEpisodeAssembler
+                        .assemble(target, List.of(candidate));
+                for (SeriesInProgressPreviewDTO preview : candidatePreviews) {
+                    if (previews.size() >= HOME_NEXT_EPISODES_LIMIT) {
+                        break;
+                    }
+                    if (appendedSeriesTmdbIds.add(preview.seriesTmdbId())) {
+                        previews.add(preview);
+                    }
+                }
+            }
+
+            if (previews.size() >= HOME_NEXT_EPISODES_LIMIT || !page.hasNext()) {
+                break;
+            }
+            pageNumber++;
+        }
+
+        return List.copyOf(previews);
     }
 
     private String latestWatchedBackdropPath(List<DiaryEntry> recentEntries, String language) {
