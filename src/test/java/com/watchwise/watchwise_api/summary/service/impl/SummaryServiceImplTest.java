@@ -83,7 +83,6 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 
@@ -259,8 +258,8 @@ class SummaryServiceImplTest {
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         lenient().when(diaryEntryRepository.findSeriesInProgressByUserId(any(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
-        lenient().when(diaryEntryService.getSeriesInProgress(any(), any(), any(), any()))
-                .thenReturn(Page.empty());
+        lenient().when(diaryEntryService.getHomeNextEpisodeCandidates(any(), any(), anyInt()))
+                .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(any(), any(), any()))
@@ -395,8 +394,8 @@ class SummaryServiceImplTest {
         when(homeWatchAggregate.getTotalEpisodesWatched()).thenReturn(128L);
         SeriesInProgressResponseDTO row = new SeriesInProgressResponseDTO(
                 "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0);
-        when(diaryEntryService.getSeriesInProgress(eq(lucasId), eq(lucasId), any(), any()))
-                .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryService.getHomeNextEpisodeCandidates(eq(lucasId), eq(lucasId), eq(4)))
+                .thenReturn(List.of(row));
         when(homeNextEpisodeAssembler.assemble(eq(lucas), any()))
                 .thenReturn(List.of(new SeriesInProgressPreviewDTO(
                         "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0)));
@@ -418,7 +417,7 @@ class SummaryServiceImplTest {
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
         assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressPreviewDTO(
                 "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0));
-        verify(diaryEntryService).getSeriesInProgress(eq(lucasId), eq(lucasId), eq(1), eq(4));
+        verify(diaryEntryService).getHomeNextEpisodeCandidates(eq(lucasId), eq(lucasId), eq(4));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
         assertThat(result.genreCountsEpisodesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));

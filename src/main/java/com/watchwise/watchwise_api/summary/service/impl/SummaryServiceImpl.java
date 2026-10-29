@@ -75,14 +75,12 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -218,51 +216,14 @@ public class SummaryServiceImpl implements SummaryService {
     }
 
     private List<SeriesInProgressPreviewDTO> loadHomeNextEpisodes(UUID viewerId, UUID userId, User target) {
-        List<SeriesInProgressPreviewDTO> previews = new ArrayList<>(HOME_NEXT_EPISODES_LIMIT);
-        Set<String> appendedSeriesTmdbIds = new LinkedHashSet<>();
-        int pageNumber = 1;
-
-        while (previews.size() < HOME_NEXT_EPISODES_LIMIT) {
-            Page<SeriesInProgressResponseDTO> page;
-            try {
-                page = diaryEntryService.getSeriesInProgress(
-                        viewerId, userId, pageNumber, HOME_NEXT_EPISODES_LIMIT);
-            } catch (TmdbUnavailableException exception) {
-                break;
-            }
-
-            List<SeriesInProgressResponseDTO> candidates = page.getContent();
-            if (candidates.isEmpty()) {
-                break;
-            }
-
-            for (SeriesInProgressResponseDTO candidate : candidates) {
-                if (previews.size() >= HOME_NEXT_EPISODES_LIMIT) {
-                    break;
-                }
-                if (appendedSeriesTmdbIds.contains(candidate.seriesTmdbId())) {
-                    continue;
-                }
-
-                List<SeriesInProgressPreviewDTO> candidatePreviews = homeNextEpisodeAssembler
-                        .assemble(target, List.of(candidate));
-                for (SeriesInProgressPreviewDTO preview : candidatePreviews) {
-                    if (previews.size() >= HOME_NEXT_EPISODES_LIMIT) {
-                        break;
-                    }
-                    if (appendedSeriesTmdbIds.add(preview.seriesTmdbId())) {
-                        previews.add(preview);
-                    }
-                }
-            }
-
-            if (previews.size() >= HOME_NEXT_EPISODES_LIMIT || !page.hasNext()) {
-                break;
-            }
-            pageNumber++;
+        List<SeriesInProgressResponseDTO> candidates;
+        try {
+            candidates = diaryEntryService.getHomeNextEpisodeCandidates(
+                    viewerId, userId, HOME_NEXT_EPISODES_LIMIT);
+        } catch (TmdbUnavailableException exception) {
+            return List.of();
         }
-
-        return List.copyOf(previews);
+        return homeNextEpisodeAssembler.assemble(target, candidates);
     }
 
     private String latestWatchedBackdropPath(List<DiaryEntry> recentEntries, String language) {

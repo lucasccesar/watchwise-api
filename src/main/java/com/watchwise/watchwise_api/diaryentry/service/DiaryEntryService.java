@@ -46,6 +46,9 @@ public interface DiaryEntryService {
 
     List<DiarySeriesOptionDTO> getDiarySeriesOptions(UUID viewerId, UUID userId);
 
+    List<SeriesInProgressResponseDTO> getHomeNextEpisodeCandidates(
+            UUID viewerId, UUID userId, int limit);
+
     Page<SeriesInProgressResponseDTO> getSeriesInProgress(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize);
 
     SeriesInProgressPageResponseDTO getSeriesInProgress(

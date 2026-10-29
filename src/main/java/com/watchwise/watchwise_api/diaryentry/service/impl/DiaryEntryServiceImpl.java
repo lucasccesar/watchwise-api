@@ -132,6 +132,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private static final String RAW_DIARY_TYPE_ERROR =
             "Raw diary filters only support MOVIE or EPISODE; use /diary/view for derived SERIES and SEASON completions";
+    private static final int HOME_NEXT_EPISODES_MAX_LIMIT = 4;
+    private static final int HOME_NEXT_EPISODES_BATCH_SIZE = 4;
 
     private final DiaryEntryRepository diaryEntryRepository;
     private final ContentReviewRepository contentReviewRepository;
@@ -360,6 +362,53 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     @Override
+    public List<SeriesInProgressResponseDTO> getHomeNextEpisodeCandidates(
+            UUID viewerId, UUID userId, int limit) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        assertCanViewDiary(viewerId, userId, target);
+
+        int effectiveLimit = Math.min(Math.max(limit, 0), HOME_NEXT_EPISODES_MAX_LIMIT);
+        if (effectiveLimit == 0) {
+            return List.of();
+        }
+
+        List<SeriesProgressReadRepository.SeriesProgressCandidate> allRows =
+                seriesProgressReadRepository.findCandidatesByUserId(
+                        userId,
+                        SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED,
+                        Sort.Direction.DESC,
+                        Pageable.unpaged())
+                        .getContent();
+        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = refreshSnapshots(allRows);
+        List<SeriesInProgressResponseDTO> candidatesWithNextEpisode = new ArrayList<>(effectiveLimit);
+
+        for (int start = 0;
+                start < allRows.size() && candidatesWithNextEpisode.size() < effectiveLimit;
+                start += HOME_NEXT_EPISODES_BATCH_SIZE) {
+            int end = Math.min(start + HOME_NEXT_EPISODES_BATCH_SIZE, allRows.size());
+            List<SeriesProgressReadRepository.SeriesProgressCandidate> batch = allRows.subList(start, end);
+            List<SeriesInProgressResponseDTO> presented;
+            try {
+                presented = assembleSeriesProgressRows(target, userId, batch, snapshots);
+            } catch (TmdbUnavailableException exception) {
+                if (candidatesWithNextEpisode.isEmpty()) {
+                    throw exception;
+                }
+                break;
+            }
+
+            candidatesWithNextEpisode.addAll(presented.stream()
+                    .filter(candidate -> candidate.nextEpisode() != null)
+                    .limit(effectiveLimit - candidatesWithNextEpisode.size())
+                    .toList());
+        }
+
+        return List.copyOf(candidatesWithNextEpisode);
+    }
+
+    @Override
     public Page<SeriesInProgressResponseDTO> getSeriesInProgress(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
         SeriesInProgressPageResponseDTO result = getSeriesInProgress(
                 viewerId, userId, pageNumber, pageSize,
@@ -396,51 +445,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Page<SeriesProgressReadRepository.SeriesProgressCandidate> page =
                 seriesProgressReadRepository.findCandidatesByUserId(
                         userId, effectiveSort, effectiveDirection, pageRequest);
-        List<String> pageSeriesIds = page.getContent().stream()
-                .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
-                .distinct()
-                .toList();
-        Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> watchedProgress =
-                loadWatchedProgress(userId, pageSeriesIds);
-        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, pageSeriesIds);
-
-        Map<String, SeriesInProgressResponseDTO> baseResponses = new LinkedHashMap<>();
-        page.getContent().forEach(row -> baseResponses.put(
-                row.getSeriesTmdbId(),
-                toDetailedSeriesResponse(
-                        row,
-                        snapshots.get(row.getSeriesTmdbId()),
-                        watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of()),
-                        customPosterBySeries.get(row.getSeriesTmdbId()))));
-
-        Set<WatchedEpisodeCoordinate> watchedCoordinates = pageSeriesIds.isEmpty()
-                ? Set.of()
-                : Optional.ofNullable(diaryEntryRepository.findWatchedEpisodeCoordinates(userId, pageSeriesIds))
-                        .orElseGet(Set::of);
-        Map<String, List<SeasonProgressDTO>> seasonProgressBySeries = baseResponses.values().stream()
-                .collect(Collectors.toMap(
-                        SeriesInProgressResponseDTO::seriesTmdbId,
-                        SeriesInProgressResponseDTO::seasonProgress,
-                        (first, ignored) -> first,
-                        LinkedHashMap::new));
-        Map<String, SeriesProgressPresentationEnricher.Enrichment> presentation = pageSeriesIds.isEmpty()
-                ? Map.of()
-                : Optional.ofNullable(seriesProgressPresentationEnricher.enrich(
-                                target, page.getContent(), seasonProgressBySeries,
-                                watchedCoordinates, customPosterBySeries))
-                        .orElseGet(Map::of);
-
-        List<SeriesInProgressResponseDTO> content = page.getContent().stream()
-                .map(row -> {
-                    SeriesInProgressResponseDTO base = baseResponses.get(row.getSeriesTmdbId());
-                    SeriesProgressPresentationEnricher.Enrichment enrichment = presentation.get(row.getSeriesTmdbId());
-                    return enrichment == null
-                            ? base
-                            : base.withPresentation(
-                                    enrichment.seriesTitle(), enrichment.seriesPosterPath(),
-                                    enrichment.lastWatchedEpisodeTitle(), enrichment.nextEpisode());
-                })
-                .toList();
+        List<SeriesInProgressResponseDTO> content = assembleSeriesProgressRows(
+                target, userId, page.getContent(), snapshots);
         SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
 
         return new SeriesInProgressPageResponseDTO(
@@ -451,6 +457,59 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 page.getTotalPages(),
                 page.hasNext(),
                 aggregate);
+    }
+
+    private List<SeriesInProgressResponseDTO> assembleSeriesProgressRows(
+            User target,
+            UUID userId,
+            List<SeriesProgressReadRepository.SeriesProgressCandidate> rows,
+            Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> seriesIds = rows.stream()
+                .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .distinct()
+                .toList();
+        Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> watchedProgress =
+                loadWatchedProgress(userId, seriesIds);
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, seriesIds);
+
+        Map<String, SeriesInProgressResponseDTO> baseResponses = new LinkedHashMap<>();
+        rows.forEach(row -> baseResponses.put(
+                row.getSeriesTmdbId(),
+                toDetailedSeriesResponse(
+                        row,
+                        snapshots.get(row.getSeriesTmdbId()),
+                        watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of()),
+                        customPosterBySeries.get(row.getSeriesTmdbId()))));
+
+        Set<WatchedEpisodeCoordinate> watchedCoordinates = Optional.ofNullable(
+                        diaryEntryRepository.findWatchedEpisodeCoordinates(userId, seriesIds))
+                .orElseGet(Set::of);
+        Map<String, List<SeasonProgressDTO>> seasonProgressBySeries = baseResponses.values().stream()
+                .collect(Collectors.toMap(
+                        SeriesInProgressResponseDTO::seriesTmdbId,
+                        SeriesInProgressResponseDTO::seasonProgress,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+        Map<String, SeriesProgressPresentationEnricher.Enrichment> presentation = Optional.ofNullable(
+                        seriesProgressPresentationEnricher.enrich(
+                                target, rows, seasonProgressBySeries, watchedCoordinates, customPosterBySeries))
+                .orElseGet(Map::of);
+
+        return rows.stream()
+                .map(row -> {
+                    SeriesInProgressResponseDTO base = baseResponses.get(row.getSeriesTmdbId());
+                    SeriesProgressPresentationEnricher.Enrichment enrichment = presentation.get(row.getSeriesTmdbId());
+                    return enrichment == null
+                            ? base
+                            : base.withPresentation(
+                                    enrichment.seriesTitle(), enrichment.seriesPosterPath(),
+                                    enrichment.lastWatchedEpisodeTitle(), enrichment.nextEpisode());
+                })
+                .toList();
     }
 
     private Map<String, SeriesProgressMetadataRefreshService.Snapshot> refreshSnapshots(
