@@ -36,10 +36,10 @@ import java.security.NoSuchAlgorithmException;
 @Component
 @ConditionalOnProperty(prefix = "app.import.letterboxd-seed", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class LetterboxdSeedLoader implements ApplicationRunner {
-    static final String RESOURCE_LOCATION = "classpath:import/letterboxd-filmes-e-series-sem-especiais-ajustado.csv";
+    static final String RESOURCE_LOCATION = "classpath:import/curated-content-aliases.csv";
     static final String SEED_VERSION = "letterboxd-catalog-v1";
     static final String PROVENANCE = "letterboxd-filmes-e-series-sem-especiais-ajustado.csv";
-    static final String EXPECTED_SHA256 = "3f74b2a21a97576b58f9f51661838edfd63a372aaa7d80bf5a866e7750c47726";
+    static final String EXPECTED_SHA256 = "9d8442f656d874ce1768ae44564a1e30efc95c6bf8b4cece483ab3885195c447";
     private static final int BATCH_SIZE = 500;
     private static final List<String> EXPECTED_HEADER = List.of(
             "title", "release_year", "tmdb_media_type", "tmdb_id", "series_tmdb_id", "season_number", "episode_number");

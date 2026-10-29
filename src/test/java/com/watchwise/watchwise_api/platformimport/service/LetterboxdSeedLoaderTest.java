@@ -69,7 +69,7 @@ class LetterboxdSeedLoaderTest {
                 .isEqualTo(EXPECTED_ROWS);
         assertThat(jdbc.queryForObject("select count(*) from letterboxd_seed_loads", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select checksum from letterboxd_seed_loads", String.class))
-                .isEqualTo("3f74b2a21a97576b58f9f51661838edfd63a372aaa7d80bf5a866e7750c47726");
+                .isEqualTo("9d8442f656d874ce1768ae44564a1e30efc95c6bf8b4cece483ab3885195c447");
         assertThat(jdbc.queryForObject("select count(*) from external_content_aliases where trust = 'CURATED_SEED'", Integer.class))
                 .isEqualTo(EXPECTED_ROWS);
     }
