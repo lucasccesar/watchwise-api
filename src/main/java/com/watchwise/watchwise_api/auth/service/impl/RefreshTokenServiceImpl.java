@@ -47,7 +47,12 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public String issueRefreshToken(UUID userId, long authVersion) {
-        String token = jwtService.generateToken(userId, authVersion, TokenType.REFRESH);
+        return issueRefreshToken(userId, authVersion, false);
+    }
+
+    @Override
+    public String issueRefreshToken(UUID userId, long authVersion, boolean rememberMe) {
+        String token = jwtService.generateToken(userId, authVersion, TokenType.REFRESH, rememberMe);
         UUID jti = jwtService.extractJti(token);
 
         RefreshToken refreshToken = RefreshToken.builder()
@@ -91,9 +96,10 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
             throw new UnauthorizedException("Invalid refresh token");
         }
         String newAccessToken = jwtService.generateToken(user.getId(), user.getAuthVersion(), TokenType.ACCESS);
-        String newRefreshToken = issueRefreshToken(user.getId(), user.getAuthVersion());
+        boolean rememberMe = jwtService.extractRememberMe(rawRefreshToken);
+        String newRefreshToken = issueRefreshToken(user.getId(), user.getAuthVersion(), rememberMe);
 
-        return new RefreshedTokens(newAccessToken, newRefreshToken);
+        return new RefreshedTokens(newAccessToken, newRefreshToken, rememberMe);
     }
 
     @Override

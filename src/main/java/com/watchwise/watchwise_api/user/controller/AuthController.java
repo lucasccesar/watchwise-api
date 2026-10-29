@@ -128,8 +128,8 @@ public class AuthController {
             UserResponseDTO user = userService.getCurrentUser(result.userId());
             long authVersion = userService.getAuthVersion(user.id());
             rotateCsrfToken(servletRequest, response);
-            cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authVersion));
-            cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authVersion));
+            cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authVersion, false));
+            cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authVersion, false));
         }
         return ResponseEntity.noContent().build();
     }
@@ -196,8 +196,10 @@ public class AuthController {
         UserResponseDTO user = authenticatedUser.user();
 
         rotateCsrfToken(request, response);
-        cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authenticatedUser.authVersion()));
-        cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authenticatedUser.authVersion()));
+        cookieUtil.addCookie(response, buildAccessTokenCookie(
+                user.id(), authenticatedUser.authVersion(), loginUserDTO.rememberMe()));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(
+                user.id(), authenticatedUser.authVersion(), loginUserDTO.rememberMe()));
 
         return ResponseEntity.ok(user);
     }
@@ -228,8 +230,10 @@ public class AuthController {
         UserResponseDTO user = authenticatedUser.user();
 
         rotateCsrfToken(request, response);
-        cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authenticatedUser.authVersion()));
-        cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authenticatedUser.authVersion()));
+        cookieUtil.addCookie(response, buildAccessTokenCookie(
+                user.id(), authenticatedUser.authVersion(), oAuthLoginDTO.rememberMe()));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(
+                user.id(), authenticatedUser.authVersion(), oAuthLoginDTO.rememberMe()));
 
         return ResponseEntity.ok(user);
     }
@@ -244,8 +248,8 @@ public class AuthController {
 
         RefreshedTokens tokens = refreshTokenService.rotateRefreshToken(refreshToken);
 
-        cookieUtil.addCookie(response, cookieUtil.buildAccessTokenCookie(tokens.accessToken()));
-        cookieUtil.addCookie(response, cookieUtil.buildRefreshTokenCookie(tokens.refreshToken()));
+        cookieUtil.addCookie(response, cookieUtil.buildAccessTokenCookie(tokens.accessToken(), tokens.rememberMe()));
+        cookieUtil.addCookie(response, cookieUtil.buildRefreshTokenCookie(tokens.refreshToken(), tokens.rememberMe()));
 
         return ResponseEntity.noContent().build();
     }
@@ -303,13 +307,13 @@ public class AuthController {
         }
     }
 
-    private ResponseCookie buildAccessTokenCookie(UUID userId, long authVersion) {
+    private ResponseCookie buildAccessTokenCookie(UUID userId, long authVersion, boolean rememberMe) {
         String token = jwtService.generateToken(userId, authVersion, TokenType.ACCESS);
-        return cookieUtil.buildAccessTokenCookie(token);
+        return cookieUtil.buildAccessTokenCookie(token, rememberMe);
     }
 
-    private ResponseCookie buildRefreshTokenCookie(UUID userId, long authVersion) {
-        String token = refreshTokenService.issueRefreshToken(userId, authVersion);
-        return cookieUtil.buildRefreshTokenCookie(token);
+    private ResponseCookie buildRefreshTokenCookie(UUID userId, long authVersion, boolean rememberMe) {
+        String token = refreshTokenService.issueRefreshToken(userId, authVersion, rememberMe);
+        return cookieUtil.buildRefreshTokenCookie(token, rememberMe);
     }
 }

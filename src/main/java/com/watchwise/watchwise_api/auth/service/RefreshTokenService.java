@@ -10,6 +10,8 @@ public interface RefreshTokenService {
 
     String issueRefreshToken(UUID userId, long authVersion);
 
+    String issueRefreshToken(UUID userId, long authVersion, boolean rememberMe);
+
     RefreshedTokens rotateRefreshToken(String rawRefreshToken);
 
     void revokeRefreshToken(String rawRefreshToken);

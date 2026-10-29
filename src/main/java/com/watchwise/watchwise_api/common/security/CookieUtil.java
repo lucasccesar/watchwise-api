@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.common.security;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class CookieUtil {
 
     private final long accessTokenExpirationMinutes;
     private final long refreshTokenExpirationDays;
+    private final long rememberMeRefreshTokenExpirationDays;
     private final boolean secureCookies;
     private final String refreshTokenPath;
     private final String csrfTokenPath;
@@ -27,18 +29,29 @@ public class CookieUtil {
     @Value("${app.auth.email-confirmation.token-ttl-minutes:30}")
     private long emailConfirmationTokenTtlMinutes = 30;
 
+    @Autowired
     public CookieUtil(
             @Value("${app.jwt.expiration-minutes}") long accessTokenExpirationMinutes,
             @Value("${app.jwt.refresh-expiration-days}") long refreshTokenExpirationDays,
+            @Value("${app.jwt.remember-me-refresh-expiration-days:30}") long rememberMeRefreshTokenExpirationDays,
             @Value("${app.cookies.secure:true}") boolean secureCookies,
             @Value("${server.servlet.context-path:}") String contextPath
     ) {
         this.accessTokenExpirationMinutes = accessTokenExpirationMinutes;
         this.refreshTokenExpirationDays = refreshTokenExpirationDays;
+        this.rememberMeRefreshTokenExpirationDays = rememberMeRefreshTokenExpirationDays;
         this.secureCookies = secureCookies;
         this.refreshTokenPath = contextPath + "/auth/refresh";
         this.csrfTokenPath = contextPath.isEmpty() ? "/" : contextPath;
         this.registrationProofPath = contextPath + "/auth";
+    }
+
+    public CookieUtil(
+            long accessTokenExpirationMinutes,
+            long refreshTokenExpirationDays,
+            boolean secureCookies,
+            String contextPath) {
+        this(accessTokenExpirationMinutes, refreshTokenExpirationDays, 30, secureCookies, contextPath);
     }
 
     public String getRefreshTokenPath() {
@@ -54,13 +67,19 @@ public class CookieUtil {
     }
 
     public ResponseCookie buildAccessTokenCookie(String token) {
-        return ResponseCookie.from(ACCESS_TOKEN_COOKIE, token)
+        return buildAccessTokenCookie(token, true);
+    }
+
+    public ResponseCookie buildAccessTokenCookie(String token, boolean rememberMe) {
+        ResponseCookie.ResponseCookieBuilder cookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE, token)
                 .httpOnly(true)
                 .secure(secureCookies)
                 .path("/")
-                .sameSite("Lax")
-                .maxAge(Duration.ofMinutes(accessTokenExpirationMinutes))
-                .build();
+                .sameSite("Lax");
+        if (rememberMe) {
+            cookie.maxAge(Duration.ofMinutes(accessTokenExpirationMinutes));
+        }
+        return cookie.build();
     }
 
     public ResponseCookie buildRefreshTokenCookie(String token) {
@@ -71,6 +90,18 @@ public class CookieUtil {
                 .sameSite("Lax")
                 .maxAge(Duration.ofDays(refreshTokenExpirationDays))
                 .build();
+    }
+
+    public ResponseCookie buildRefreshTokenCookie(String token, boolean rememberMe) {
+        ResponseCookie.ResponseCookieBuilder cookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
+                .httpOnly(true)
+                .secure(secureCookies)
+                .path(refreshTokenPath)
+                .sameSite("Lax");
+        if (rememberMe) {
+            cookie.maxAge(Duration.ofDays(rememberMeRefreshTokenExpirationDays));
+        }
+        return cookie.build();
     }
 
     public ResponseCookie buildRegistrationProofCookie(String proof) {
