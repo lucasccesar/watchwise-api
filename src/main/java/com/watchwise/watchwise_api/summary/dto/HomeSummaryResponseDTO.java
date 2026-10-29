@@ -19,8 +19,33 @@ public record HomeSummaryResponseDTO(
         HomeViewerDTO viewer,
         boolean hasUnreadNotifications,
         List<HomeRecentlyWatchedDTO> recentlyWatched,
-        List<HomeSocialActivityDTO> socialActivities
+        List<HomeSocialActivityDTO> socialActivities,
+        String latestWatchedBackdropPath
 ) {
+    public HomeSummaryResponseDTO(
+            long totalMinutesWatchedMovies,
+            long totalMinutesWatchedEpisodes,
+            long totalMoviesWatched,
+            long totalDistinctMoviesWatched,
+            long totalEpisodesWatched,
+            long distinctSeriesWatched,
+            List<SeriesInProgressPreviewDTO> nextEpisodes,
+            List<CalendarEventDTO> upcomingReleases,
+            List<DailyWatchCountDTO> watchCountByDayLast30Days,
+            List<GenreCountDTO> genreCountsMoviesLast30Days,
+            List<GenreCountDTO> genreCountsEpisodesLast30Days,
+            HomeViewerDTO viewer,
+            boolean hasUnreadNotifications,
+            List<HomeRecentlyWatchedDTO> recentlyWatched,
+            List<HomeSocialActivityDTO> socialActivities
+    ) {
+        this(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched,
+                totalDistinctMoviesWatched, totalEpisodesWatched, distinctSeriesWatched,
+                nextEpisodes, upcomingReleases, watchCountByDayLast30Days,
+                genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
+                hasUnreadNotifications, recentlyWatched, socialActivities, null);
+    }
+
     public HomeSummaryResponseDTO(
             long totalMinutesWatchedMovies,
             long totalMinutesWatchedEpisodes,
@@ -34,7 +59,7 @@ public record HomeSummaryResponseDTO(
     ) {
         this(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched, totalMoviesWatched,
                 totalEpisodesWatched, 0L, nextEpisodes, List.of(), watchCountByDayLast30Days, genreCountsMoviesLast30Days,
-                genreCountsSeriesLast30Days, null, false, toRecentlyWatched(recentlyWatched), List.of());
+                genreCountsSeriesLast30Days, null, false, toRecentlyWatched(recentlyWatched), List.of(), null);
     }
 
     private static List<HomeRecentlyWatchedDTO> toRecentlyWatched(List<?> recentlyWatched) {

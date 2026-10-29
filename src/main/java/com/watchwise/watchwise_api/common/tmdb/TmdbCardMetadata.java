@@ -8,11 +8,22 @@ public record TmdbCardMetadata(
         String releaseDate,
         Integer runtimeMinutes,
         List<String> genres,
-        Integer numberOfSeasons) {
+        Integer numberOfSeasons,
+        String backdropPath) {
 
     public TmdbCardMetadata(
             String title, String posterPath, String releaseDate, Integer runtimeMinutes) {
-        this(title, posterPath, releaseDate, runtimeMinutes, null, null);
+        this(title, posterPath, releaseDate, runtimeMinutes, null, null, null);
+    }
+
+    public TmdbCardMetadata(
+            String title,
+            String posterPath,
+            String releaseDate,
+            Integer runtimeMinutes,
+            List<String> genres,
+            Integer numberOfSeasons) {
+        this(title, posterPath, releaseDate, runtimeMinutes, genres, numberOfSeasons, null);
     }
 
     public TmdbCardMetadata {

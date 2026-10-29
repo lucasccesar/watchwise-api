@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
@@ -19,6 +20,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
@@ -139,6 +141,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final CalendarService calendarService;
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
     private final ContentCardAssembler contentCardAssembler;
+    private final TmdbCardMetadataResolver tmdbCardMetadataResolver;
     private final ProfileSummaryReader profileSummaryReader;
     private final AllTimeStatsReader allTimeStatsReader;
     private final CurrentRatingSummaryReader currentRatingSummaryReader;
@@ -208,12 +211,29 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(item -> toHomeSocialActivity(item, cards))
                 .toList();
         HomeViewerDTO viewer = new HomeViewerDTO(target.getName(), target.getUsername(), target.getProfilePicture());
+        String latestWatchedBackdropPath = latestWatchedBackdropPath(
+                recentEntries, target.getPreferredLanguage());
 
         return new HomeSummaryResponseDTO(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched,
                 totalDistinctMoviesWatched, totalEpisodesWatched, distinctSeriesWatched, nextEpisodes, upcomingReleases,
                 watchCountByDayLast30Days,
                 genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
-                notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities);
+                notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities,
+                latestWatchedBackdropPath);
+    }
+
+    private String latestWatchedBackdropPath(List<DiaryEntry> recentEntries, String language) {
+        if (recentEntries.isEmpty()) {
+            return null;
+        }
+        Content content = recentEntries.get(0).getContent();
+        if (content == null || content.getType() == null) {
+            return null;
+        }
+        return tmdbCardMetadataResolver.resolve(ContentCoordinate.from(content), language)
+                .toOptional()
+                .map(TmdbCardMetadata::backdropPath)
+                .orElse(null);
     }
 
     private List<DiaryEntry> loadHomeRecentlyWatchedEntries(UUID userId) {
@@ -232,6 +252,14 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(entry -> {
                     Content content = entry.getContent();
                     ContentCardDTO card = cards.get(ContentCoordinate.from(content));
+                    if (content.getType() == ContentType.EPISODE && card != null
+                            && StringUtils.isNotBlank(content.getSeriesTmdbId())) {
+                        ContentCoordinate seriesCoordinate = seriesCoordinate(content.getSeriesTmdbId());
+                        ContentCardDTO seriesCard = cards.get(seriesCoordinate);
+                        if (seriesCard != null && StringUtils.isNotBlank(seriesCard.title())) {
+                            card = withTitle(card, seriesCard.title());
+                        }
+                    }
                     return new HomeRecentlyWatchedDTO(entry.getId(), new HomeContentReferenceDTO(
                                     content.getId(), content.getTmdbId(), content.getType(),
                                     content.getSeriesTmdbId(), content.getSeasonNumber(),
@@ -254,21 +282,46 @@ public class SummaryServiceImpl implements SummaryService {
 
     private Map<ContentCoordinate, ContentCardDTO> assembleHomeCards(
             UUID posterUserId, User target, List<DiaryEntry> recentEntries, List<FeedItemDTO> feedItems) {
-        List<ContentCardSpec> specs = Stream.concat(
-                        recentEntries.stream()
+        List<ContentCardSpec> recentContentSpecs = recentEntries.stream()
                                 .map(DiaryEntry::getContent)
                                 .filter(content -> content != null && content.getType() != null)
-                                .map(this::toCardSpec),
-                        feedItems.stream()
+                                .map(this::toCardSpec)
+                                .toList();
+        List<ContentCardSpec> episodeSeriesSpecs = recentEntries.stream()
+                .map(DiaryEntry::getContent)
+                .filter(content -> content != null && content.getType() == ContentType.EPISODE)
+                .map(Content::getSeriesTmdbId)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .map(this::seriesCoordinate)
+                .map(coordinate -> new ContentCardSpec(coordinate, null, null, null, null))
+                .toList();
+        List<ContentCardSpec> feedContentSpecs = feedItems.stream()
                                 .map(FeedItemDTO::content)
                                 .filter(content -> content != null && content.type() != null)
-                                .map(content -> new ContentCardSpec(toCoordinate(content), null, null, null, null)))
+                                .map(content -> new ContentCardSpec(toCoordinate(content), null, null, null, null))
+                .toList();
+        List<ContentCardSpec> specs = Stream.of(recentContentSpecs, episodeSeriesSpecs, feedContentSpecs)
+                .flatMap(List::stream)
                 .toList();
         Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
                 specs,
                 new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), posterUserId, null),
                 HOME_CARD_FIELDS);
         return cards == null ? Map.of() : cards;
+    }
+
+    private ContentCoordinate seriesCoordinate(String seriesTmdbId) {
+        return new ContentCoordinate(ContentType.SERIES, seriesTmdbId, null, null, null);
+    }
+
+    private ContentCardDTO withTitle(ContentCardDTO card, String title) {
+        return new ContentCardDTO(
+                card.contentId(), card.type(), card.tmdbId(), card.seriesTmdbId(),
+                card.seasonNumber(), card.episodeNumber(), title, card.posterPath(), card.customPosterUrl(),
+                card.releaseDate(), card.releaseYear(), card.runtimeMinutes(), card.totalRuntimeMinutes(),
+                card.numberOfSeasons(), card.numberOfEpisodes(), card.genres(), card.stats(),
+                card.viewerState(), card.previewStatus());
     }
 
     private ContentCardSpec toCardSpec(Content content) {
