@@ -53,9 +53,6 @@ public interface UserMapper {
         if (dto.isProfilePublic() == null) {
             builder.isProfilePublic(true);
         }
-        if(dto.profilePicture() == null){
-            builder.profilePicture("https://default-image.png");
-        }
     }
 
 

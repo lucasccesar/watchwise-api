@@ -111,7 +111,7 @@ class UserListViewControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].user.id").value(owner.id().toString()))
                 .andExpect(jsonPath("$.content[0].user.username").value("viewallowner"))
                 .andExpect(jsonPath("$.content[0].user.name").value("viewallowner"))
-                .andExpect(jsonPath("$.content[0].user.profilePicture").value("https://default-image.png"))
+                .andExpect(jsonPath("$.content[0].user.profilePicture").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.content[0].user.isProfilePublic").value(true))
                 .andExpect(jsonPath("$.content[0].visibility").value("PUBLIC"))
                 .andExpect(jsonPath("$.content[0].likesCount").value(0))

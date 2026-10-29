@@ -247,7 +247,8 @@ public class SummaryServiceImpl implements SummaryService {
                 .findByDiaryEntryIdIn(entries.stream().map(DiaryEntry::getId).toList()).stream()
                 .collect(Collectors.groupingBy(
                         companion -> companion.getDiaryEntry().getId(),
-                        Collectors.mapping(companion -> companion.getUser().getProfilePicture(), Collectors.toList())));
+                        Collectors.mapping(companion -> companion.getUser().getProfilePicture(),
+                                Collectors.filtering(Objects::nonNull, Collectors.toList()))));
         return entries.stream()
                 .map(entry -> {
                     Content content = entry.getContent();

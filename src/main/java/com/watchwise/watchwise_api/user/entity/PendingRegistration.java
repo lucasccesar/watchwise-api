@@ -44,7 +44,7 @@ public class PendingRegistration {
     @Column(length = 280)
     private String description;
 
-    @Column(name = "profile_picture", nullable = false, length = 2048)
+    @Column(name = "profile_picture", length = 2048)
     private String profilePicture;
 
     @Column(length = 2048)

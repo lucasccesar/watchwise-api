@@ -136,8 +136,8 @@ class UserMapperTest {
     }
 
     @Test
-    @DisplayName("[postUserDtoToUser] Should Apply Default ProfilePicture - When Value Is Null")
-    void shouldApplyDefaultProfilePictureWhenValueIsNull() {
+    @DisplayName("[postUserDtoToUser] Should Preserve Missing ProfilePicture - When Value Is Null")
+    void shouldPreserveMissingProfilePictureWhenValueIsNull() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
                 "john.doe@email.com",
@@ -149,7 +149,7 @@ class UserMapperTest {
 
         User result = userMapper.postUserDtoToUser(dto);
 
-        assertThat(result.getProfilePicture()).isEqualTo("https://default-image.png");
+        assertThat(result.getProfilePicture()).isNull();
     }
 
     @Test

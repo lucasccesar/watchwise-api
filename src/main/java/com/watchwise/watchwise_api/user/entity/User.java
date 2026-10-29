@@ -49,10 +49,9 @@ public class User {
     @Setter
     private String description;
 
-    @Column(name = "profile_picture", nullable = false, length = 2048)
+    @Column(name = "profile_picture", length = 2048)
     @Setter
-    @Builder.Default
-    private String profilePicture = "https://default-image.png";
+    private String profilePicture;
 
     @Column(length = 2048)
     @Setter
