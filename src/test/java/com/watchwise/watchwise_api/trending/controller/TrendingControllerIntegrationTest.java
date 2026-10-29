@@ -5,7 +5,9 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.dto.ContentCardViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.trending.dto.TrendingCardDTO;
 import com.watchwise.watchwise_api.trending.dto.TrendingResponseDTO;
@@ -31,6 +33,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -118,7 +121,10 @@ class TrendingControllerIntegrationTest {
                 List.of(new TrendingCardDTO(
                         "603", MovieOrSeriesType.MOVIE, "The Matrix",
                         "https://image.tmdb.org/t/p/w500/matrix.jpg", "/matrix-backdrop.jpg", 1999,
-                        List.of("Science Fiction", "Action"), 8.7, 8.2, 123.4, 136, null, null,
+                        List.of("Science Fiction", "Action"), 8.7, 8.2, 123.4, 136, null,
+                        new ContentCardViewerStateDTO(
+                                WatchStatus.WATCHED, 8, LocalDate.of(2026, 10, 1), 1,
+                                false, 1, true, false, null, null),
                         ContentPreviewStatus.AVAILABLE)),
                 List.of(new TrendingCardDTO(
                         "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
@@ -139,6 +145,7 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies[0].posterUrl").value("https://image.tmdb.org/t/p/w500/matrix.jpg"))
                 .andExpect(jsonPath("$.movies[0].backdropPath").value("/matrix-backdrop.jpg"))
                 .andExpect(jsonPath("$.movies[0].communityAverageScore").value(8.2))
+                .andExpect(jsonPath("$.movies[0].viewerState.inWatchlist").value(true))
                 .andExpect(jsonPath("$.movies[0].year").value(1999))
                 .andExpect(jsonPath("$.movies[0].tmdbVoteAverage").value(8.7))
                 .andExpect(jsonPath("$.movies[0].popularity").value(123.4))
@@ -162,7 +169,10 @@ class TrendingControllerIntegrationTest {
         TrendingResponseDTO expected = new TrendingResponseDTO(
                 List.of(new TrendingCardDTO(
                         "604", MovieOrSeriesType.MOVIE, "The Matrix Reloaded", null, null, 2003,
-                        null, 7.2, 7.7, 90.0, null, null, null,
+                        null, 7.2, 7.7, 90.0, null, null,
+                        new ContentCardViewerStateDTO(
+                                WatchStatus.PARTIALLY_WATCHED, null, null, null,
+                                null, 1, true, false, null, null),
                         ContentPreviewStatus.UNAVAILABLE)),
                 List.of(),
                 new TrendingResponseDTO.SectionPage(2, 12, 4, 80, true),
@@ -179,6 +189,7 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies").isArray())
                 .andExpect(jsonPath("$.movies[0].tmdbId").value("604"))
                 .andExpect(jsonPath("$.movies[0].communityAverageScore").value(7.7))
+                .andExpect(jsonPath("$.movies[0].viewerState.inWatchlist").value(true))
                 .andExpect(jsonPath("$.moviesPage.page").value(2))
                 .andExpect(jsonPath("$.moviesPage.hasNext").value(true))
                 .andExpect(jsonPath("$.series").isArray())

@@ -115,13 +115,15 @@ class TrendingServiceImplTest {
                 ContentPreviewStatus.AVAILABLE));
         assertThat(result.moviesPage()).isEqualTo(new TrendingResponseDTO.SectionPage(1, 12, 2, 21, true));
         assertThat(result.seriesPage()).isEqualTo(new TrendingResponseDTO.SectionPage(1, 12, 3, 42, true));
+        assertThat(result.movies().get(0).viewerState().inWatchlist()).isTrue();
+        assertThat(result.series().get(0).viewerState().inWatchlist()).isTrue();
 
         ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
         verify(contentCardAssembler).assemble(
                 specs.capture(),
                 eq(new ContentCardContext("pt-BR", "BR", null, viewerId)),
                 eq(Set.of(ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS,
-                        ContentCardFieldSet.VIEWER_STATE)));
+                        ContentCardFieldSet.VIEWER_STATE, ContentCardFieldSet.WATCHLIST_PROGRESS)));
         assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate)
                 .containsExactly(
                         new ContentCoordinate(ContentType.MOVIE, "603", null, null, null),
@@ -170,6 +172,7 @@ class TrendingServiceImplTest {
 
         assertThat(result.movies()).extracting(TrendingCardDTO::tmdbId).containsExactly("604");
         assertThat(result.movies().get(0).communityAverageScore()).isEqualTo(7.7);
+        assertThat(result.movies().get(0).viewerState().inWatchlist()).isTrue();
         assertThat(result.series()).isEmpty();
         assertThat(result.moviesPage()).isEqualTo(new TrendingResponseDTO.SectionPage(2, 12, 4, 80, true));
         assertThat(result.seriesPage()).isNull();

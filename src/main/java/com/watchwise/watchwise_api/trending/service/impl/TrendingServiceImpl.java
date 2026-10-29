@@ -43,7 +43,8 @@ public class TrendingServiceImpl implements TrendingService {
     private static final Set<ContentCardFieldSet> CARD_FIELDS = Set.of(
             ContentCardFieldSet.BASIC_METADATA,
             ContentCardFieldSet.STATS,
-            ContentCardFieldSet.VIEWER_STATE);
+            ContentCardFieldSet.VIEWER_STATE,
+            ContentCardFieldSet.WATCHLIST_PROGRESS);
 
     private final UserRepository userRepository;
     private final TmdbClient tmdbClient;
