@@ -74,9 +74,9 @@ class CookieUtilTest {
     }
 
     @Test
-    @DisplayName("[getCsrfTokenPath] Should Return Bare Context Path - When Context Path Is Set")
-    void shouldReturnBareContextPathWhenContextPathIsSet() {
-        assertThat(cookieUtil.getCsrfTokenPath()).isEqualTo("/api/v1");
+    @DisplayName("[getCsrfTokenPath] Should Return Root Path - When Context Path Is Set")
+    void shouldReturnRootPathWhenContextPathIsSet() {
+        assertThat(cookieUtil.getCsrfTokenPath()).isEqualTo("/");
     }
 
     @Test

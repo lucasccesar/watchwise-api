@@ -415,14 +415,14 @@ class UserControllerTest {
         HttpServletResponse response = mock(HttpServletResponse.class);
         ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
         when(cookieUtil.getRefreshTokenPath()).thenReturn("/api/v1/auth/refresh");
-        when(cookieUtil.getCsrfTokenPath()).thenReturn("/api/v1");
+        when(cookieUtil.getCsrfTokenPath()).thenReturn("/");
         when(cookieUtil.clearCookie(anyString(), anyString())).thenReturn(clearedCookie);
 
         userController.deleteCurrentUser(deleteAccountDTO, response);
 
         verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
         verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, "/api/v1/auth/refresh");
-        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/api/v1");
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
         verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 

@@ -42,7 +42,7 @@ public class CookieUtil {
         this.rememberMeRefreshTokenExpirationDays = rememberMeRefreshTokenExpirationDays;
         this.secureCookies = secureCookies;
         this.refreshTokenPath = contextPath + "/auth/refresh";
-        this.csrfTokenPath = contextPath.isEmpty() ? "/" : contextPath;
+        this.csrfTokenPath = "/";
         this.registrationProofPath = contextPath + "/auth";
     }
 
