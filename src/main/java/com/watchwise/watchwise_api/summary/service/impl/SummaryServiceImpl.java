@@ -230,7 +230,17 @@ public class SummaryServiceImpl implements SummaryService {
         if (content == null || content.getType() == null) {
             return null;
         }
-        return tmdbCardMetadataResolver.resolve(ContentCoordinate.from(content), language)
+        ContentCoordinate metadataCoordinate = switch (content.getType()) {
+            case MOVIE -> ContentCoordinate.from(content);
+            case EPISODE -> StringUtils.isNotBlank(content.getSeriesTmdbId())
+                    ? seriesCoordinate(content.getSeriesTmdbId())
+                    : null;
+            case SERIES, SEASON -> null;
+        };
+        if (metadataCoordinate == null) {
+            return null;
+        }
+        return tmdbCardMetadataResolver.resolve(metadataCoordinate, language)
                 .toOptional()
                 .map(TmdbCardMetadata::backdropPath)
                 .orElse(null);
