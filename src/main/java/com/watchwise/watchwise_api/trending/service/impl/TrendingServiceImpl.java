@@ -176,13 +176,15 @@ public class TrendingServiceImpl implements TrendingService {
         String title = firstNonNull(card == null ? null : card.title(), movie.title());
         String posterPath = firstNonNull(card == null ? null : card.posterPath(), movie.posterPath());
         Integer year = firstNonNull(card == null ? null : card.releaseYear(), releaseYear(movie.releaseDate()));
+        LocalDate releaseDate = firstNonNull(
+                card == null ? null : card.releaseDate(), parseDate(movie.releaseDate()));
         Integer runtime = firstNonNull(card == null ? null : card.runtimeMinutes(), movie.runtime());
         Double communityAverageScore = card == null || card.stats() == null
                 ? null
                 : card.stats().averageScore();
         return new TrendingCardDTO(
                 movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                backdropPath, year, card == null ? null : card.genres(), movie.voteAverage(),
+                backdropPath, year, releaseDate, card == null ? null : card.genres(), movie.voteAverage(),
                 communityAverageScore, movie.popularity(), runtime, null,
                 card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
@@ -195,6 +197,8 @@ public class TrendingServiceImpl implements TrendingService {
         String title = firstNonNull(card == null ? null : card.title(), series.name());
         String posterPath = firstNonNull(card == null ? null : card.posterPath(), series.posterPath());
         Integer year = firstNonNull(card == null ? null : card.releaseYear(), releaseYear(series.firstAirDate()));
+        LocalDate releaseDate = firstNonNull(
+                card == null ? null : card.releaseDate(), parseDate(series.firstAirDate()));
         Integer runtime = card == null ? null : card.runtimeMinutes();
         Integer numberOfSeasons = firstNonNull(
                 series.numberOfSeasons(), card == null ? null : card.numberOfSeasons());
@@ -203,7 +207,8 @@ public class TrendingServiceImpl implements TrendingService {
                 : card.stats().averageScore();
         return new TrendingCardDTO(
                 series.id(), MovieOrSeriesType.SERIES, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                null, year, card == null ? null : card.genres(), series.voteAverage(), communityAverageScore,
+                null, year, releaseDate, card == null ? null : card.genres(), series.voteAverage(),
+                communityAverageScore,
                 series.popularity(), runtime, numberOfSeasons, card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
     }

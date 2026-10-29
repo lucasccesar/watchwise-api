@@ -104,12 +104,14 @@ class TrendingServiceImplTest {
         assertThat(result.movies()).containsExactly(new TrendingCardDTO(
                 "603", MovieOrSeriesType.MOVIE, "The Matrix",
                 "https://image.tmdb.org/t/p/w500/matrix.jpg", "/matrix-backdrop.jpg", 1999,
+                LocalDate.of(1999, 3, 30),
                 List.of("Science Fiction", "Action"), 8.7, 8.2, 123.4, 136, null,
                 card(ContentType.MOVIE, "603", "The Matrix", "/matrix.jpg", 136, 8.2).viewerState(),
                 ContentPreviewStatus.AVAILABLE));
         assertThat(result.series()).containsExactly(new TrendingCardDTO(
                 "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
                 "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", null, 2008,
+                LocalDate.of(2008, 1, 20),
                 List.of("Drama", "Crime"), 9.1, 9.0, 456.7, 47, 5,
                 card(ContentType.SERIES, "1396", "Breaking Bad", "/breaking-bad.jpg", 47, 9.0).viewerState(),
                 ContentPreviewStatus.AVAILABLE));
@@ -173,6 +175,7 @@ class TrendingServiceImplTest {
         assertThat(result.movies()).extracting(TrendingCardDTO::tmdbId).containsExactly("604");
         assertThat(result.movies().get(0).communityAverageScore()).isEqualTo(7.7);
         assertThat(result.movies().get(0).viewerState().inWatchlist()).isTrue();
+        assertThat(result.movies().get(0).releaseDate()).isEqualTo(LocalDate.of(2003, 5, 7));
         assertThat(result.series()).isEmpty();
         assertThat(result.moviesPage()).isEqualTo(new TrendingResponseDTO.SectionPage(2, 12, 4, 80, true));
         assertThat(result.seriesPage()).isNull();
