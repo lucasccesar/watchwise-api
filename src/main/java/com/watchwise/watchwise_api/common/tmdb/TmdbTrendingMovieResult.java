@@ -14,7 +14,20 @@ public record TmdbTrendingMovieResult(
         @JsonProperty("genre_ids") List<Integer> genreIds,
         @JsonProperty("vote_average") Double voteAverage,
         Double popularity,
-        Integer runtime) {
+        Integer runtime,
+        @JsonProperty("backdrop_path") String backdropPath) {
+
+    public TmdbTrendingMovieResult(
+            String id,
+            String title,
+            String posterPath,
+            String releaseDate,
+            List<Integer> genreIds,
+            Double voteAverage,
+            Double popularity,
+            Integer runtime) {
+        this(id, title, posterPath, releaseDate, genreIds, voteAverage, popularity, runtime, null);
+    }
 
     public TmdbTrendingMovieResult(
             String id,
@@ -24,11 +37,11 @@ public record TmdbTrendingMovieResult(
             List<Integer> genreIds,
             Double voteAverage,
             Double popularity) {
-        this(id, title, posterPath, releaseDate, genreIds, voteAverage, popularity, null);
+        this(id, title, posterPath, releaseDate, genreIds, voteAverage, popularity, null, null);
     }
 
     public TmdbTrendingMovieResult(
             String id, String title, String posterPath, String releaseDate) {
-        this(id, title, posterPath, releaseDate, null, null, null, null);
+        this(id, title, posterPath, releaseDate, null, null, null, null, null);
     }
 }

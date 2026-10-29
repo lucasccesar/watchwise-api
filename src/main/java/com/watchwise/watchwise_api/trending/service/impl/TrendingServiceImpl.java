@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Service
@@ -41,6 +42,7 @@ public class TrendingServiceImpl implements TrendingService {
 
     private static final Set<ContentCardFieldSet> CARD_FIELDS = Set.of(
             ContentCardFieldSet.BASIC_METADATA,
+            ContentCardFieldSet.STATS,
             ContentCardFieldSet.VIEWER_STATE);
 
     private final UserRepository userRepository;
@@ -61,7 +63,7 @@ public class TrendingServiceImpl implements TrendingService {
         Map<ContentCoordinate, ContentCardDTO> cards = assembleCards(
                 viewer, movieSpecs(movies.results(), size), seriesSpecs(series.results(), size));
         return new TrendingResponseDTO(
-                toMovieCards(movies.results(), size, cards),
+                toMovieCards(movies.results(), size, cards, true),
                 toSeriesCards(series.results(), size, cards),
                 toSectionPage(movies, size),
                 toSectionPage(series, size));
@@ -80,7 +82,7 @@ public class TrendingServiceImpl implements TrendingService {
             Map<ContentCoordinate, ContentCardDTO> cards = assembleCards(
                     viewer, movieSpecs(movies.results(), size), List.of());
             return new TrendingResponseDTO(
-                    toMovieCards(movies.results(), size, cards),
+                    toMovieCards(movies.results(), size, cards, false),
                     List.of(),
                     toSectionPage(movies, size),
                     null);
@@ -144,10 +146,13 @@ public class TrendingServiceImpl implements TrendingService {
     private List<TrendingCardDTO> toMovieCards(
             List<TmdbTrendingMovieResult> results,
             int size,
-            Map<ContentCoordinate, ContentCardDTO> cards) {
-        return results.stream()
-                .limit(size)
-                .map(movie -> toMovieCard(movie, cards))
+            Map<ContentCoordinate, ContentCardDTO> cards,
+            boolean includeFirstBackdrop) {
+        return IntStream.range(0, Math.min(size, results.size()))
+                .mapToObj(index -> toMovieCard(
+                        results.get(index),
+                        includeFirstBackdrop && index == 0 ? results.get(index).backdropPath() : null,
+                        cards))
                 .toList();
     }
 
@@ -162,16 +167,22 @@ public class TrendingServiceImpl implements TrendingService {
     }
 
     private TrendingCardDTO toMovieCard(
-            TmdbTrendingMovieResult movie, Map<ContentCoordinate, ContentCardDTO> cards) {
+            TmdbTrendingMovieResult movie,
+            String backdropPath,
+            Map<ContentCoordinate, ContentCardDTO> cards) {
         ContentCoordinate coordinate = new ContentCoordinate(ContentType.MOVIE, movie.id(), null, null, null);
         ContentCardDTO card = cards.get(coordinate);
         String title = firstNonNull(card == null ? null : card.title(), movie.title());
         String posterPath = firstNonNull(card == null ? null : card.posterPath(), movie.posterPath());
         Integer year = firstNonNull(card == null ? null : card.releaseYear(), releaseYear(movie.releaseDate()));
         Integer runtime = firstNonNull(card == null ? null : card.runtimeMinutes(), movie.runtime());
+        Double communityAverageScore = card == null || card.stats() == null
+                ? null
+                : card.stats().averageScore();
         return new TrendingCardDTO(
                 movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                year, card == null ? null : card.genres(), movie.voteAverage(), movie.popularity(), runtime, null,
+                backdropPath, year, card == null ? null : card.genres(), movie.voteAverage(),
+                communityAverageScore, movie.popularity(), runtime, null,
                 card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
     }
@@ -186,10 +197,13 @@ public class TrendingServiceImpl implements TrendingService {
         Integer runtime = card == null ? null : card.runtimeMinutes();
         Integer numberOfSeasons = firstNonNull(
                 series.numberOfSeasons(), card == null ? null : card.numberOfSeasons());
+        Double communityAverageScore = card == null || card.stats() == null
+                ? null
+                : card.stats().averageScore();
         return new TrendingCardDTO(
                 series.id(), MovieOrSeriesType.SERIES, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                year, card == null ? null : card.genres(), series.voteAverage(), series.popularity(), runtime,
-                numberOfSeasons, card == null ? null : card.viewerState(),
+                null, year, card == null ? null : card.genres(), series.voteAverage(), communityAverageScore,
+                series.popularity(), runtime, numberOfSeasons, card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
     }
 

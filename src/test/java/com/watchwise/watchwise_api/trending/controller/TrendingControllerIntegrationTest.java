@@ -117,13 +117,13 @@ class TrendingControllerIntegrationTest {
         TrendingResponseDTO expected = new TrendingResponseDTO(
                 List.of(new TrendingCardDTO(
                         "603", MovieOrSeriesType.MOVIE, "The Matrix",
-                        "https://image.tmdb.org/t/p/w500/matrix.jpg", 1999,
-                        List.of("Science Fiction", "Action"), 8.7, 123.4, 136, null, null,
+                        "https://image.tmdb.org/t/p/w500/matrix.jpg", "/matrix-backdrop.jpg", 1999,
+                        List.of("Science Fiction", "Action"), 8.7, 8.2, 123.4, 136, null, null,
                         ContentPreviewStatus.AVAILABLE)),
                 List.of(new TrendingCardDTO(
                         "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
-                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", 2008,
-                        List.of("Drama", "Crime"), 9.1, 456.7, 47, 5, null,
+                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", null, 2008,
+                        List.of("Drama", "Crime"), 9.1, 9.0, 456.7, 47, 5, null,
                         ContentPreviewStatus.AVAILABLE)));
         when(trendingService.getTrending(user.id(), TrendingTimeWindow.DAY, 21)).thenReturn(expected);
 
@@ -137,6 +137,8 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies[0].type").value("MOVIE"))
                 .andExpect(jsonPath("$.movies[0].title").value("The Matrix"))
                 .andExpect(jsonPath("$.movies[0].posterUrl").value("https://image.tmdb.org/t/p/w500/matrix.jpg"))
+                .andExpect(jsonPath("$.movies[0].backdropPath").value("/matrix-backdrop.jpg"))
+                .andExpect(jsonPath("$.movies[0].communityAverageScore").value(8.2))
                 .andExpect(jsonPath("$.movies[0].year").value(1999))
                 .andExpect(jsonPath("$.movies[0].tmdbVoteAverage").value(8.7))
                 .andExpect(jsonPath("$.movies[0].popularity").value(123.4))
@@ -146,6 +148,7 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.series[0].type").value("SERIES"))
                 .andExpect(jsonPath("$.series[0].title").value("Breaking Bad"))
                 .andExpect(jsonPath("$.series[0].posterUrl").value("https://image.tmdb.org/t/p/w500/breaking-bad.jpg"))
+                .andExpect(jsonPath("$.series[0].communityAverageScore").value(9.0))
                 .andExpect(jsonPath("$.series[0].year").value(2008))
                 .andExpect(jsonPath("$.series[0].numberOfSeasons").value(5));
 
@@ -158,8 +161,9 @@ class TrendingControllerIntegrationTest {
         RegisteredUser user = registerUser("trendingcontinuation");
         TrendingResponseDTO expected = new TrendingResponseDTO(
                 List.of(new TrendingCardDTO(
-                        "604", MovieOrSeriesType.MOVIE, "The Matrix Reloaded", null, 2003,
-                        null, 7.2, 90.0, null, null, null, ContentPreviewStatus.UNAVAILABLE)),
+                        "604", MovieOrSeriesType.MOVIE, "The Matrix Reloaded", null, null, 2003,
+                        null, 7.2, 7.7, 90.0, null, null, null,
+                        ContentPreviewStatus.UNAVAILABLE)),
                 List.of(),
                 new TrendingResponseDTO.SectionPage(2, 12, 4, 80, true),
                 null);
@@ -174,6 +178,7 @@ class TrendingControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.movies").isArray())
                 .andExpect(jsonPath("$.movies[0].tmdbId").value("604"))
+                .andExpect(jsonPath("$.movies[0].communityAverageScore").value(7.7))
                 .andExpect(jsonPath("$.moviesPage.page").value(2))
                 .andExpect(jsonPath("$.moviesPage.hasNext").value(true))
                 .andExpect(jsonPath("$.series").isArray())

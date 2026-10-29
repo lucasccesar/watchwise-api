@@ -14,12 +14,12 @@ class TmdbTrendingModelsTest {
         TmdbTrendingMovieResult result = objectMapper.readValue("""
                 {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg",
                  "release_date":"1999-03-31","genre_ids":[28,878],
-                 "vote_average":8.7,"popularity":123.4}
+                 "vote_average":8.7,"popularity":123.4,"backdrop_path":"/matrix-backdrop.jpg"}
                 """, TmdbTrendingMovieResult.class);
 
         assertThat(result).isEqualTo(new TmdbTrendingMovieResult(
                 "603", "The Matrix", "/matrix.jpg", "1999-03-31",
-                java.util.List.of(28, 878), 8.7, 123.4));
+                java.util.List.of(28, 878), 8.7, 123.4, null, "/matrix-backdrop.jpg"));
     }
 
     @Test
