@@ -319,7 +319,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 season.name(),
                 season.overview(),
                 season.posterPath(),
-                null,
+                series.backdropPath(),
                 parseDate(season.airDate()),
                 averageRuntime(episodeRuntimes),
                 totalRuntimeMinutes(episodeRuntimes),
@@ -353,6 +353,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         TmdbEpisodeFullDetails episode = tmdbClient.getEpisodeFullDetails(
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
+        String seasonPosterPath = tmdbClient
+                .getSeasonFullDetails(content.getSeriesTmdbId(), content.getSeasonNumber(), language)
+                .toOptional()
+                .map(TmdbSeasonFullDetails::posterPath)
+                .orElse(null);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
         persistUnitRuntime(content, episode.runtime());
@@ -362,8 +367,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 ContentType.EPISODE,
                 episode.name(),
                 episode.overview(),
+                seasonPosterPath,
                 episode.stillPath(),
-                null,
                 parseDate(episode.airDate()),
                 episode.runtime(),
                 null,
