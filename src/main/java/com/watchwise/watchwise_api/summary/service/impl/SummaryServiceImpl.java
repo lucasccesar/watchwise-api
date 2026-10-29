@@ -252,12 +252,13 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(entry -> {
                     Content content = entry.getContent();
                     ContentCardDTO card = cards.get(ContentCoordinate.from(content));
-                    if (content.getType() == ContentType.EPISODE && card != null
+                    String seriesTitle = null;
+                    if (content.getType() == ContentType.EPISODE
                             && StringUtils.isNotBlank(content.getSeriesTmdbId())) {
                         ContentCoordinate seriesCoordinate = seriesCoordinate(content.getSeriesTmdbId());
                         ContentCardDTO seriesCard = cards.get(seriesCoordinate);
                         if (seriesCard != null && StringUtils.isNotBlank(seriesCard.title())) {
-                            card = withTitle(card, seriesCard.title());
+                            seriesTitle = seriesCard.title();
                         }
                     }
                     return new HomeRecentlyWatchedDTO(entry.getId(), new HomeContentReferenceDTO(
@@ -266,7 +267,7 @@ public class SummaryServiceImpl implements SummaryService {
                                     content.getEpisodeNumber(), content.getRuntimeMinutes()),
                             entry.getScore(), entry.getWatchedDate(),
                             card == null ? null : card.customPosterUrl(),
-                            companionPictures.getOrDefault(entry.getId(), List.of()), card);
+                            companionPictures.getOrDefault(entry.getId(), List.of()), card, seriesTitle);
                 })
                 .toList();
     }
@@ -313,15 +314,6 @@ public class SummaryServiceImpl implements SummaryService {
 
     private ContentCoordinate seriesCoordinate(String seriesTmdbId) {
         return new ContentCoordinate(ContentType.SERIES, seriesTmdbId, null, null, null);
-    }
-
-    private ContentCardDTO withTitle(ContentCardDTO card, String title) {
-        return new ContentCardDTO(
-                card.contentId(), card.type(), card.tmdbId(), card.seriesTmdbId(),
-                card.seasonNumber(), card.episodeNumber(), title, card.posterPath(), card.customPosterUrl(),
-                card.releaseDate(), card.releaseYear(), card.runtimeMinutes(), card.totalRuntimeMinutes(),
-                card.numberOfSeasons(), card.numberOfEpisodes(), card.genres(), card.stats(),
-                card.viewerState(), card.previewStatus());
     }
 
     private ContentCardSpec toCardSpec(Content content) {

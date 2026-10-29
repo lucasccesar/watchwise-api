@@ -13,7 +13,8 @@ public record HomeRecentlyWatchedDTO(
         LocalDate watchedDate,
         String customPosterUrl,
         List<String> companionProfilePictures,
-        ContentCardDTO card
+        ContentCardDTO card,
+        String seriesTitle
 ) {
     public HomeRecentlyWatchedDTO {
         companionProfilePictures = companionProfilePictures == null ? List.of() : List.copyOf(companionProfilePictures);
@@ -21,6 +22,11 @@ public record HomeRecentlyWatchedDTO(
 
     public HomeRecentlyWatchedDTO(UUID id, HomeContentReferenceDTO content, Integer score, LocalDate watchedDate,
             String customPosterUrl, List<String> companionProfilePictures) {
-        this(id, content, score, watchedDate, customPosterUrl, companionProfilePictures, null);
+        this(id, content, score, watchedDate, customPosterUrl, companionProfilePictures, null, null);
+    }
+
+    public HomeRecentlyWatchedDTO(UUID id, HomeContentReferenceDTO content, Integer score, LocalDate watchedDate,
+            String customPosterUrl, List<String> companionProfilePictures, ContentCardDTO card) {
+        this(id, content, score, watchedDate, customPosterUrl, companionProfilePictures, card, null);
     }
 }
