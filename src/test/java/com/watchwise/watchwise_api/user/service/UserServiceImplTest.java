@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
+import com.watchwise.watchwise_api.user.service.RegistrationStartResult;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -234,12 +235,13 @@ class UserServiceImplTest {
         when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
                 .thenReturn(Optional.empty());
         when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
-        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
+        when(emailConfirmationService.startRegistration(any(User.class)))
+                .thenReturn(RegistrationStartResult.pending("browser-proof"));
 
-        String result = userService.startRegistration(postUserDTO);
+        RegistrationStartResult result = userService.startRegistration(postUserDTO);
 
-        assertThat(result).isEqualTo("browser-proof");
-        verify(emailConfirmationService).issueForRegistration(any(User.class));
+        assertThat(result.registrationProof()).isEqualTo("browser-proof");
+        verify(emailConfirmationService).startRegistration(any(User.class));
         verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
@@ -251,13 +253,14 @@ class UserServiceImplTest {
         when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
                 .thenReturn(Optional.empty());
         when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
-        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
+        when(emailConfirmationService.startRegistration(any(User.class)))
+                .thenReturn(RegistrationStartResult.pending("browser-proof"));
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.startRegistration(postUserDTO);
 
-        verify(emailConfirmationService).issueForRegistration(userCaptor.capture());
+        verify(emailConfirmationService).startRegistration(userCaptor.capture());
         User capturedUser = userCaptor.getValue();
 
         assertThat(capturedUser.getUsername()).isEqualTo("JohnDoe");
@@ -273,13 +276,14 @@ class UserServiceImplTest {
         when(userRepository.findByEmailOrPendingEmailIgnoreCaseForUpdate("john.doe@email.com"))
                 .thenReturn(Optional.empty());
         when(userRepository.findByUsernameIgnoreCase("JohnDoe")).thenReturn(Optional.empty());
-        when(emailConfirmationService.issueForRegistration(any(User.class))).thenReturn("browser-proof");
+        when(emailConfirmationService.startRegistration(any(User.class)))
+                .thenReturn(RegistrationStartResult.pending("browser-proof"));
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.startRegistration(postUserDTO);
 
-        verify(emailConfirmationService).issueForRegistration(userCaptor.capture());
+        verify(emailConfirmationService).startRegistration(userCaptor.capture());
         assertThat(userCaptor.getValue().getIsEmailVerified()).isFalse();
     }
 
@@ -299,7 +303,7 @@ class UserServiceImplTest {
         assertThat(existing.getUsername()).isEqualTo("preclaimed");
         assertThat(existing.getPassword()).isEqualTo("existing-password-hash");
         verify(userRepository, never()).saveAndFlush(any(User.class));
-        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
+        verify(emailConfirmationService, never()).startRegistration(any(User.class));
     }
 
     @Test
@@ -318,7 +322,7 @@ class UserServiceImplTest {
         assertThat(accountWithPendingEmail.getEmail()).isEqualTo("current@email.com");
         assertThat(accountWithPendingEmail.getPendingEmail()).isEqualTo("john.doe@email.com");
         verify(userRepository, never()).saveAndFlush(any(User.class));
-        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
+        verify(emailConfirmationService, never()).startRegistration(any(User.class));
     }
 
     @Test
@@ -335,7 +339,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username already in use");
 
-        verify(emailConfirmationService, never()).issueForRegistration(any(User.class));
+        verify(emailConfirmationService, never()).startRegistration(any(User.class));
     }
     @Test
     @DisplayName("[startRegistration] Should Throw BadRequestException - When Trimmed Username Is Shorter Than The Minimum Length")

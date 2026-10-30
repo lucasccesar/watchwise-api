@@ -15,7 +15,7 @@ import java.util.UUID;
 
 public interface UserService {
 
-    String startRegistration(PostUserDTO postUserDTO);
+    RegistrationStartResult startRegistration(PostUserDTO postUserDTO);
 
     PublicUserProfileDTO getUserById(UUID viewerId, UUID targetUserId);
 

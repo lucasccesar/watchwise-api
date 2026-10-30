@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
 import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import com.watchwise.watchwise_api.user.service.PasswordResetService;
+import com.watchwise.watchwise_api.user.service.RegistrationStartResult;
 import com.watchwise.watchwise_api.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -108,8 +109,17 @@ public class AuthController {
 
         requestThrottler.checkAllowed(throttleKey("register", request), registerMaxRequests, Duration.ofMinutes(registerWindowMinutes));
 
-        String registrationProof = userService.startRegistration(postUserDTO);
-        cookieUtil.addCookie(response, cookieUtil.buildRegistrationProofCookie(registrationProof));
+        RegistrationStartResult registration = userService.startRegistration(postUserDTO);
+        if (registration.isAutoConfirmed()) {
+            UserResponseDTO user = userService.getCurrentUser(registration.userId());
+            long authVersion = userService.getAuthVersion(user.id());
+            rotateCsrfToken(request, response);
+            cookieUtil.addCookie(response, buildAccessTokenCookie(user.id(), authVersion, false));
+            cookieUtil.addCookie(response, buildRefreshTokenCookie(user.id(), authVersion, false));
+            return ResponseEntity.status(HttpStatus.CREATED).build();
+        }
+
+        cookieUtil.addCookie(response, cookieUtil.buildRegistrationProofCookie(registration.registrationProof()));
 
         return ResponseEntity.accepted().build();
     }

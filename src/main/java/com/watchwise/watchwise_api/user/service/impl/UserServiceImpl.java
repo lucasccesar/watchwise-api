@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
+import com.watchwise.watchwise_api.user.service.RegistrationStartResult;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -78,7 +79,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public String startRegistration(PostUserDTO postUserDTO) {
+    public RegistrationStartResult startRegistration(PostUserDTO postUserDTO) {
 
         String trimmedUsername = postUserDTO.username().trim();
         validateUsernameLength(trimmedUsername);
@@ -102,7 +103,7 @@ public class UserServiceImpl implements UserService {
             throw new ConflictException("Username already in use");
         }
 
-        return emailConfirmationService.issueForRegistration(mapperUser);
+        return emailConfirmationService.startRegistration(mapperUser);
     }
 
     @Override

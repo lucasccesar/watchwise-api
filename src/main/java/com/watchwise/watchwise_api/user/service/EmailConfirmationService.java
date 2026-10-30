@@ -55,6 +55,9 @@ public class EmailConfirmationService {
     @Value("${app.auth.registration.max-pending-attempts-per-email:3}")
     private int maxPendingAttemptsPerEmail;
 
+    @Value("${app.auth.registration.auto-confirm:false}")
+    private boolean autoConfirmRegistration;
+
     public void requireDeliveryConfigured() {
         requireSender();
     }
@@ -78,6 +81,35 @@ public class EmailConfirmationService {
         user.setEmailConfirmationExpiresAt(now.plus(Duration.ofMinutes(tokenTtlMinutes)));
         users.saveAndFlush(user);
         sendAfterCommit(sender, user.getPendingEmail() == null ? user.getEmail() : user.getPendingEmail(), rawToken);
+    }
+
+    @Transactional
+    public RegistrationStartResult startRegistration(User registration) {
+        if (!autoConfirmRegistration) {
+            return RegistrationStartResult.pending(issueForRegistration(registration));
+        }
+
+        String email = registration.getEmail().trim().toLowerCase(java.util.Locale.ROOT);
+        LocalDateTime now = LocalDateTime.now(clock);
+        pendingRegistrations.lockEmail(email);
+        if (users.findByEmailOrPendingEmailIgnoreCaseForUpdate(email).isPresent()) {
+            throw new ConflictException("Email already in use");
+        }
+
+        pendingRegistrations.deleteExpiredForEmail(email, now);
+        registration.setEmail(email);
+        registration.setIsEmailVerified(true);
+        registration.setEmailConfirmationTokenHash(null);
+        registration.setEmailConfirmationExpiresAt(null);
+        registration.setUpdatedAt(now);
+        User saved;
+        try {
+            saved = users.saveAndFlush(registration);
+        } catch (DataIntegrityViolationException exception) {
+            throw mapUniqueConstraintViolation(exception);
+        }
+        pendingRegistrations.deleteByEmailIgnoreCase(email);
+        return RegistrationStartResult.autoConfirmed(saved.getId());
     }
 
     @Transactional

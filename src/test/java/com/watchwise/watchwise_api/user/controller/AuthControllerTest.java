@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.ResendEmailConfirmationDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
+import com.watchwise.watchwise_api.user.service.RegistrationStartResult;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.EmailConfirmationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -139,7 +140,8 @@ class AuthControllerTest {
     void shouldReturnAcceptedWithoutUserDtoWhenRegistrationIsPending() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
+        when(userService.startRegistration(postUserDTO))
+                .thenReturn(RegistrationStartResult.pending("registration-proof"));
 
         ResponseEntity<Void> result = authController.register(postUserDTO, request, response);
 
@@ -166,7 +168,8 @@ class AuthControllerTest {
     void shouldSendConfirmationWithoutCreatingASessionWhenDeliveryIsConfigured() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
+        when(userService.startRegistration(postUserDTO))
+                .thenReturn(RegistrationStartResult.pending("registration-proof"));
 
         authController.register(postUserDTO, request, response);
 
@@ -256,7 +259,8 @@ class AuthControllerTest {
     void shouldCheckRateLimitBeforeCreatingUserWhenNotAuthenticated() {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
-        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
+        when(userService.startRegistration(postUserDTO))
+                .thenReturn(RegistrationStartResult.pending("registration-proof"));
 
         authController.register(postUserDTO, request, response);
 
@@ -271,7 +275,8 @@ class AuthControllerTest {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
-        when(userService.startRegistration(postUserDTO)).thenReturn("registration-proof");
+        when(userService.startRegistration(postUserDTO))
+                .thenReturn(RegistrationStartResult.pending("registration-proof"));
 
         authController.register(postUserDTO, request, response);
 
