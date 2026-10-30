@@ -1,0 +1,821 @@
+# Review package: 7ddfb1fa2b18a7ac5729adc6fb7adfb238e27bd6..6a654c1b00b130a635fed84b5c21364a075a4470
+
+## Commits
+6a654c1 feat(daily-game): add hierarchical episode selection
+--- FILES ---
+ .../dailygame/controller/DailyGameController.java  | 22 +++--
+ .../dailygame/dto/DailyGameEpisodeOptionDTO.java   | 11 +++
+ .../dailygame/dto/DailyGameSeasonOptionDTO.java    |  7 ++
+ .../dailygame/service/DailyGameSearchService.java  |  9 ++-
+ .../service/impl/DailyGameSearchServiceImpl.java   | 93 ++++++++++------------
+ .../DailyGameControllerIntegrationTest.java        | 63 +++++++++++++++
+ .../controller/DailyGameControllerTest.java        | 34 +++++---
+ .../impl/DailyGameSearchServiceImplTest.java       | 85 ++++++++++++--------
+ 8 files changed, 223 insertions(+), 101 deletions(-)
+--- DIFF ---
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java b/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
+index bdb3fba..f642ebe 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
+@@ -1,20 +1,22 @@
+ package com.watchwise.watchwise_api.dailygame.controller;
+ 
+ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+ import com.watchwise.watchwise_api.common.exception.BadRequestException;
+ import com.watchwise.watchwise_api.common.security.RequestThrottler;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+ import jakarta.validation.Valid;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.data.domain.Page;
+@@ -24,20 +26,21 @@ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.format.annotation.DateTimeFormat;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ import java.time.Duration;
+ import java.time.LocalDate;
+ import java.time.ZoneOffset;
++import java.util.List;
+ import java.util.UUID;
+ 
+ @RestController
+ @RequiredArgsConstructor
+ public class DailyGameController {
+ 
+     private final DailyGameService dailyGameService;
+     private final DailyGameSearchService dailyGameSearchService;
+     private final DailyGameRankingService dailyGameRankingService;
+     private final RequestThrottler requestThrottler;
+@@ -100,31 +103,36 @@ public class DailyGameController {
+     public ResponseEntity<PageResponseDTO<DailyGameSearchResultDTO>> searchEpisodeSeries(
+             @RequestParam("q") String query,
+             @RequestParam(value = "page", required = false) Integer page,
+             @RequestParam(value = "size", required = false) Integer size) {
+         UUID userId = currentUserId();
+         throttleSearch(userId);
+         Page<DailyGameSearchResultDTO> results = dailyGameSearchService.searchEpisodeSeries(userId, query, page, size);
+         return ResponseEntity.ok(PageResponseDTO.of(results));
+     }
+ 
++    @GetMapping("/games/EPISODE_BY_FRAME/search/seasons")
++    public ResponseEntity<List<DailyGameSeasonOptionDTO>> listEpisodeSeasons(
++            @RequestParam("seriesTmdbId") String seriesTmdbId) {
++        UUID userId = currentUserId();
++        throttleSearch(userId);
++        return ResponseEntity.ok(dailyGameSearchService.listEpisodeSeasons(userId, seriesTmdbId));
++    }
++
+     @GetMapping("/games/EPISODE_BY_FRAME/search/episodes")
+-    public ResponseEntity<PageResponseDTO<DailyGameSearchResultDTO>> searchEpisodes(
++    public ResponseEntity<List<DailyGameEpisodeOptionDTO>> listEpisodeEpisodes(
+             @RequestParam("seriesTmdbId") String seriesTmdbId,
+-            @RequestParam("q") String query,
+-            @RequestParam(value = "page", required = false) Integer page,
+-            @RequestParam(value = "size", required = false) Integer size) {
++            @RequestParam("seasonNumber") Integer seasonNumber) {
+         UUID userId = currentUserId();
+         throttleSearch(userId);
+-        Page<DailyGameSearchResultDTO> results = dailyGameSearchService.searchEpisodes(
+-                userId, seriesTmdbId, query, page, size);
+-        return ResponseEntity.ok(PageResponseDTO.of(results));
++        return ResponseEntity.ok(dailyGameSearchService.listEpisodeEpisodes(
++                userId, seriesTmdbId, seasonNumber));
+     }
+ 
+     @PostMapping("/games/{gameType}/attempt")
+     public ResponseEntity<DailyGameAttemptResponseDTO> submitAttempt(
+             @PathVariable("gameType") DailyGameType gameType,
+             @Valid @RequestBody DailyGameAttemptRequest request) {
+         UUID userId = currentUserId();
+         throttleAttempt(userId);
+         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request));
+     }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameEpisodeOptionDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameEpisodeOptionDTO.java
+new file mode 100644
+index 0000000..1a320e0
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameEpisodeOptionDTO.java
+@@ -0,0 +1,11 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import java.time.LocalDate;
++
++public record DailyGameEpisodeOptionDTO(
++        String seriesTmdbId,
++        Integer seasonNumber,
++        Integer episodeNumber,
++        String name,
++        LocalDate airDate) {
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameSeasonOptionDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameSeasonOptionDTO.java
+new file mode 100644
+index 0000000..6bae57c
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameSeasonOptionDTO.java
+@@ -0,0 +1,7 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public record DailyGameSeasonOptionDTO(
++        Integer seasonNumber,
++        String name,
++        Integer episodeCount) {
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameSearchService.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameSearchService.java
+index 756ad0e..78716e6 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameSearchService.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameSearchService.java
+@@ -1,19 +1,24 @@
+ package com.watchwise.watchwise_api.dailygame.service;
+ 
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import org.springframework.data.domain.Page;
+ 
++import java.util.List;
+ import java.util.UUID;
+ 
+ public interface DailyGameSearchService {
+ 
+     Page<DailyGameSearchResultDTO> search(
+             UUID userId, DailyGameType type, String query, Integer page, Integer size);
+ 
+     Page<DailyGameSearchResultDTO> searchEpisodeSeries(
+             UUID userId, String query, Integer page, Integer size);
+ 
+-    Page<DailyGameSearchResultDTO> searchEpisodes(
+-            UUID userId, String seriesTmdbId, String query, Integer page, Integer size);
++    List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId);
++
++    List<DailyGameEpisodeOptionDTO> listEpisodeEpisodes(
++            UUID userId, String seriesTmdbId, Integer seasonNumber);
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImpl.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImpl.java
+index 467c854..ac33a52 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImpl.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImpl.java
+@@ -7,35 +7,36 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.PageImpl;
+ import org.springframework.data.domain.PageRequest;
+ import org.springframework.stereotype.Service;
+ 
+ import java.time.Clock;
+ import java.time.LocalDate;
+ import java.time.format.DateTimeParseException;
+ import java.util.ArrayList;
+ import java.util.List;
+-import java.util.Locale;
+ import java.util.UUID;
+ import java.util.function.Function;
+ import java.util.function.IntFunction;
+ 
+ @Service
+ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
+ 
+     private static final int MAX_QUERY_LENGTH = 100;
+     private static final int MAX_SEARCH_PAGE_SIZE = 100;
+     private static final int TMDB_SEARCH_PAGE_SIZE = 20;
+@@ -76,42 +77,60 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
+ 
+     @Override
+     public Page<DailyGameSearchResultDTO> searchEpisodeSeries(
+             UUID userId, String query, Integer page, Integer size) {
+         String normalizedQuery = normalizeQuery(query);
+         PageRequest pageRequest = buildPageRequest(page, size);
+         return searchSeries(normalizedQuery, pageRequest);
+     }
+ 
+     @Override
+-    public Page<DailyGameSearchResultDTO> searchEpisodes(
+-            UUID userId, String seriesTmdbId, String query, Integer page, Integer size) {
++    public List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId) {
+         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
+-        String normalizedQuery = normalizeQuery(query);
+-        PageRequest pageRequest = buildPageRequest(page, size);
+         TmdbTvFullDetails series = foundValueOrEmpty(
+                 tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE));
+         if (series == null || series.seasons() == null) {
+-            return new PageImpl<>(List.of(), pageRequest, 0);
++            return List.of();
+         }
+ 
+-        LocalDate today = LocalDate.now(clock);
+-        String queryLowerCase = normalizedQuery.toLowerCase(Locale.ROOT);
+-        List<DailyGameSearchResultDTO> candidates = series.seasons().stream()
++        return series.seasons().stream()
+                 .filter(this::isRegularSeason)
+-                .flatMap(season -> seasonCandidates(
+-                        normalizedSeriesTmdbId, season.seasonNumber(), queryLowerCase, today).stream())
++                .map(season -> new DailyGameSeasonOptionDTO(
++                        season.seasonNumber(), season.name(), season.episodeCount()))
+                 .toList();
++    }
++
++    @Override
++    public List<DailyGameEpisodeOptionDTO> listEpisodeEpisodes(
++            UUID userId, String seriesTmdbId, Integer seasonNumber) {
++        String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
++        int normalizedSeasonNumber = normalizePositiveSeasonNumber(seasonNumber);
++        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
++                normalizedSeriesTmdbId, normalizedSeasonNumber, LANGUAGE);
++        if (lookup == null || lookup.isUnavailable()) {
++            throw tmdbUnavailable();
++        }
++        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
++                || found.value() == null || found.value().episodes() == null) {
++            return List.of();
++        }
+ 
+-        int fromIndex = Math.min((int) pageRequest.getOffset(), candidates.size());
+-        int toIndex = Math.min(fromIndex + pageRequest.getPageSize(), candidates.size());
+-        return new PageImpl<>(candidates.subList(fromIndex, toIndex), pageRequest, candidates.size());
++        LocalDate today = LocalDate.now(clock);
++        return found.value().episodes().stream()
++                .filter(episode -> isReleasedEpisode(episode, today))
++                .map(episode -> new DailyGameEpisodeOptionDTO(
++                        normalizedSeriesTmdbId,
++                        normalizedSeasonNumber,
++                        episode.episodeNumber(),
++                        episode.name(),
++                        parseDate(episode.airDate())))
++                .toList();
+     }
+ 
+     private Page<DailyGameSearchResultDTO> searchMovies(String query, PageRequest pageRequest) {
+         return searchExternal(
+                 pageRequest,
+                 remotePage -> tmdbClient.searchMovies(query, LANGUAGE, remotePage),
+                 movie -> new DailyGameSearchResultDTO(
+                         DailyGameTargetKind.MOVIE,
+                         movie.id(),
+                         null,
+@@ -148,74 +167,41 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
+                         null,
+                         person.id(),
+                         null,
+                         null,
+                         null,
+                         person.name(),
+                         TmdbImageUrlBuilder.profileUrl(person.profilePath()),
+                         null));
+     }
+ 
+-    private List<DailyGameSearchResultDTO> seasonCandidates(
+-            String seriesTmdbId, Integer seasonNumber, String query, LocalDate today) {
+-        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
+-                seriesTmdbId, seasonNumber, LANGUAGE);
+-        if (lookup == null || lookup.isUnavailable()) {
+-            throw tmdbUnavailable();
+-        }
+-        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
+-                || found.value() == null || found.value().episodes() == null) {
+-            return List.of();
+-        }
+-        return found.value().episodes().stream()
+-                .filter(episode -> isReleasedMatchingEpisode(episode, query, today))
+-                .map(episode -> toEpisodeResult(seriesTmdbId, seasonNumber, episode))
+-                .toList();
+-    }
+-
+     private TmdbTvFullDetails foundValueOrEmpty(TmdbLookupResult<TmdbTvFullDetails> lookup) {
+         if (lookup == null || lookup.isUnavailable()) {
+             throw tmdbUnavailable();
+         }
+         if (lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found) {
+             return found.value();
+         }
+         return null;
+     }
+ 
+     private boolean isRegularSeason(TmdbSeasonSummary season) {
+         return season != null && season.seasonNumber() != null && season.seasonNumber() > 0;
+     }
+ 
+-    private boolean isReleasedMatchingEpisode(TmdbEpisodeSummary episode, String query, LocalDate today) {
++    private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate today) {
+         if (episode == null || episode.episodeNumber() == null || episode.episodeNumber() < 1
+-                || episode.name() == null || episode.name().isBlank()
+-                || episode.stillPath() == null || episode.stillPath().isBlank()) {
++                || episode.name() == null || episode.name().isBlank()) {
+             return false;
+         }
+         LocalDate airDate = parseDate(episode.airDate());
+-        return airDate != null && !airDate.isAfter(today)
+-                && episode.name().toLowerCase(Locale.ROOT).contains(query);
+-    }
+-
+-    private DailyGameSearchResultDTO toEpisodeResult(
+-            String seriesTmdbId, Integer seasonNumber, TmdbEpisodeSummary episode) {
+-        return new DailyGameSearchResultDTO(
+-                DailyGameTargetKind.EPISODE,
+-                null,
+-                null,
+-                seriesTmdbId,
+-                seasonNumber,
+-                episode.episodeNumber(),
+-                episode.name(),
+-                TmdbImageUrlBuilder.stillUrl(episode.stillPath()),
+-                parseDate(episode.airDate()));
++        return airDate != null && !airDate.isAfter(today);
+     }
+ 
+     private <T> TmdbSearchPage<T> searchPageOrEmpty(
+             TmdbLookupResult<TmdbSearchPage<T>> lookup, int requestedPage) {
+         if (lookup == null || lookup.isUnavailable()) {
+             throw tmdbUnavailable();
+         }
+         if (!(lookup instanceof TmdbLookupResult.Found<TmdbSearchPage<T>> found)
+                 || found.value() == null) {
+             return new TmdbSearchPage<>(requestedPage, List.of(), 0, 0);
+@@ -288,20 +274,27 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
+     }
+ 
+     private String normalizePositiveIdentifier(String value) {
+         String trimmedValue = value == null ? null : value.trim();
+         if (trimmedValue == null || !trimmedValue.matches("[1-9]\\d*")) {
+             throw new BadRequestException("seriesTmdbId must be a positive numeric identifier");
+         }
+         return trimmedValue;
+     }
+ 
++    private int normalizePositiveSeasonNumber(Integer value) {
++        if (value == null || value <= 0) {
++            throw new BadRequestException("seasonNumber must be a positive integer");
++        }
++        return value;
++    }
++
+     private TmdbUnavailableException tmdbUnavailable() {
+         return new TmdbUnavailableException("TMDB is currently unavailable");
+     }
+ 
+     private LocalDate parseDate(String value) {
+         if (value == null || value.isBlank()) {
+             return null;
+         }
+         try {
+             return LocalDate.parse(value);
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
+index 55e8c71..decbe53 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
+@@ -180,20 +180,33 @@ class DailyGameControllerIntegrationTest {
+         RegisteredUser user = registerUser("dailycontrollergiveupcsrf");
+ 
+         mockMvc.perform(post("/games/{gameType}/give-up", DailyGameType.MOVIE_BY_INFO)
+                         .cookie(user.accessToken()))
+                 .andExpect(status().isForbidden())
+                 .andExpect(jsonPath("$.status").value(403));
+ 
+         verifyNoInteractions(dailyGameService);
+     }
+ 
++    @Test
++    @DisplayName("[search] Should Return Unauthorized - When Episode Dropdown Access Token Is Missing")
++    void shouldReturnUnauthorizedWhenEpisodeDropdownAccessTokenIsMissing() throws Exception {
++        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
++                        .param("seriesTmdbId", "1399"))
++                .andExpect(status().isUnauthorized())
++                .andExpect(jsonPath("$.status").value(401))
++                .andExpect(jsonPath("$.detail").doesNotExist())
++                .andExpect(jsonPath("$.instance").doesNotExist());
++
++        verifyNoInteractions(dailyGameSearchService);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Return Ok - When Access And Csrf Cookies Are Valid")
+     void shouldReturnOkWhenAccessAndCsrfCookiesAreValid() throws Exception {
+         RegisteredUser user = registerUser("dailycontrollerattempt");
+         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
+                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
+                 DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
+         when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+                 .thenReturn(response);
+ 
+@@ -216,20 +229,55 @@ class DailyGameControllerIntegrationTest {
+                 .andExpect(status().isBadRequest())
+                 .andExpect(jsonPath("$.status").value(400))
+                 .andExpect(jsonPath("$.error").value("Bad Request"))
+                 .andExpect(jsonPath("$.path").value("/games/UNKNOWN/search"))
+                 .andExpect(jsonPath("$.detail").doesNotExist())
+                 .andExpect(jsonPath("$.instance").doesNotExist());
+ 
+         verifyNoInteractions(dailyGameSearchService);
+     }
+ 
++    @Test
++    @DisplayName("[search] Should Return BadRequest ApiError - When Episode Series Identifier Is Invalid")
++    void shouldReturnBadRequestApiErrorWhenEpisodeSeriesIdentifierIsInvalid() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollerepisodeseriesid");
++        when(dailyGameSearchService.listEpisodeSeasons(user.id(), "abc"))
++                .thenThrow(new BadRequestException("seriesTmdbId must be a positive numeric identifier"));
++
++        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
++                        .param("seriesTmdbId", "abc").cookie(user.accessToken()))
++                .andExpect(status().isBadRequest())
++                .andExpect(jsonPath("$.status").value(400))
++                .andExpect(jsonPath("$.message").value("seriesTmdbId must be a positive numeric identifier"))
++                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/seasons"));
++
++        verify(dailyGameSearchService).listEpisodeSeasons(user.id(), "abc");
++    }
++
++    @Test
++    @DisplayName("[search] Should Return BadRequest ApiError - When Episode Season Coordinate Is Invalid")
++    void shouldReturnBadRequestApiErrorWhenEpisodeSeasonCoordinateIsInvalid() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollerepisodeseason");
++        when(dailyGameSearchService.listEpisodeEpisodes(user.id(), "1399", 0))
++                .thenThrow(new BadRequestException("seasonNumber must be a positive integer"));
++
++        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
++                        .param("seriesTmdbId", "1399").param("seasonNumber", "0")
++                        .cookie(user.accessToken()))
++                .andExpect(status().isBadRequest())
++                .andExpect(jsonPath("$.status").value(400))
++                .andExpect(jsonPath("$.message").value("seasonNumber must be a positive integer"))
++                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/episodes"));
++
++        verify(dailyGameSearchService).listEpisodeEpisodes(user.id(), "1399", 0);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Return BadRequest ApiError - When Candidate Identifiers Are Invalid")
+     void shouldReturnBadRequestApiErrorWhenCandidateIdentifiersAreInvalid() throws Exception {
+         RegisteredUser user = registerUser("dailycontrollerbody");
+ 
+         mockMvc.perform(attemptRequest(user, DailyGameType.MOVIE_BY_INFO, "{\"tmdbId\":\"not-numeric\"}"))
+                 .andExpect(status().isBadRequest())
+                 .andExpect(jsonPath("$.status").value(400))
+                 .andExpect(jsonPath("$.message").value("Validation Failed"))
+                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/attempt"))
+@@ -308,20 +356,35 @@ class DailyGameControllerIntegrationTest {
+                 .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+ 
+         mockMvc.perform(get("/games/{gameType}/search", DailyGameType.MOVIE_BY_INFO)
+                         .param("q", "fight").cookie(user.accessToken()))
+                 .andExpect(status().isBadGateway())
+                 .andExpect(jsonPath("$.status").value(502))
+                 .andExpect(jsonPath("$.error").value("Bad Gateway"))
+                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/search"));
+     }
+ 
++    @Test
++    @DisplayName("[search] Should Return BadGateway - When Episode Dropdown TMDB Is Unavailable")
++    void shouldReturnBadGatewayWhenEpisodeDropdownTmdbIsUnavailable() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollerepisodetmdb");
++        when(dailyGameSearchService.listEpisodeSeasons(user.id(), "1399"))
++                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
++
++        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
++                        .param("seriesTmdbId", "1399").cookie(user.accessToken()))
++                .andExpect(status().isBadGateway())
++                .andExpect(jsonPath("$.status").value(502))
++                .andExpect(jsonPath("$.error").value("Bad Gateway"))
++                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/seasons"));
++    }
++
+     @Test
+     @DisplayName("[history and ranking] Should Return Page Envelopes - When Requests Are Authenticated")
+     void shouldReturnHistoryAndRankingPageEnvelopesWhenRequestsAreAuthenticated() throws Exception {
+         RegisteredUser user = registerUser("dailycontrollerpages");
+         DailyGameHistoryDTO history = new DailyGameHistoryDTO(
+                 LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE,
+                 10, DailyGameViewStatus.COMPLETED, 1, 10, LocalDateTime.now(), answer());
+         DailyGameRankingEntryDTO ranking = new DailyGameRankingEntryDTO(
+                 1, user.id(), "dailycontrollerpages", null, 10, 1);
+         when(dailyGameRankingService.getHistory(user.id(), null, 1, 20))
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
+index 45a2eb3..4940484 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
+@@ -1,21 +1,23 @@
+ package com.watchwise.watchwise_api.dailygame.controller;
+ 
+ import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
+ import com.watchwise.watchwise_api.common.exception.ConflictException;
+ import com.watchwise.watchwise_api.common.security.RequestThrottler;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+@@ -207,56 +209,66 @@ class DailyGameControllerTest {
+                 .thenThrow(new ConflictException("Daily game attempt is already finished"));
+ 
+         mockMvc.perform(post("/games/{gameType}/give-up", GAME_TYPE))
+                 .andExpect(status().isConflict())
+                 .andExpect(jsonPath("$.status").value(409))
+                 .andExpect(jsonPath("$.error").value("Conflict"))
+                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/give-up"));
+     }
+ 
+     @Test
+-    @DisplayName("[search] Should Delegate All Search Routes - When Candidates Are Requested")
++    @DisplayName("[search] Should Delegate All Search Routes - When Candidates And Episode Dropdowns Are Requested")
+     void shouldDelegateAllSearchRoutesAndApplyOneSearchLimitPerRequest() throws Exception {
+         DailyGameSearchResultDTO movie = new DailyGameSearchResultDTO(
+                 DailyGameTargetKind.MOVIE, "550", null, null, null, null, "Fight Club", "/fight.jpg", null);
+         DailyGameSearchResultDTO series = new DailyGameSearchResultDTO(
+                 DailyGameTargetKind.SERIES, "1399", null, null, null, null, "Game of Thrones", "/got.jpg", null);
+-        DailyGameSearchResultDTO episode = new DailyGameSearchResultDTO(
+-                DailyGameTargetKind.EPISODE, null, null, "1399", 1, 1, "Winter Is Coming", "/episode.jpg", LocalDate.now());
++        DailyGameSeasonOptionDTO season = new DailyGameSeasonOptionDTO(1, "Season 1", 10);
++        DailyGameEpisodeOptionDTO episode = new DailyGameEpisodeOptionDTO(
++                "1399", 1, 1, "Winter Is Coming", LocalDate.of(2011, 4, 17));
+         when(dailyGameSearchService.search(CURRENT_USER_ID, GAME_TYPE, "fight", 2, 5))
+                 .thenReturn(page(movie));
+         when(dailyGameSearchService.searchEpisodeSeries(CURRENT_USER_ID, "game", 1, 10))
+                 .thenReturn(page(series));
+-        when(dailyGameSearchService.searchEpisodes(CURRENT_USER_ID, "1399", "winter", 1, 10))
+-                .thenReturn(page(episode));
++        when(dailyGameSearchService.listEpisodeSeasons(CURRENT_USER_ID, "1399"))
++                .thenReturn(List.of(season));
++        when(dailyGameSearchService.listEpisodeEpisodes(CURRENT_USER_ID, "1399", 1))
++                .thenReturn(List.of(episode));
+ 
+         mockMvc.perform(get("/games/{gameType}/search", GAME_TYPE)
+                         .param("q", "fight").param("page", "2").param("size", "5"))
+                 .andExpect(status().isOk())
+                 .andExpect(jsonPath("$.content[0].tmdbId").value("550"))
+                 .andExpect(jsonPath("$.page").value(2))
+                 .andExpect(jsonPath("$.size").value(5));
+         mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/series")
+                         .param("q", "game").param("page", "1").param("size", "10"))
+                 .andExpect(status().isOk())
+                 .andExpect(jsonPath("$.content[0].tmdbId").value("1399"));
++        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
++                        .param("seriesTmdbId", "1399"))
++                .andExpect(status().isOk())
++                .andExpect(jsonPath("$[0].seasonNumber").value(1))
++                .andExpect(jsonPath("$[0].episodeCount").value(10))
++                .andExpect(jsonPath("$[0].imageUrl").doesNotExist());
+         mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
+-                        .param("seriesTmdbId", "1399").param("q", "winter")
+-                        .param("page", "1").param("size", "10"))
++                        .param("seriesTmdbId", "1399").param("seasonNumber", "1"))
+                 .andExpect(status().isOk())
+-                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1399"))
+-                .andExpect(jsonPath("$.content[0].episodeNumber").value(1));
++                .andExpect(jsonPath("$[0].seriesTmdbId").value("1399"))
++                .andExpect(jsonPath("$[0].episodeNumber").value(1))
++                .andExpect(jsonPath("$[0].imageUrl").doesNotExist());
+ 
+         verify(dailyGameSearchService).search(CURRENT_USER_ID, GAME_TYPE, "fight", 2, 5);
+         verify(dailyGameSearchService).searchEpisodeSeries(CURRENT_USER_ID, "game", 1, 10);
+-        verify(dailyGameSearchService).searchEpisodes(CURRENT_USER_ID, "1399", "winter", 1, 10);
+-        verify(requestThrottler, org.mockito.Mockito.times(3)).checkAllowed(
++        verify(dailyGameSearchService).listEpisodeSeasons(CURRENT_USER_ID, "1399");
++        verify(dailyGameSearchService).listEpisodeEpisodes(CURRENT_USER_ID, "1399", 1);
++        verify(requestThrottler, org.mockito.Mockito.times(4)).checkAllowed(
+                 eq("daily-game-search|" + CURRENT_USER_ID), eq(30), eq(Duration.ofMinutes(5)));
+     }
+ 
+     @Test
+     @DisplayName("[search] Should Reject Generic Episode Route Without Throttling - When Episode By Frame Is Requested")
+     void shouldRejectGenericEpisodeRouteWithoutThrottlingWhenEpisodeByFrameIsRequested() throws Exception {
+         mockMvc.perform(get("/games/{gameType}/search", DailyGameType.EPISODE_BY_FRAME)
+                         .param("q", "pilot"))
+                 .andExpect(status().isBadRequest())
+                 .andExpect(jsonPath("$.message").value("Episode searches require the episode search endpoints"));
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImplTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImplTest.java
+index 576ee33..335e5a9 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImplTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameSearchServiceImplTest.java
+@@ -6,20 +6,22 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import org.junit.jupiter.api.DisplayName;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+ import org.junit.jupiter.params.ParameterizedTest;
+ import org.junit.jupiter.params.provider.EnumSource;
+ import org.junit.jupiter.params.provider.NullSource;
+ import org.junit.jupiter.params.provider.ValueSource;
+@@ -282,113 +284,134 @@ class DailyGameSearchServiceImplTest {
+ 
+         assertThat(result.getContent()).extracting(DailyGameSearchResultDTO::tmdbId)
+                 .containsExactly("400");
+         assertThat(result.getNumber()).isEqualTo(1);
+         assertThat(result.getTotalElements()).isEqualTo(2);
+         verify(tmdbClient).searchTv("office", LANGUAGE, 1);
+         verify(tmdbClient, never()).searchTv("office", LANGUAGE, 2);
+     }
+ 
+     @Test
+-    @DisplayName("[search] Should Accept Long Positive Numeric Series Identifier - When The Identifier Exceeds Twenty Digits")
+-    void shouldAcceptLongPositiveNumericSeriesIdentifierWhenTheIdentifierExceedsTwentyDigits() {
++    @DisplayName("[listEpisodeSeasons] Should Accept Long Positive Numeric Series Identifier - When The Identifier Exceeds Twenty Digits")
++    void shouldAcceptLongPositiveNumericSeriesIdentifierWhenListingEpisodeSeasons() {
+         String seriesTmdbId = "123456789012345678901";
+         when(tmdbClient.getTvFullDetails(seriesTmdbId, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+ 
+-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(
+-                USER_ID, seriesTmdbId, "pilot", 1, 20);
++        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, seriesTmdbId);
+ 
+-        assertThat(result.getContent()).isEmpty();
++        assertThat(result).isEmpty();
+         verify(tmdbClient).getTvFullDetails(seriesTmdbId, LANGUAGE);
+     }
+ 
+     @Test
+     @DisplayName("[searchEpisodeSeries] Should Search Only Series - When Finding Episode Sources")
+     void shouldSearchOnlySeriesWhenFindingEpisodeSources() {
+         when(tmdbClient.searchTv("office", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
+                 new TmdbSearchPage<>(1, List.of(new TmdbTvSearchResult("2316", "The Office", "/poster.jpg", "2005-03-24")), 1, 1)));
+ 
+         Page<DailyGameSearchResultDTO> result = service().searchEpisodeSeries(USER_ID, " office ", 1, 20);
+ 
+         assertThat(result.getContent().getFirst().targetKind()).isEqualTo(DailyGameTargetKind.SERIES);
+         assertThat(result.getContent().getFirst().tmdbId()).isEqualTo("2316");
+         verify(tmdbClient).searchTv("office", LANGUAGE, 1);
+         verify(tmdbClient, never()).searchMovies(anyString(), anyString(), anyInt());
+         verify(tmdbClient, never()).searchPeople(anyString(), anyString(), anyInt());
+     }
+ 
+     @Test
+-    @DisplayName("[searchEpisodes] Should Return Released Matching Episodes With Composite Identity - When The Series Has Regular And Future Episodes")
+-    void shouldReturnReleasedMatchingEpisodesWithCompositeIdentityWhenTheSeriesHasRegularAndFutureEpisodes() {
++    @DisplayName("[listEpisodeSeasons] Should Omit Specials And Map Only Dropdown Fields - When The Series Has Regular And Special Seasons")
++    void shouldOmitSpecialsAndMapOnlyDropdownFieldsWhenListingEpisodeSeasons() {
+         when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(seriesWithSeasons(
+                 new TmdbSeasonSummary(0, "Specials", null, "2008-01-01", 1, "/special.jpg"),
+                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, "/season-1.jpg"),
++                new TmdbSeasonSummary(-1, "Other Specials", null, "2007-01-01", 2, "/other-special.jpg"),
+                 new TmdbSeasonSummary(2, "Season 2", null, "2027-01-01", 1, "/season-2.jpg"))));
++
++        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, "1399");
++
++        assertThat(result).containsExactly(
++                new DailyGameSeasonOptionDTO(1, "Season 1", 4),
++                new DailyGameSeasonOptionDTO(2, "Season 2", 1));
++        verify(tmdbClient).getTvFullDetails("1399", LANGUAGE);
++    }
++
++    @Test
++    @DisplayName("[listEpisodeEpisodes] Should Return Released Episodes Without Image Fields - When A Season Has Future And Image-less Episodes")
++    void shouldReturnReleasedEpisodesWithoutImageFieldsWhenASeasonHasFutureAndImageLessEpisodes() {
+         when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(season(1,
+                 new TmdbEpisodeSummary(1, "Pilot", null, "2020-01-01", 45, "/pilot.jpg", null),
+                 new TmdbEpisodeSummary(2, "Future Fight", null, "2026-09-28", 45, "/future.jpg", null),
+                 new TmdbEpisodeSummary(3, "No Still Fight", null, "2020-02-01", 45, null, null),
+-                new TmdbEpisodeSummary(4, "Finale Fight", null, "2020-03-01", 45, "/finale.jpg", null))));
+-        when(tmdbClient.getSeasonFullDetails("1399", 2, LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(season(2,
+-                new TmdbEpisodeSummary(1, "Other Fight", null, "2020-04-01", 45, "/other.jpg", null))));
++                new TmdbEpisodeSummary(4, "Unaired", null, null, 45, "/unaired.jpg", null))));
+ 
+-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(USER_ID, "1399", "  fIgHt ", 1, 1);
++        List<DailyGameEpisodeOptionDTO> result = service().listEpisodeEpisodes(USER_ID, "1399", 1);
+ 
+-        assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
+-                DailyGameTargetKind.EPISODE, null, null, "1399", 1, 4,
+-                "Finale Fight", "https://image.tmdb.org/t/p/w300/finale.jpg", LocalDate.of(2020, 3, 1)));
+-        assertThat(result.getTotalElements()).isEqualTo(2);
+-        assertThat(result.getTotalPages()).isEqualTo(2);
+-        verify(tmdbClient).getTvFullDetails("1399", LANGUAGE);
++        assertThat(result).containsExactly(
++                new DailyGameEpisodeOptionDTO("1399", 1, 1, "Pilot", LocalDate.of(2020, 1, 1)),
++                new DailyGameEpisodeOptionDTO("1399", 1, 3, "No Still Fight", LocalDate.of(2020, 2, 1)));
+         verify(tmdbClient).getSeasonFullDetails("1399", 1, LANGUAGE);
+-        verify(tmdbClient).getSeasonFullDetails("1399", 2, LANGUAGE);
+-        verify(tmdbClient, never()).getSeasonFullDetails("1399", 0, LANGUAGE);
+     }
+ 
+     @Test
+-    @DisplayName("[searchEpisodes] Should Reject Invalid Series Identifier - When The Identifier Is Not Positive Numeric")
+-    void shouldRejectInvalidSeriesIdentifierWhenTheIdentifierIsNotPositiveNumeric() {
+-        assertThatThrownBy(() -> service().searchEpisodes(USER_ID, "abc", "pilot", 1, 20))
++    @DisplayName("[listEpisodeSeasons] Should Reject Invalid Series Identifier - When The Identifier Is Not Positive Numeric")
++    void shouldRejectInvalidSeriesIdentifierWhenListingEpisodeSeasons() {
++        assertThatThrownBy(() -> service().listEpisodeSeasons(USER_ID, "abc"))
++                .isInstanceOf(BadRequestException.class);
++
++        verifyNoInteractions(tmdbClient);
++    }
++
++    @Test
++    @DisplayName("[listEpisodeEpisodes] Should Reject Invalid Season Coordinate - When The Season Number Is Not Positive")
++    void shouldRejectInvalidSeasonCoordinateWhenTheSeasonNumberIsNotPositive() {
++        assertThatThrownBy(() -> service().listEpisodeEpisodes(USER_ID, "1399", 0))
+                 .isInstanceOf(BadRequestException.class);
+ 
+         verifyNoInteractions(tmdbClient);
+     }
+ 
+     @Test
+-    @DisplayName("[searchEpisodes] Should Return Empty Page - When The Series Or Season Is Not Found")
+-    void shouldReturnEmptyPageWhenTheSeriesOrSeasonIsNotFound() {
++    @DisplayName("[listEpisodeSeasons] Should Return Empty List - When The Series Is Not Found")
++    void shouldReturnEmptyListWhenTheSeriesIsNotFound() {
+         when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+ 
+-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(USER_ID, "1399", "pilot", 1, 20);
++        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, "1399");
+ 
+-        assertThat(result.getContent()).isEmpty();
+-        assertThat(result.getTotalElements()).isZero();
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    @DisplayName("[listEpisodeEpisodes] Should Return Empty List - When The Season Is Not Found")
++    void shouldReturnEmptyListWhenTheSeasonIsNotFound() {
++        when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
++
++        List<DailyGameEpisodeOptionDTO> result = service().listEpisodeEpisodes(USER_ID, "1399", 1);
++
++        assertThat(result).isEmpty();
+     }
+ 
+     @Test
+     @DisplayName("[search] Should Propagate TMDB Unavailable - When The External Search Is Unavailable")
+     void shouldPropagateTmdbUnavailableWhenTheExternalSearchIsUnavailable() {
+         when(tmdbClient.searchMovies("fight", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Unavailable<>());
+ 
+         assertThatThrownBy(() -> service().search(USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 20))
+                 .isInstanceOf(TmdbUnavailableException.class)
+                 .hasMessage("TMDB is currently unavailable");
+     }
+ 
+     @Test
+-    @DisplayName("[searchEpisodes] Should Propagate TMDB Unavailable - When A Season Lookup Is Unavailable")
++    @DisplayName("[listEpisodeEpisodes] Should Propagate TMDB Unavailable - When A Season Lookup Is Unavailable")
+     void shouldPropagateTmdbUnavailableWhenASeasonLookupIsUnavailable() {
+-        when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(seriesWithSeasons(
+-                new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg"))));
+         when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.Unavailable<>());
+ 
+-        assertThatThrownBy(() -> service().searchEpisodes(USER_ID, "1399", "pilot", 1, 20))
++        assertThatThrownBy(() -> service().listEpisodeEpisodes(USER_ID, "1399", 1))
+                 .isInstanceOf(TmdbUnavailableException.class)
+                 .hasMessage("TMDB is currently unavailable");
+     }
+ 
+     private DailyGameSearchServiceImpl service() {
+         return new DailyGameSearchServiceImpl(tmdbClient, new PageRequestFactory(), CLOCK);
+     }
+ 
+     private TmdbMovieSearchResult movie(String id, String title) {
+         return new TmdbMovieSearchResult(id, title, "/poster.jpg", "1999-10-15");
+

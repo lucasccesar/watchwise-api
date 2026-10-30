@@ -1,0 +1,719 @@
+# Review package: 6a654c1b00b130a635fed84b5c21364a075a4470..6f1b230
+
+## Commits
+6f1b230 feat(daily-game): require six episode stills
+--- FILES ---
+ .../dailygame/dto/DailyGameAnswerDTO.java          |  18 ++-
+ .../DailyChallengeSnapshotAssembler.java           |  21 +++-
+ .../generation/EpisodeByFrameGenerator.java        |  73 +++++++++----
+ .../impl/DailyChallengeResponseAssembler.java      |  47 +++++++-
+ .../generation/DailyChallengeGeneratorTest.java    | 121 ++++++++++++++++++++-
+ .../impl/DailyChallengeResponseAssemblerTest.java  |  42 +++++++
+ .../service/impl/DailyGameServiceImplTest.java     |  26 +++++
+ 7 files changed, 319 insertions(+), 29 deletions(-)
+--- DIFF ---
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAnswerDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAnswerDTO.java
+index dbae344..338c676 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAnswerDTO.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAnswerDTO.java
+@@ -3,12 +3,28 @@ package com.watchwise.watchwise_api.dailygame.dto;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ 
+ public record DailyGameAnswerDTO(
+         DailyGameTargetKind targetKind,
+         String tmdbId,
+         String personTmdbId,
+         String seriesTmdbId,
+         Integer seasonNumber,
+         Integer episodeNumber,
+         String title,
+-        String imageUrl) {
++        String imageUrl,
++        String seriesName,
++        String seriesPosterUrl,
++        Integer seriesYear) {
++
++    public DailyGameAnswerDTO(
++            DailyGameTargetKind targetKind,
++            String tmdbId,
++            String personTmdbId,
++            String seriesTmdbId,
++            Integer seasonNumber,
++            Integer episodeNumber,
++            String title,
++            String imageUrl) {
++        this(targetKind, tmdbId, personTmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, imageUrl,
++                null, null, null);
++    }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
+index 2a4de5c..3b90412 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
+@@ -37,26 +37,37 @@ public class DailyChallengeSnapshotAssembler {
+                                           String sourceTmdbId, List<DailyChallengeCandidate.HintSnapshot> hints) {
+         return candidate(gameType, DailyGameTargetKind.PERSON, personTmdbId, null, null, null, sourceTmdbId,
+                 "PERSON:" + personTmdbId, imagePath,
+                 answerSnapshot(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null, name, imagePath,
+                         sourceTmdbId),
+                 displaySnapshot(imagePath), hints);
+     }
+ 
+     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
+                                            String name, List<String> imagePaths) {
++        return episode(seriesTmdbId, seasonNumber, episodeNumber, name, null, null, null, imagePaths);
++    }
++
++    public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
++                                           String name, String seriesName, String seriesPosterPath, Integer seriesYear,
++                                           List<String> imagePaths) {
+         String imagePath = imagePaths.getFirst();
++        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.EPISODE, null, null,
++                seriesTmdbId, seasonNumber, episodeNumber, name, imagePath, seriesTmdbId);
++        put(answerSnapshot, "seriesName", seriesName);
++        put(answerSnapshot, "seriesPosterPath", seriesPosterPath);
++        put(answerSnapshot, "seriesYear", seriesYear);
++        put(answerSnapshot, "episodeName", name);
+         return candidate(DailyGameType.EPISODE_BY_FRAME, DailyGameTargetKind.EPISODE, null, seriesTmdbId,
+                 seasonNumber, episodeNumber, seriesTmdbId,
+                 "EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber, imagePath,
+-                answerSnapshot(DailyGameTargetKind.EPISODE, null, null, seriesTmdbId, seasonNumber, episodeNumber,
+-                        name, imagePath, seriesTmdbId),
++                answerSnapshot,
+                 displaySnapshot(imagePaths), List.of());
+     }
+ 
+     public DailyChallengeCandidate movieInfo(TmdbMovieFullDetails movie, String imagePath,
+                                              List<DailyChallengeCandidate.HintSnapshot> hints) {
+         return candidate(DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, movie.id(), null, null, null,
+                 movie.id(), "MOVIE:" + movie.id(), imagePath,
+                 answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null, null, null, null, movie.title(), imagePath,
+                         movie.id()),
+                 displaySnapshot(imagePath), hints);
+@@ -125,11 +136,17 @@ public class DailyChallengeSnapshotAssembler {
+                                               List<DailyChallengeCandidate.HintSnapshot> hints) {
+         return new DailyChallengeCandidate(gameType, targetKind, targetTmdbId, seriesTmdbId, seasonNumber,
+                 episodeNumber, sourceTmdbId, answerKey, imagePath, answerSnapshot, displaySnapshot, hints);
+     }
+ 
+     private static void put(Map<String, Object> snapshot, String field, String value) {
+         if (value != null && !value.isBlank()) {
+             snapshot.put(field, value);
+         }
+     }
++
++    private static void put(Map<String, Object> snapshot, String field, Object value) {
++        if (value != null) {
++            snapshot.put(field, value);
++        }
++    }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/EpisodeByFrameGenerator.java b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/EpisodeByFrameGenerator.java
+index 87d2e74..da43425 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/EpisodeByFrameGenerator.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/EpisodeByFrameGenerator.java
+@@ -6,123 +6,154 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeImages;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbStill;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import org.springframework.stereotype.Component;
+ 
+ import java.time.LocalDate;
+ import java.util.ArrayList;
++import java.util.Collections;
+ import java.util.LinkedHashSet;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.Set;
+ 
+ @Component
+ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
+ 
++    private static final int MINIMUM_STILL_COUNT = 6;
++
+     private final TmdbClient tmdbClient;
+     private final DailyChallengeSnapshotAssembler snapshotAssembler;
+ 
+     public EpisodeByFrameGenerator(TmdbClient tmdbClient, DailyChallengeSnapshotAssembler snapshotAssembler) {
+         this.tmdbClient = tmdbClient;
+         this.snapshotAssembler = snapshotAssembler;
+     }
+ 
+     @Override
+     public DailyGameType gameType() {
+         return DailyGameType.EPISODE_BY_FRAME;
+     }
+ 
+     @Override
+     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
+         return generate(challengeDate, Set.of());
+     }
+ 
+     @Override
+     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+-        return DailyChallengeGenerationSupport.randomItem(
++        List<TmdbTvSearchResult> series = DailyChallengeGenerationSupport.value(
+                         tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
+                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+-                .filter(series -> series != null && DailyChallengeGenerationSupport.validId(series.id()))
+-                .flatMap(series -> findEpisode(series, challengeDate, excludedAnswerKeys));
++                .map(page -> shuffled(page.results()))
++                .orElse(List.of());
++        return series.stream()
++                .filter(item -> item != null && DailyChallengeGenerationSupport.validId(item.id()))
++                .map(item -> findEpisode(item, challengeDate, excludedAnswerKeys))
++                .flatMap(Optional::stream)
++                .findFirst();
+     }
+ 
+     private Optional<DailyChallengeCandidate> findEpisode(TmdbTvSearchResult series, LocalDate challengeDate,
+                                                           Set<String> excludedAnswerKeys) {
+         TmdbLookup<TmdbTvFullDetails> lookup = new TmdbLookup<>(tmdbClient.getTvFullDetails(series.id(),
+                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+         return lookup.value()
+                 .flatMap(details -> findEpisode(series.id(), details, challengeDate, excludedAnswerKeys));
+     }
+ 
+     private Optional<DailyChallengeCandidate> findEpisode(String seriesTmdbId, TmdbTvFullDetails series,
+                                                           LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+         if (series.seasons() == null) {
+             return Optional.empty();
+         }
+-        List<EpisodeCandidate> candidates = new ArrayList<>();
+-        series.seasons().stream()
++        for (TmdbSeasonSummary season : shuffled(series.seasons().stream()
+                 .filter(this::isRegularSeason)
+-                .forEach(season -> DailyChallengeGenerationSupport.value(
+-                                tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(),
+-                                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+-                        .ifPresent(details -> addReleasedEpisodes(candidates, details, challengeDate)));
+-        return DailyChallengeGenerationSupport.randomItem(candidates, episode ->
+-                        !excludedAnswerKeys.contains("EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
+-                                + ":" + episode.episodeNumber()))
+-                .map(episode -> snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(), episode.episodeNumber(),
+-                        episode.name(), imagePaths(seriesTmdbId, episode)));
++                .toList())) {
++            Optional<TmdbSeasonFullDetails> seasonDetails = DailyChallengeGenerationSupport.value(
++                    tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(),
++                            TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
++            if (seasonDetails.isEmpty()) {
++                continue;
++            }
++            List<EpisodeCandidate> episodes = new ArrayList<>();
++            addReleasedEpisodes(episodes, seasonDetails.get(), challengeDate);
++            for (EpisodeCandidate episode : shuffled(episodes)) {
++                String answerKey = "EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
++                        + ":" + episode.episodeNumber();
++                if (excludedAnswerKeys != null && excludedAnswerKeys.contains(answerKey)) {
++                    continue;
++                }
++                List<String> paths = imagePaths(seriesTmdbId, episode);
++                if (paths.size() >= MINIMUM_STILL_COUNT) {
++                    return Optional.of(snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(),
++                            episode.episodeNumber(), episode.name(), series.name(), series.posterPath(),
++                            seriesYear(series.firstAirDate()), paths));
++                }
++            }
++        }
++        return Optional.empty();
+     }
+ 
+     private List<String> imagePaths(String seriesTmdbId, EpisodeCandidate episode) {
+         LinkedHashSet<String> paths = new LinkedHashSet<>();
+         DailyChallengeGenerationSupport.value(tmdbClient.getEpisodeImages(
+                         seriesTmdbId, episode.seasonNumber(), episode.episodeNumber()))
+                 .map(TmdbEpisodeImages::stills)
+                 .orElse(List.of())
+                 .stream()
+                 .filter(still -> still != null && still.filePath() != null && !still.filePath().isBlank())
+                 .map(TmdbStill::filePath)
+                 .map(String::trim)
+                 .forEach(paths::add);
+-        if (paths.isEmpty()) {
+-            paths.add(episode.stillPath());
+-        }
+         List<String> ordered = new ArrayList<>(paths);
+-        java.util.Collections.reverse(ordered);
++        Collections.reverse(ordered);
+         return List.copyOf(ordered);
+     }
+ 
+     private boolean isRegularSeason(TmdbSeasonSummary season) {
+         return season != null && season.seasonNumber() != null && season.seasonNumber() > 0;
+     }
+ 
+     private void addReleasedEpisodes(List<EpisodeCandidate> candidates, TmdbSeasonFullDetails season,
+                                      LocalDate challengeDate) {
+         if (season.seasonNumber() == null || season.episodes() == null) {
+             return;
+         }
+         season.episodes().stream()
+                 .filter(episode -> isReleasedEpisode(episode, challengeDate))
+                 .forEach(episode -> candidates.add(new EpisodeCandidate(season.seasonNumber(), episode.episodeNumber(),
+-                        episode.name(), episode.stillPath())));
++                        episode.name())));
+     }
+ 
+     private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate challengeDate) {
+         return episode != null && episode.episodeNumber() != null && episode.episodeNumber() > 0
+                 && episode.name() != null && !episode.name().isBlank()
+-                && DailyChallengeGenerationSupport.validImage(episode.stillPath())
+                 && DailyChallengeGenerationSupport.date(episode.airDate())
+                 .map(releaseDate -> !releaseDate.isAfter(challengeDate)).orElse(false);
+     }
+ 
+-    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name, String stillPath) {
++    private Integer seriesYear(String firstAirDate) {
++        return DailyChallengeGenerationSupport.date(firstAirDate).map(LocalDate::getYear).orElse(null);
++    }
++
++    private <T> List<T> shuffled(List<T> values) {
++        if (values == null || values.isEmpty()) {
++            return List.of();
++        }
++        List<T> shuffled = new ArrayList<>(values);
++        Collections.shuffle(shuffled);
++        return shuffled;
++    }
++
++    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name) {
+     }
+ 
+     private record TmdbLookup<T>(com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult<T> result) {
+         Optional<T> value() {
+             return DailyChallengeGenerationSupport.value(result);
+         }
+     }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+index f89c061..f639a5b 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+@@ -169,40 +169,83 @@ public class DailyChallengeResponseAssembler {
+         };
+     }
+ 
+     private DailyGameAnswerDTO answer(DailyChallenge challenge) {
+         DailyGameTargetKind targetKind = challenge.getTargetKind();
+         String tmdbId = targetKind == DailyGameTargetKind.MOVIE || targetKind == DailyGameTargetKind.SERIES
+                 ? challenge.getTargetTmdbId() : null;
+         String personTmdbId = targetKind == DailyGameTargetKind.PERSON ? challenge.getTargetTmdbId() : null;
+         String seriesTmdbId = targetKind == DailyGameTargetKind.EPISODE ? challenge.getSeriesTmdbId() : null;
+         Map<String, Object> snapshot = challenge.getAnswerSnapshot();
+-        String title = snapshot == null ? null : (String) snapshot.get("title");
++        String title = snapshotValue(snapshot, "episodeName");
++        if (title == null) {
++            title = snapshotValue(snapshot, "title");
++        }
++        String seriesName = targetKind == DailyGameTargetKind.EPISODE
++                ? snapshotValue(snapshot, "seriesName") : null;
++        String seriesPosterPath = targetKind == DailyGameTargetKind.EPISODE
++                ? snapshotValue(snapshot, "seriesPosterPath") : null;
++        Integer seriesYear = targetKind == DailyGameTargetKind.EPISODE
++                ? snapshotInteger(snapshot, "seriesYear") : null;
+         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
+-                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge));
++                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge), seriesName,
++                posterUrl(seriesPosterPath), seriesYear);
+     }
+ 
+     private String imageUrl(DailyChallenge challenge) {
+         return imageUrl(challenge, challenge.getImagePath());
+     }
+ 
+     private String imageUrl(DailyChallenge challenge, String imagePath) {
+         if (isAbsoluteHttpUrl(imagePath)) {
+             return imagePath;
+         }
+         return switch (challenge.getTargetKind()) {
+             case MOVIE, SERIES -> TmdbImageUrlBuilder.posterUrl(imagePath);
+             case PERSON -> TmdbImageUrlBuilder.profileUrl(imagePath);
+             case EPISODE -> TmdbImageUrlBuilder.stillUrl(imagePath);
+         };
+     }
+ 
++    private String posterUrl(String imagePath) {
++        if (isAbsoluteHttpUrl(imagePath)) {
++            return imagePath;
++        }
++        return TmdbImageUrlBuilder.posterUrl(imagePath);
++    }
++
++    private String snapshotValue(Map<String, Object> snapshot, String key) {
++        if (snapshot == null) {
++            return null;
++        }
++        Object value = snapshot.get(key);
++        return value instanceof String string && !string.isBlank() ? string : null;
++    }
++
++    private Integer snapshotInteger(Map<String, Object> snapshot, String key) {
++        if (snapshot == null) {
++            return null;
++        }
++        Object value = snapshot.get(key);
++        if (value instanceof Number number) {
++            return number.intValue();
++        }
++        if (value instanceof String string) {
++            try {
++                return Integer.valueOf(string);
++            } catch (NumberFormatException ignored) {
++                return null;
++            }
++        }
++        return null;
++    }
++
+     private List<String> imagePaths(DailyChallenge challenge) {
+         Map<String, Object> snapshot = challenge.getDisplaySnapshot();
+         if (snapshot != null && snapshot.get("imagePaths") instanceof List<?> paths) {
+             List<String> validPaths = paths.stream()
+                     .filter(String.class::isInstance)
+                     .map(String.class::cast)
+                     .filter(path -> !path.isBlank())
+                     .toList();
+             if (!validPaths.isEmpty()) {
+                 return validPaths;
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
+index 654058f..d435709 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
+@@ -40,20 +40,21 @@ import org.mockito.junit.jupiter.MockitoExtension;
+ import java.time.LocalDate;
+ import java.util.Collections;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Set;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
+ import static org.mockito.ArgumentMatchers.eq;
+ import static org.mockito.ArgumentMatchers.intThat;
++import static org.mockito.Mockito.lenient;
+ import static org.mockito.Mockito.verify;
+ import static org.mockito.Mockito.when;
+ 
+ @ExtendWith(MockitoExtension.class)
+ class DailyChallengeGeneratorTest {
+ 
+     private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
+     private static final LocalDate CHALLENGE_DATE = LocalDate.of(2026, 9, 27);
+ 
+     @Mock
+@@ -161,34 +162,133 @@ class DailyChallengeGeneratorTest {
+                         new TmdbEpisodeSummary(2, "Future", null, "2026-09-28", 10, "/future.jpg", List.of()),
+                         new TmdbEpisodeSummary(3, "Valid", null, "2026-09-27", 10, "/valid.jpg", List.of())), null, null);
+         TmdbTvFullDetails series = seriesDetails("1396", "Breaking Bad", null, List.of(
+                 new TmdbSeasonSummary(0, "Specials", null, "2008-01-01", 1, null),
+                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, null)));
+         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(series));
+         when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season));
+         when(tmdbClient.getEpisodeImages("1396", 1, 3)).thenReturn(found(new TmdbEpisodeImages(List.of(
+                 new TmdbStill("/first.jpg"),
+                 new TmdbStill("/second.jpg"),
+-                new TmdbStill("/third.jpg")))));
++                new TmdbStill("/third.jpg"),
++                new TmdbStill("/fourth.jpg"),
++                new TmdbStill("/fifth.jpg"),
++                new TmdbStill("/sixth.jpg")))));
+ 
+         DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
+                 .generate(CHALLENGE_DATE)
+                 .orElseThrow();
+ 
+         assertThat(candidate.answerKey()).isEqualTo("EPISODE:1396:1:3");
+         assertThat(candidate.targetTmdbId()).isNull();
+         assertThat(candidate.seriesTmdbId()).isEqualTo("1396");
+         assertThat(candidate.seasonNumber()).isEqualTo(1);
+         assertThat(candidate.episodeNumber()).isEqualTo(3);
+-        assertThat(candidate.imagePath()).isEqualTo("/third.jpg");
++        assertThat(candidate.imagePath()).isEqualTo("/sixth.jpg");
+         assertThat(candidate.displaySnapshot().get("imagePaths"))
+-                .isEqualTo(List.of("/third.jpg", "/second.jpg", "/first.jpg"));
++                .isEqualTo(List.of("/sixth.jpg", "/fifth.jpg", "/fourth.jpg", "/third.jpg", "/second.jpg", "/first.jpg"));
++        assertThat(candidate.answerSnapshot())
++                .containsEntry("seriesName", "Breaking Bad")
++                .containsEntry("seriesPosterPath", "/poster.jpg")
++                .containsEntry("seriesYear", 2008)
++                .containsEntry("episodeName", "Valid")
++                .containsEntry("seasonNumber", 1)
++                .containsEntry("episodeNumber", 3);
++    }
++
++    @Test
++    @DisplayName("[generate] Should Reject The Episode - When It Has Fewer Than Six Unique Still Images")
++    void shouldRejectTheEpisodeWhenItHasFewerThanSixUniqueStillImages() {
++        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
++                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
++                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
++        when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
++                episode(1, "Too Few", "/summary.jpg"))));
++        when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(new TmdbEpisodeImages(List.of(
++                new TmdbStill("/one.jpg"), new TmdbStill("/two.jpg"), new TmdbStill("/three.jpg"),
++                new TmdbStill("/four.jpg"), new TmdbStill("/five.jpg"), new TmdbStill("/five.jpg"),
++                new TmdbStill("  ")))));
++
++        assertThat(new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE))
++                .isEmpty();
++    }
++
++    @Test
++    @DisplayName("[generate] Should Choose The Second Episode - When The First Episode Has Too Few Stills")
++    void shouldChooseTheSecondEpisodeWhenTheFirstEpisodeHasTooFewStills() {
++        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
++                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
++                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null)))));
++        when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
++                episode(1, "Too Few", "/first-summary.jpg"),
++                episode(2, "Second Episode", null))));
++        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
++        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 2)).thenReturn(found(stills(6)));
++
++        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
++                .generate(CHALLENGE_DATE)
++                .orElseThrow();
++
++        assertThat(candidate.answerKey()).isEqualTo("EPISODE:1396:1:2");
++    }
++
++    @Test
++    @DisplayName("[generate] Should Choose The Second Season - When The First Season Has No Eligible Episode")
++    void shouldChooseTheSecondSeasonWhenTheFirstSeasonHasNoEligibleEpisode() {
++        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
++                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
++                List.of(
++                        new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null),
++                        new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 1, null)))));
++        lenient().when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
++                episode(1, "First Season", "/first-season-summary.jpg"))));
++        lenient().when(tmdbClient.getSeasonFullDetails("1396", 2, LANGUAGE)).thenReturn(found(season(2,
++                episode(1, "Second Season", null))));
++        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
++        lenient().when(tmdbClient.getEpisodeImages("1396", 2, 1)).thenReturn(found(stills(6)));
++
++        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
++                .generate(CHALLENGE_DATE)
++                .orElseThrow();
++
++        assertThat(candidate.answerKey()).isEqualTo("EPISODE:1396:2:1");
++    }
++
++    @Test
++    @DisplayName("[generate] Should Attempt A New Series - When The Previous Series Has No Eligible Episode")
++    void shouldAttemptANewSeriesWhenThePreviousSeriesHasNoEligibleEpisode() {
++        TmdbTvSearchResult firstSeries = new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20");
++        TmdbTvSearchResult secondSeries = new TmdbTvSearchResult("66732", "Stranger Things", "/stranger-things.jpg", "2016-07-15");
++        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
++                .thenReturn(found(new TmdbSearchPage<>(1, List.of(firstSeries, secondSeries), 1, 2)));
++        lenient().when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
++                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
++        lenient().when(tmdbClient.getTvFullDetails("66732", LANGUAGE)).thenReturn(found(new TmdbTvFullDetails(
++                "66732", "Stranger Things", "Stranger Things", null, "/stranger-things.jpg", null, "2016-07-15",
++                List.of(), List.of(), List.of(), List.of(),
++                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2016-07-15", 1, null)),
++                null, null, null, null, 1, 1, List.of(), null, "Ended")));
++        lenient().when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
++                episode(1, "Breaking Bad Episode", "/breaking-bad-episode.jpg"))));
++        lenient().when(tmdbClient.getSeasonFullDetails("66732", 1, LANGUAGE)).thenReturn(found(season(1,
++                episode(1, "Stranger Things Episode", null))));
++        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
++        lenient().when(tmdbClient.getEpisodeImages("66732", 1, 1)).thenReturn(found(stills(6)));
++
++        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
++                .generate(CHALLENGE_DATE)
++                .orElseThrow();
++
++        assertThat(candidate.answerKey()).isEqualTo("EPISODE:66732:1:1");
+     }
+ 
+     @Test
+     @DisplayName("[generate] Should Preserve Clue Order And Omit Certification - When BR Certification Is Missing")
+     void shouldPreserveClueOrderAndOmitCertificationWhenBRCertificationIsMissing() {
+         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                 .thenReturn(found(movieDetailsWithInfo("550")));
+         when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+@@ -304,20 +404,35 @@ class DailyChallengeGeneratorTest {
+     }
+ 
+     private static TmdbSearchPage<TmdbMovieSearchResult> moviePage(TmdbMovieSearchResult result) {
+         return new TmdbSearchPage<>(1, List.of(result), 1, 1);
+     }
+ 
+     private static TmdbSearchPage<TmdbTvSearchResult> seriesPage(TmdbTvSearchResult result) {
+         return new TmdbSearchPage<>(1, List.of(result), 1, 1);
+     }
+ 
++    private static TmdbSeasonFullDetails season(int seasonNumber, TmdbEpisodeSummary... episodes) {
++        return new TmdbSeasonFullDetails(seasonNumber, "Season " + seasonNumber, null, null,
++                "2008-01-20", seasonNumber, List.of(episodes), null, null);
++    }
++
++    private static TmdbEpisodeSummary episode(int episodeNumber, String name, String stillPath) {
++        return new TmdbEpisodeSummary(episodeNumber, name, null, "2026-09-27", 45, stillPath, List.of());
++    }
++
++    private static TmdbEpisodeImages stills(int count) {
++        return new TmdbEpisodeImages(java.util.stream.IntStream.rangeClosed(1, count)
++                .mapToObj(index -> new TmdbStill("/still-" + index + ".jpg"))
++                .toList());
++    }
++
+     private static TmdbMovieFullDetails movieDetails(String id, String title, TmdbCredits credits) {
+         return new TmdbMovieFullDetails(id, title, title, null, "/poster.jpg", null, "1999-10-15", null,
+                 List.of(), List.of(), credits, null, null, null, null, List.of(), null);
+     }
+ 
+     private static TmdbMovieFullDetails movieDetailsWithInfo(String id) {
+         TmdbCredits credits = new TmdbCredits(
+                 List.of(new TmdbCastMember(287, "Brad Pitt", "Tyler Durden", "/brad.jpg")),
+                 List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember(7467, "David Fincher", "Director", null)));
+         return new TmdbMovieFullDetails(id, "Fight Club", "Fight Club", "A story", "/fight.jpg", null, "1999-10-15", 139,
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+index 77f2749..3de5582 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+@@ -52,20 +52,62 @@ class DailyChallengeResponseAssemblerTest {
+                 "https://image.tmdb.org/t/p/w300/third.jpg",
+                 "https://image.tmdb.org/t/p/w300/second.jpg",
+                 "https://image.tmdb.org/t/p/w300/first.jpg");
+         assertThat(open.imageUrls()).isNull();
+         assertThat(completed.imageUrls()).containsExactly(
+                 "https://image.tmdb.org/t/p/w300/third.jpg",
+                 "https://image.tmdb.org/t/p/w300/second.jpg",
+                 "https://image.tmdb.org/t/p/w300/first.jpg");
+     }
+ 
++    @Test
++    @DisplayName("[answer] Should Expose Frozen Series Metadata - When The Episode Result Is Terminal")
++    void shouldExposeFrozenSeriesMetadataWhenTheEpisodeResultIsTerminal() {
++        DailyChallenge challenge = DailyChallenge.builder()
++                .id(UUID.randomUUID())
++                .challengeDate(LocalDate.of(2026, 9, 27))
++                .gameType(DailyGameType.EPISODE_BY_FRAME)
++                .targetKind(DailyGameTargetKind.EPISODE)
++                .seriesTmdbId("1396")
++                .seasonNumber(1)
++                .episodeNumber(3)
++                .answerKey("EPISODE:1396:1:3")
++                .imagePath("/third.jpg")
++                .answerSnapshot(Map.of(
++                        "seriesTmdbId", "1396",
++                        "seriesName", "Breaking Bad",
++                        "seriesPosterPath", "/poster.jpg",
++                        "seriesYear", 2008,
++                        "episodeName", "Pilot",
++                        "seasonNumber", 1,
++                        "episodeNumber", 3,
++                        "title", "Pilot",
++                        "imageUrl", "/third.jpg"))
++                .displaySnapshot(Map.of("imagePaths", List.of("/third.jpg", "/second.jpg", "/first.jpg")))
++                .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
++                .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
++                .build();
++
++        DailyGameAttemptResponseDTO open = assembler.toAttemptResponse(
++                challenge, result(1, DailyGameResultStatus.IN_PROGRESS));
++        DailyGameAttemptResponseDTO terminal = assembler.toAttemptResponse(
++                challenge, result(1, DailyGameResultStatus.COMPLETED));
++
++        assertThat(open.answer()).isNull();
++        assertThat(terminal.answer()).satisfies(answer -> {
++            assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
++            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
++            assertThat(answer.seriesYear()).isEqualTo(2008);
++            assertThat(answer.title()).isEqualTo("Pilot");
++        });
++    }
++
+     @Test
+     @DisplayName("[images] Should Repeat Only The Last Image - When The Episode Has Fewer Than Six Stills")
+     void shouldRepeatOnlyTheLastImageWhenTheEpisodeHasFewerThanSixStills() {
+         DailyChallenge challenge = DailyChallenge.builder()
+                 .id(UUID.randomUUID())
+                 .challengeDate(LocalDate.of(2026, 9, 27))
+                 .gameType(DailyGameType.EPISODE_BY_FRAME)
+                 .targetKind(DailyGameTargetKind.EPISODE)
+                 .seriesTmdbId("1396")
+                 .seasonNumber(1)
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+index 4bda57d..3ebf8db 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+@@ -390,20 +390,42 @@ class DailyGameServiceImplTest {
+         when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+ 
+         DailyGameStateDTO response = service().getGame(
+                 USER_ID, TODAY, DailyGameType.MOVIE_BY_INFO, true);
+ 
+         assertThat(response.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
+         assertThat(response.attemptsUsed()).isZero();
+         assertThat(response.answer()).isNull();
+     }
+ 
++    @Test
++    @DisplayName("[getGame] Should Assemble A Terminal Episode Answer From The Snapshot - Without Calling TMDB")
++    void shouldAssembleATerminalEpisodeAnswerFromTheSnapshotWithoutCallingTmdb() {
++        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
++        UserDailyGameResult result = result(challenge, 1, 6, DailyGameResultStatus.COMPLETED, NOW);
++        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.EPISODE_BY_FRAME))
++                .thenReturn(Optional.of(challenge));
++        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
++                .thenReturn(List.of(result));
++        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
++
++        DailyGameStateDTO response = service().getGame(
++                USER_ID, TODAY, DailyGameType.EPISODE_BY_FRAME, false);
++
++        assertThat(response.answer()).satisfies(answer -> {
++            assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
++            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
++            assertThat(answer.seriesYear()).isEqualTo(2008);
++        });
++        verifyNoInteractions(tmdbClient);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Use The Composite Episode Identity - When The Candidate Is Valid")
+     void shouldUseTheCompositeEpisodeIdentityWhenTheCandidateIsValid() {
+         DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
+         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+         stubOpenSubmission(challenge, result);
+         when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                 .thenReturn(new TmdbLookupResult.Found<>(mock()));
+ 
+         DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.EPISODE_BY_FRAME,
+@@ -607,20 +629,24 @@ class DailyGameServiceImplTest {
+                 .seriesTmdbId(seriesTmdbId)
+                 .seasonNumber(seasonNumber)
+                 .episodeNumber(episodeNumber)
+                 .answerKey("EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber)
+                 .imagePath("/still.jpg")
+                 .answerSnapshot(Map.of(
+                         "targetKind", "EPISODE",
+                         "seriesTmdbId", seriesTmdbId,
+                         "seasonNumber", seasonNumber,
+                         "episodeNumber", episodeNumber,
++                        "seriesName", "Breaking Bad",
++                        "seriesPosterPath", "/poster.jpg",
++                        "seriesYear", 2008,
++                        "episodeName", "Episode",
+                         "title", "Episode",
+                         "imageUrl", "/still.jpg"))
+                 .displaySnapshot(Map.of("imageUrl", "/still.jpg"))
+                 .createdAt(NOW)
+                 .updatedAt(NOW)
+                 .build();
+     }
+ 
+     private UserDailyGameResult result(DailyChallenge challenge, int attempts, int score,
+                                        DailyGameResultStatus status, LocalDateTime completedAt) {
+

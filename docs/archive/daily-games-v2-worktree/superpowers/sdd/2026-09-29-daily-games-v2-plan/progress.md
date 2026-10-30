@@ -1,0 +1,21 @@
+# SDD ledger — plan: D:/Users/Lucas C/Documentos/codigos/watchwise-api/docs/superpowers/plans/2026-09-29-daily-games-v2-plan.md
+
+- Setup: isolated worktree created at `C:/Users/Lucas C/.codex/worktrees/daily-games-v2/watchwise-api`; plan artifacts are kept in this worktree; implementation proceeds sequentially because tasks share the daily-game files.
+- Baseline: `mvnw.cmd test` passed with 3,203 tests, 0 failures, 0 errors, 0 skipped on commit `c6489048e37592cb34da9d6c61c0632f9ee2fb7f`.
+- Task 1: minor (deferred): RED evidence reached test compilation because service/job tests were written before their production types; focused GREEN evidence passed 33/33.
+- Task 1: complete (commits c648904..58497c7, review clean).
+- Task 2: minor (deferred): today-specific controller route uses ZoneOffset.UTC directly instead of the injected Clock; give-up test could assert exact answer fields. Neither blocks the shared core; final review should triage.
+- Task 2: complete (commits 58497c7..7ddfb1f, review clean).
+- Task 3: complete (commits 7ddfb1f..6a654c1, review clean).
+- Task 4: complete (commits 6a654c1..6f1b230, review clean).
+- Task 5: complete (commits 6f1b230..6916f34, review clean).
+- Task 6: fix round 1/5 (3 addressed, 1 open; commit f1432b5..71944fd).
+- Task 6: fix round 2/5 (1 addressed, 0 open; commit 71944fd..52ef4c9).
+- Task 6: complete (commits 6916f34..52ef4c9, review clean).
+- Task 7: complete (documentation-only worktree changes; consistency search clean).
+- Task 8: verification complete — focused 210/210, full 3,266/3,266, clean package passed; final whole-branch review pending.
+- Checkpoint 2026-09-30: user requested a safe pause. Final fix commit is `2565b54`; controller-run full `mvnw.cmd test` passed with 3,273 tests and controller-run `mvnw.cmd clean package` passed with 3,273 tests. Final whole-branch review was dispatched against `c648904..2565b54` but stopped before a verdict. Worktree remains preserved; no push, reset, or discarded changes.
+- Final whole-branch review: 0 Critical, 3 Important and 2 Minor findings against `c648904..2565b54`. The Important findings covered historical feedback loss, non-playable default Major filmographies after lookup-budget exhaustion, and TMDB fan-out while holding the result lock; the Minor findings covered give-up assertions and the accidentally committed root review report.
+- Final fix wave: commit `f2794dc` (`fix(dailygame): finalize attempt and filmography handling`) addressed the five original findings, removed `final-fix-report.md`, moved TMDB-backed work outside the final persistence lock, added `currentAttempt`, bounded comparison lookups, required two default Major works, and strengthened tests. Focused verification passed 66/66; broader verification remained limited by unavailable Docker/Testcontainers and previously recorded full-package failures. No push.
+- Final scoped re-review of `2565b54..f2794dc`: original findings 1–5 were all ADDRESSED. One new Important remains open: adding `currentAttempt` removed the old public 16-argument canonical `DailyGameAttemptResponseDTO` constructor, while only the 11- and 14-argument compatibility overloads remain. Per the SDD rule allowing one final fix wave and one scoped re-review, do not start another fix wave without user direction.
+- Compatibility follow-up authorized by the user: commit `330afbe` (`fix(dailygame): restore legacy response constructor`) restored the exact 16-argument overload and added `DailyGameAttemptResponseDTOTest`; its independent scoped review found no Critical/Important regressions. Focused verification passed 67/67. Final `mvnw.cmd test` passed 3,277/3,277, and final `mvnw.cmd clean package` passed 3,277/3,277 with Flyway v63 validation and JAR packaging. HEAD is `330afbe`, worktree clean, and no push was performed. All previously open findings are closed.

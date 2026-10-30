@@ -1,0 +1,1782 @@
+# Review package: 58497c727a803781aa5114550c3d38e0d75528d7..7ddfb1fa2b18a7ac5729adc6fb7adfb238e27bd6
+
+## Commits
+7ddfb1f feat(daily-game): add specific game reads and give-up
+--- FILES ---
+ .../dailygame/controller/DailyGameController.java  |  52 +++-
+ .../dailygame/dto/DailyGameActorGuessDTO.java      |   6 +
+ .../dailygame/dto/DailyGameAttemptDTO.java         |   9 +
+ .../dailygame/dto/DailyGameAttemptResponseDTO.java |  23 +-
+ .../dailygame/dto/DailyGameCandidateDTO.java       |  17 ++
+ .../dailygame/dto/DailyGameComparisonCellDTO.java  |  15 +
+ .../dto/DailyGameComparisonDirection.java          |   6 +
+ .../dailygame/dto/DailyGameComparisonStatus.java   |   8 +
+ .../dto/DailyGameFilmographyEntryDTO.java          |  24 ++
+ .../dto/DailyGameFilmographyFeedbackDTO.java       |  18 ++
+ .../dto/DailyGameFilmographyStateDTO.java          |  14 +
+ .../dailygame/dto/DailyGameInfoFeedbackDTO.java    |  28 ++
+ .../dailygame/dto/DailyGameStateDTO.java           |  22 +-
+ .../service/DailyGameAttemptDetailsCodec.java      | 324 +++++++++++++++++++++
+ .../dailygame/service/DailyGameService.java        |   8 +
+ .../impl/DailyChallengeResponseAssembler.java      |  49 +++-
+ .../service/impl/DailyGameServiceImpl.java         |  97 +++++-
+ .../DailyGameControllerIntegrationTest.java        |  50 ++++
+ .../controller/DailyGameControllerTest.java        |  62 ++++
+ .../service/DailyGameAttemptDetailsCodecTest.java  |  48 +++
+ .../impl/DailyChallengeResponseAssemblerTest.java  |  24 ++
+ .../service/impl/DailyGameServiceImplTest.java     |  73 +++++
+ 22 files changed, 959 insertions(+), 18 deletions(-)
+--- DIFF ---
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java b/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
+index a9b1957..bdb3fba 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameController.java
+@@ -1,20 +1,21 @@
+ package com.watchwise.watchwise_api.dailygame.controller;
+ 
+ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+ import com.watchwise.watchwise_api.common.exception.BadRequestException;
+ import com.watchwise.watchwise_api.common.security.RequestThrottler;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+ import jakarta.validation.Valid;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.data.domain.Page;
+ import org.springframework.http.ResponseEntity;
+@@ -22,20 +23,21 @@ import org.springframework.security.core.context.SecurityContextHolder;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.format.annotation.DateTimeFormat;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ import java.time.Duration;
+ import java.time.LocalDate;
++import java.time.ZoneOffset;
+ import java.util.UUID;
+ 
+ @RestController
+ @RequiredArgsConstructor
+ public class DailyGameController {
+ 
+     private final DailyGameService dailyGameService;
+     private final DailyGameSearchService dailyGameSearchService;
+     private final DailyGameRankingService dailyGameRankingService;
+     private final RequestThrottler requestThrottler;
+@@ -56,20 +58,36 @@ public class DailyGameController {
+     public ResponseEntity<DailyGameTodayResponseDTO> getToday() {
+         return ResponseEntity.ok(dailyGameService.getToday(currentUserId()));
+     }
+ 
+     @GetMapping("/games/{challengeDate}")
+     public ResponseEntity<DailyGameTodayResponseDTO> getDay(
+             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate) {
+         return ResponseEntity.ok(dailyGameService.getDay(currentUserId(), challengeDate));
+     }
+ 
++    @GetMapping("/games/{gameType}/today")
++    public ResponseEntity<DailyGameStateDTO> getGameToday(
++        @PathVariable("gameType") DailyGameType gameType,
++            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
++        return ResponseEntity.ok(dailyGameService.getGame(
++                currentUserId(), LocalDate.now(ZoneOffset.UTC), gameType, majorRoles));
++    }
++
++    @GetMapping("/games/{challengeDate}/{gameType}")
++    public ResponseEntity<DailyGameStateDTO> getGame(
++            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
++            @PathVariable("gameType") DailyGameType gameType,
++            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
++        return ResponseEntity.ok(dailyGameService.getGame(currentUserId(), challengeDate, gameType, majorRoles));
++    }
++
+     @GetMapping("/games/{gameType}/search")
+     public ResponseEntity<PageResponseDTO<DailyGameSearchResultDTO>> search(
+             @PathVariable("gameType") DailyGameType gameType,
+             @RequestParam("q") String query,
+             @RequestParam(value = "page", required = false) Integer page,
+             @RequestParam(value = "size", required = false) Integer size) {
+         if (gameType == DailyGameType.EPISODE_BY_FRAME) {
+             throw new BadRequestException("Episode searches require the episode search endpoints");
+         }
+         UUID userId = currentUserId();
+@@ -100,40 +118,51 @@ public class DailyGameController {
+         Page<DailyGameSearchResultDTO> results = dailyGameSearchService.searchEpisodes(
+                 userId, seriesTmdbId, query, page, size);
+         return ResponseEntity.ok(PageResponseDTO.of(results));
+     }
+ 
+     @PostMapping("/games/{gameType}/attempt")
+     public ResponseEntity<DailyGameAttemptResponseDTO> submitAttempt(
+             @PathVariable("gameType") DailyGameType gameType,
+             @Valid @RequestBody DailyGameAttemptRequest request) {
+         UUID userId = currentUserId();
+-        requestThrottler.checkAllowed(
+-                "daily-game-attempt|" + userId,
+-                attemptMaxRequests,
+-                Duration.ofMinutes(attemptWindowMinutes));
++        throttleAttempt(userId);
+         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request));
+     }
+ 
+     @PostMapping("/games/{challengeDate}/{gameType}/attempt")
+     public ResponseEntity<DailyGameAttemptResponseDTO> submitHistoricalAttempt(
+             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
+             @PathVariable("gameType") DailyGameType gameType,
+             @Valid @RequestBody DailyGameAttemptRequest request) {
+         UUID userId = currentUserId();
+-        requestThrottler.checkAllowed(
+-                "daily-game-attempt|" + userId,
+-                attemptMaxRequests,
+-                Duration.ofMinutes(attemptWindowMinutes));
++        throttleAttempt(userId);
+         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, challengeDate, gameType, request));
+     }
+ 
++    @PostMapping("/games/{gameType}/give-up")
++    public ResponseEntity<DailyGameAttemptResponseDTO> giveUp(
++            @PathVariable("gameType") DailyGameType gameType) {
++        UUID userId = currentUserId();
++        throttleAttempt(userId);
++        return ResponseEntity.ok(dailyGameService.giveUp(userId, gameType));
++    }
++
++    @PostMapping("/games/{challengeDate}/{gameType}/give-up")
++    public ResponseEntity<DailyGameAttemptResponseDTO> giveUpHistorical(
++            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
++            @PathVariable("gameType") DailyGameType gameType) {
++        UUID userId = currentUserId();
++        throttleAttempt(userId);
++        return ResponseEntity.ok(dailyGameService.giveUp(userId, challengeDate, gameType));
++    }
++
+     @GetMapping("/games/history")
+     public ResponseEntity<PageResponseDTO<DailyGameHistoryDTO>> getHistory(
+             @RequestParam(value = "page", required = false) Integer page,
+             @RequestParam(value = "size", required = false) Integer size) {
+         Page<DailyGameHistoryDTO> history = dailyGameRankingService.getHistory(currentUserId(), null, page, size);
+         return ResponseEntity.ok(PageResponseDTO.of(history));
+     }
+ 
+     @GetMapping("/games/{gameType}/history")
+     public ResponseEntity<PageResponseDTO<DailyGameHistoryDTO>> getHistoryByType(
+@@ -162,14 +191,21 @@ public class DailyGameController {
+         return ResponseEntity.ok(PageResponseDTO.of(ranking));
+     }
+ 
+     private void throttleSearch(UUID userId) {
+         requestThrottler.checkAllowed(
+                 "daily-game-search|" + userId,
+                 searchMaxRequests,
+                 Duration.ofMinutes(searchWindowMinutes));
+     }
+ 
++    private void throttleAttempt(UUID userId) {
++        requestThrottler.checkAllowed(
++                "daily-game-attempt|" + userId,
++                attemptMaxRequests,
++                Duration.ofMinutes(attemptWindowMinutes));
++    }
++
+     private UUID currentUserId() {
+         return (UUID) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+     }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameActorGuessDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameActorGuessDTO.java
+new file mode 100644
+index 0000000..0bb1116
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameActorGuessDTO.java
+@@ -0,0 +1,6 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public record DailyGameActorGuessDTO(
++        String personTmdbId,
++        String name) {
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptDTO.java
+new file mode 100644
+index 0000000..c4bd483
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptDTO.java
+@@ -0,0 +1,9 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public record DailyGameAttemptDTO(
++        int attemptNumber,
++        DailyGameCandidateDTO candidate,
++        DailyGameGuessFeedbackDTO episodeFeedback,
++        DailyGameInfoFeedbackDTO infoFeedback,
++        DailyGameFilmographyFeedbackDTO filmographyFeedback) {
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
+index 00d6c70..2b22fc1 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
+@@ -13,28 +13,49 @@ public record DailyGameAttemptResponseDTO(
+         int attemptsUsed,
+         int attemptsRemaining,
+         DailyGameViewStatus status,
+         String imageUrl,
+         List<DailyGameHintDTO> hints,
+         int score,
+         LocalDateTime completedAt,
+         DailyGameAnswerDTO answer,
+         List<String> visibleImageUrls,
+         List<String> imageUrls,
++        List<DailyGameAttemptDTO> attempts,
++        DailyGameFilmographyStateDTO filmography,
+         DailyGameGuessFeedbackDTO guessFeedback) {
+ 
+     public DailyGameAttemptResponseDTO(
+             DailyGameType gameType,
+             DailyGameTargetKind targetKind,
+             int maxAttempts,
+             int attemptsUsed,
+             int attemptsRemaining,
+             DailyGameViewStatus status,
+             String imageUrl,
+             List<DailyGameHintDTO> hints,
+             int score,
+             LocalDateTime completedAt,
+             DailyGameAnswerDTO answer) {
+         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+-                score, completedAt, answer, null, null, null);
++                score, completedAt, answer, null, null, null, null, null);
++    }
++
++    public DailyGameAttemptResponseDTO(
++            DailyGameType gameType,
++            DailyGameTargetKind targetKind,
++            int maxAttempts,
++            int attemptsUsed,
++            int attemptsRemaining,
++            DailyGameViewStatus status,
++            String imageUrl,
++            List<DailyGameHintDTO> hints,
++            int score,
++            LocalDateTime completedAt,
++            DailyGameAnswerDTO answer,
++            List<String> visibleImageUrls,
++            List<String> imageUrls,
++            DailyGameGuessFeedbackDTO guessFeedback) {
++        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
++                score, completedAt, answer, visibleImageUrls, imageUrls, null, null, guessFeedback);
+     }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameCandidateDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameCandidateDTO.java
+new file mode 100644
+index 0000000..7c6a700
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameCandidateDTO.java
+@@ -0,0 +1,17 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
++
++import java.time.LocalDate;
++
++public record DailyGameCandidateDTO(
++        DailyGameTargetKind targetKind,
++        String tmdbId,
++        String personTmdbId,
++        String seriesTmdbId,
++        Integer seasonNumber,
++        Integer episodeNumber,
++        String title,
++        String imageUrl,
++        LocalDate date) {
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonCellDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonCellDTO.java
+new file mode 100644
+index 0000000..dd8fb8c
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonCellDTO.java
+@@ -0,0 +1,15 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import java.util.List;
++
++public record DailyGameComparisonCellDTO(
++        DailyGameComparisonStatus status,
++        DailyGameComparisonDirection direction,
++        Object displayValue,
++        List<String> matchedValues,
++        Integer matchCount) {
++
++    public DailyGameComparisonCellDTO {
++        matchedValues = matchedValues == null ? List.of() : List.copyOf(matchedValues);
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonDirection.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonDirection.java
+new file mode 100644
+index 0000000..362d742
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonDirection.java
+@@ -0,0 +1,6 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public enum DailyGameComparisonDirection {
++    SECRET_HIGHER,
++    SECRET_LOWER
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonStatus.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonStatus.java
+new file mode 100644
+index 0000000..43a41df
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameComparisonStatus.java
+@@ -0,0 +1,8 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public enum DailyGameComparisonStatus {
++    MATCH,
++    PARTIAL,
++    NO_MATCH,
++    NO_DATA
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyEntryDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyEntryDTO.java
+new file mode 100644
+index 0000000..00ec5be
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyEntryDTO.java
+@@ -0,0 +1,24 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import java.util.List;
++
++public record DailyGameFilmographyEntryDTO(
++        String workId,
++        String title,
++        boolean revealed,
++        boolean highlighted,
++        Integer year,
++        List<String> genres,
++        String posterUrl,
++        Integer episodeCount,
++        String period,
++        String character) {
++
++    public DailyGameFilmographyEntryDTO {
++        genres = genres == null ? List.of() : List.copyOf(genres);
++    }
++
++    public String workTmdbId() {
++        return workId;
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyFeedbackDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyFeedbackDTO.java
+new file mode 100644
+index 0000000..6a5c77d
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyFeedbackDTO.java
+@@ -0,0 +1,18 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import java.util.List;
++
++public record DailyGameFilmographyFeedbackDTO(
++        DailyGameActorGuessDTO guessedActor,
++        List<String> sharedMajorRoleWorkKeys,
++        List<String> sharedAllRoleWorkKeys,
++        List<DailyGameFilmographyEntryDTO> entries) {
++
++    public DailyGameFilmographyFeedbackDTO {
++        sharedMajorRoleWorkKeys = sharedMajorRoleWorkKeys == null
++                ? List.of() : List.copyOf(sharedMajorRoleWorkKeys);
++        sharedAllRoleWorkKeys = sharedAllRoleWorkKeys == null
++                ? List.of() : List.copyOf(sharedAllRoleWorkKeys);
++        entries = entries == null ? List.of() : List.copyOf(entries);
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyStateDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyStateDTO.java
+new file mode 100644
+index 0000000..e4bf05f
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameFilmographyStateDTO.java
+@@ -0,0 +1,14 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import java.util.List;
++
++public record DailyGameFilmographyStateDTO(
++        boolean majorRoles,
++        List<DailyGameActorGuessDTO> guessedActors,
++        List<DailyGameFilmographyEntryDTO> entries) {
++
++    public DailyGameFilmographyStateDTO {
++        guessedActors = guessedActors == null ? List.of() : List.copyOf(guessedActors);
++        entries = entries == null ? List.of() : List.copyOf(entries);
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameInfoFeedbackDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameInfoFeedbackDTO.java
+new file mode 100644
+index 0000000..db0fff6
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameInfoFeedbackDTO.java
+@@ -0,0 +1,28 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++public record DailyGameInfoFeedbackDTO(
++        DailyGameComparisonCellDTO platforms,
++        DailyGameComparisonCellDTO genres,
++        DailyGameComparisonCellDTO year,
++        DailyGameComparisonCellDTO certification,
++        DailyGameComparisonCellDTO directorOrCreators,
++        DailyGameComparisonCellDTO cast,
++        DailyGameComparisonCellDTO productionCompanies,
++        DailyGameComparisonCellDTO revenueOrSeasons) {
++
++    public DailyGameComparisonCellDTO director() {
++        return directorOrCreators;
++    }
++
++    public DailyGameComparisonCellDTO creators() {
++        return directorOrCreators;
++    }
++
++    public DailyGameComparisonCellDTO revenue() {
++        return revenueOrSeasons;
++    }
++
++    public DailyGameComparisonCellDTO seasons() {
++        return revenueOrSeasons;
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameStateDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameStateDTO.java
+index b23d0a2..a155fb9 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameStateDTO.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameStateDTO.java
+@@ -12,28 +12,48 @@ public record DailyGameStateDTO(
+         int maxAttempts,
+         int attemptsUsed,
+         int attemptsRemaining,
+         DailyGameViewStatus status,
+         String imageUrl,
+         List<DailyGameHintDTO> hints,
+         int score,
+         LocalDateTime completedAt,
+         DailyGameAnswerDTO answer,
+         List<String> visibleImageUrls,
+-        List<String> imageUrls) {
++        List<String> imageUrls,
++        List<DailyGameAttemptDTO> attempts,
++        DailyGameFilmographyStateDTO filmography) {
+ 
+     public DailyGameStateDTO(
+             DailyGameType gameType,
+             DailyGameTargetKind targetKind,
+             int maxAttempts,
+             int attemptsUsed,
+             int attemptsRemaining,
+             DailyGameViewStatus status,
+             String imageUrl,
+             List<DailyGameHintDTO> hints,
+             int score,
+             LocalDateTime completedAt,
+             DailyGameAnswerDTO answer) {
+         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+                 score, completedAt, answer, null, null);
+     }
++
++    public DailyGameStateDTO(
++            DailyGameType gameType,
++            DailyGameTargetKind targetKind,
++            int maxAttempts,
++            int attemptsUsed,
++            int attemptsRemaining,
++            DailyGameViewStatus status,
++            String imageUrl,
++            List<DailyGameHintDTO> hints,
++            int score,
++            LocalDateTime completedAt,
++            DailyGameAnswerDTO answer,
++            List<String> visibleImageUrls,
++            List<String> imageUrls) {
++        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
++                score, completedAt, answer, visibleImageUrls, imageUrls, null, null);
++    }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodec.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodec.java
+new file mode 100644
+index 0000000..4f4a2ba
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodec.java
+@@ -0,0 +1,324 @@
++package com.watchwise.watchwise_api.dailygame.service;
++
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonDirection;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
++import org.springframework.stereotype.Component;
++
++import java.time.LocalDate;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++@Component
++public class DailyGameAttemptDetailsCodec {
++
++    private static final String ATTEMPTS_KEY = "attempts";
++
++    public List<DailyGameAttemptDTO> read(Map<String, Object> details) {
++        if (details == null || !(details.get(ATTEMPTS_KEY) instanceof List<?> rawAttempts)) {
++            return List.of();
++        }
++        List<DailyGameAttemptDTO> attempts = rawAttempts.stream()
++                .map(this::decodeAttempt)
++                .filter(java.util.Objects::nonNull)
++                .toList();
++        return List.copyOf(attempts);
++    }
++
++    public Map<String, Object> append(Map<String, Object> details, DailyGameAttemptDTO attempt) {
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        if (details != null) {
++            details.forEach((key, value) -> encoded.put(key, copyValue(value)));
++        }
++        List<Object> attempts = new ArrayList<>();
++        if (details != null && details.get(ATTEMPTS_KEY) instanceof List<?> existingAttempts) {
++            existingAttempts.forEach(value -> attempts.add(copyValue(value)));
++        }
++        attempts.add(encodeAttempt(attempt));
++        encoded.put(ATTEMPTS_KEY, List.copyOf(attempts));
++        return Collections.unmodifiableMap(encoded);
++    }
++
++    private Map<String, Object> encodeAttempt(DailyGameAttemptDTO attempt) {
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("attemptNumber", attempt.attemptNumber());
++        encoded.put("candidate", encodeCandidate(attempt.candidate()));
++        encoded.put("episodeFeedback", encodeEpisodeFeedback(attempt.episodeFeedback()));
++        encoded.put("infoFeedback", encodeInfoFeedback(attempt.infoFeedback()));
++        encoded.put("filmographyFeedback", encodeFilmographyFeedback(attempt.filmographyFeedback()));
++        return encoded;
++    }
++
++    private Map<String, Object> encodeCandidate(DailyGameCandidateDTO candidate) {
++        if (candidate == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("targetKind", enumName(candidate.targetKind()));
++        encoded.put("tmdbId", candidate.tmdbId());
++        encoded.put("personTmdbId", candidate.personTmdbId());
++        encoded.put("seriesTmdbId", candidate.seriesTmdbId());
++        encoded.put("seasonNumber", candidate.seasonNumber());
++        encoded.put("episodeNumber", candidate.episodeNumber());
++        encoded.put("title", candidate.title());
++        encoded.put("imageUrl", candidate.imageUrl());
++        encoded.put("date", candidate.date() == null ? null : candidate.date().toString());
++        return encoded;
++    }
++
++    private Map<String, Object> encodeEpisodeFeedback(DailyGameGuessFeedbackDTO feedback) {
++        if (feedback == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("seriesCorrect", feedback.seriesCorrect());
++        encoded.put("seasonCorrect", feedback.seasonCorrect());
++        encoded.put("episodeCorrect", feedback.episodeCorrect());
++        encoded.put("exactMatch", feedback.exactMatch());
++        return encoded;
++    }
++
++    private Map<String, Object> encodeInfoFeedback(DailyGameInfoFeedbackDTO feedback) {
++        if (feedback == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("platforms", encodeCell(feedback.platforms()));
++        encoded.put("genres", encodeCell(feedback.genres()));
++        encoded.put("year", encodeCell(feedback.year()));
++        encoded.put("certification", encodeCell(feedback.certification()));
++        encoded.put("directorOrCreators", encodeCell(feedback.directorOrCreators()));
++        encoded.put("cast", encodeCell(feedback.cast()));
++        encoded.put("productionCompanies", encodeCell(feedback.productionCompanies()));
++        encoded.put("revenueOrSeasons", encodeCell(feedback.revenueOrSeasons()));
++        return encoded;
++    }
++
++    private Map<String, Object> encodeCell(DailyGameComparisonCellDTO cell) {
++        if (cell == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("status", enumName(cell.status()));
++        encoded.put("direction", enumName(cell.direction()));
++        encoded.put("displayValue", cell.displayValue());
++        encoded.put("matchedValues", cell.matchedValues());
++        encoded.put("matchCount", cell.matchCount());
++        return encoded;
++    }
++
++    private Map<String, Object> encodeFilmographyFeedback(DailyGameFilmographyFeedbackDTO feedback) {
++        if (feedback == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("guessedActor", encodeActorGuess(feedback.guessedActor()));
++        encoded.put("sharedMajorRoleWorkKeys", feedback.sharedMajorRoleWorkKeys());
++        encoded.put("sharedAllRoleWorkKeys", feedback.sharedAllRoleWorkKeys());
++        encoded.put("entries", feedback.entries().stream().map(this::encodeFilmographyEntry).toList());
++        return encoded;
++    }
++
++    private Map<String, Object> encodeActorGuess(DailyGameActorGuessDTO actor) {
++        if (actor == null) {
++            return null;
++        }
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("personTmdbId", actor.personTmdbId());
++        encoded.put("name", actor.name());
++        return encoded;
++    }
++
++    private Map<String, Object> encodeFilmographyEntry(DailyGameFilmographyEntryDTO entry) {
++        Map<String, Object> encoded = new LinkedHashMap<>();
++        encoded.put("workId", entry.workId());
++        encoded.put("title", entry.title());
++        encoded.put("revealed", entry.revealed());
++        encoded.put("highlighted", entry.highlighted());
++        encoded.put("year", entry.year());
++        encoded.put("genres", entry.genres());
++        encoded.put("posterUrl", entry.posterUrl());
++        encoded.put("episodeCount", entry.episodeCount());
++        encoded.put("period", entry.period());
++        encoded.put("character", entry.character());
++        return encoded;
++    }
++
++    private DailyGameAttemptDTO decodeAttempt(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> attempt = stringKeyMap(raw);
++        DailyGameCandidateDTO candidate = decodeCandidate(attempt.get("candidate"));
++        return new DailyGameAttemptDTO(
++                integer(attempt.get("attemptNumber"), 0),
++                candidate,
++                decodeEpisodeFeedback(attempt.get("episodeFeedback")),
++                decodeInfoFeedback(attempt.get("infoFeedback")),
++                decodeFilmographyFeedback(attempt.get("filmographyFeedback")));
++    }
++
++    private DailyGameCandidateDTO decodeCandidate(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> candidate = stringKeyMap(raw);
++        return new DailyGameCandidateDTO(
++                enumValue(DailyGameTargetKind.class, candidate.get("targetKind")),
++                string(candidate.get("tmdbId")),
++                string(candidate.get("personTmdbId")),
++                string(candidate.get("seriesTmdbId")),
++                nullableInteger(candidate.get("seasonNumber")),
++                nullableInteger(candidate.get("episodeNumber")),
++                string(candidate.get("title")),
++                string(candidate.get("imageUrl")),
++                candidate.get("date") == null ? null : LocalDate.parse(string(candidate.get("date"))));
++    }
++
++    private DailyGameGuessFeedbackDTO decodeEpisodeFeedback(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> feedback = stringKeyMap(raw);
++        return new DailyGameGuessFeedbackDTO(
++                bool(feedback.get("seriesCorrect")),
++                bool(feedback.get("seasonCorrect")),
++                bool(feedback.get("episodeCorrect")),
++                bool(feedback.get("exactMatch")));
++    }
++
++    private DailyGameInfoFeedbackDTO decodeInfoFeedback(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> feedback = stringKeyMap(raw);
++        return new DailyGameInfoFeedbackDTO(
++                decodeCell(feedback.get("platforms")), decodeCell(feedback.get("genres")),
++                decodeCell(feedback.get("year")), decodeCell(feedback.get("certification")),
++                decodeCell(feedback.get("directorOrCreators")), decodeCell(feedback.get("cast")),
++                decodeCell(feedback.get("productionCompanies")), decodeCell(feedback.get("revenueOrSeasons")));
++    }
++
++    private DailyGameComparisonCellDTO decodeCell(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> cell = stringKeyMap(raw);
++        return new DailyGameComparisonCellDTO(
++                enumValue(DailyGameComparisonStatus.class, cell.get("status")),
++                enumValue(DailyGameComparisonDirection.class, cell.get("direction")),
++                cell.get("displayValue"),
++                strings(cell.get("matchedValues")),
++                nullableInteger(cell.get("matchCount")));
++    }
++
++    private DailyGameFilmographyFeedbackDTO decodeFilmographyFeedback(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> feedback = stringKeyMap(raw);
++        List<DailyGameFilmographyEntryDTO> entries = feedback.get("entries") instanceof List<?> rawEntries
++                ? rawEntries.stream().map(this::decodeFilmographyEntry)
++                .filter(java.util.Objects::nonNull).toList() : List.of();
++        return new DailyGameFilmographyFeedbackDTO(
++                decodeActorGuess(feedback.get("guessedActor")),
++                strings(feedback.get("sharedMajorRoleWorkKeys")),
++                strings(feedback.get("sharedAllRoleWorkKeys")), entries);
++    }
++
++    private DailyGameActorGuessDTO decodeActorGuess(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> actor = stringKeyMap(raw);
++        return new DailyGameActorGuessDTO(string(actor.get("personTmdbId")), string(actor.get("name")));
++    }
++
++    private DailyGameFilmographyEntryDTO decodeFilmographyEntry(Object value) {
++        if (!(value instanceof Map<?, ?> raw)) {
++            return null;
++        }
++        Map<String, Object> entry = stringKeyMap(raw);
++        return new DailyGameFilmographyEntryDTO(
++                string(entry.get("workId")), string(entry.get("title")), bool(entry.get("revealed")),
++                bool(entry.get("highlighted")), nullableInteger(entry.get("year")),
++                strings(entry.get("genres")), string(entry.get("posterUrl")),
++                nullableInteger(entry.get("episodeCount")), string(entry.get("period")),
++                string(entry.get("character")));
++    }
++
++    private Object copyValue(Object value) {
++        if (value instanceof Map<?, ?> raw) {
++            Map<String, Object> copy = new LinkedHashMap<>();
++            raw.forEach((key, nested) -> copy.put(String.valueOf(key), copyValue(nested)));
++            return Collections.unmodifiableMap(copy);
++        }
++        if (value instanceof List<?> raw) {
++            return List.copyOf(raw.stream().map(this::copyValue).toList());
++        }
++        return value;
++    }
++
++    private Map<String, Object> stringKeyMap(Map<?, ?> source) {
++        Map<String, Object> converted = new LinkedHashMap<>();
++        source.forEach((key, value) -> converted.put(String.valueOf(key), value));
++        return converted;
++    }
++
++    private String enumName(Enum<?> value) {
++        return value == null ? null : value.name();
++    }
++
++    private String string(Object value) {
++        return value == null ? null : String.valueOf(value);
++    }
++
++    private boolean bool(Object value) {
++        return value instanceof Boolean booleanValue && booleanValue;
++    }
++
++    private int integer(Object value, int fallback) {
++        Integer result = nullableInteger(value);
++        return result == null ? fallback : result;
++    }
++
++    private Integer nullableInteger(Object value) {
++        if (value instanceof Number number) {
++            return number.intValue();
++        }
++        try {
++            return value == null ? null : Integer.valueOf(String.valueOf(value));
++        } catch (NumberFormatException exception) {
++            return null;
++        }
++    }
++
++    private List<String> strings(Object value) {
++        if (!(value instanceof List<?> raw)) {
++            return List.of();
++        }
++        return raw.stream().map(this::string).filter(java.util.Objects::nonNull).toList();
++    }
++
++    private <E extends Enum<E>> E enumValue(Class<E> type, Object value) {
++        if (value == null) {
++            return null;
++        }
++        try {
++            return Enum.valueOf(type, String.valueOf(value));
++        } catch (IllegalArgumentException exception) {
++            return null;
++        }
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameService.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameService.java
+index 8a7c715..814019c 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameService.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameService.java
+@@ -1,22 +1,30 @@
+ package com.watchwise.watchwise_api.dailygame.service;
+ 
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ 
+ import java.time.LocalDate;
+ import java.util.UUID;
+ 
+ public interface DailyGameService {
+ 
+     DailyGameTodayResponseDTO getToday(UUID userId);
+ 
+     DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate);
+ 
++    DailyGameStateDTO getGame(
++            UUID userId, LocalDate challengeDate, DailyGameType gameType, boolean majorRoles);
++
+     DailyGameAttemptResponseDTO submitAttempt(
+             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request);
+ 
+     DailyGameAttemptResponseDTO submitAttempt(
+             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request);
++
++    DailyGameAttemptResponseDTO giveUp(UUID userId, DailyGameType gameType);
++
++    DailyGameAttemptResponseDTO giveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType);
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+index 69a309c..f89c061 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+@@ -1,47 +1,69 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHintDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+ import org.springframework.stereotype.Component;
+ 
+ import java.time.LocalDate;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.UUID;
+ import java.util.stream.IntStream;
+ 
+ @Component
+ public class DailyChallengeResponseAssembler {
+ 
++    private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
++
++    public DailyChallengeResponseAssembler() {
++        this(new DailyGameAttemptDetailsCodec());
++    }
++
++    public DailyChallengeResponseAssembler(DailyGameAttemptDetailsCodec attemptDetailsCodec) {
++        this.attemptDetailsCodec = attemptDetailsCodec;
++    }
++
++    public DailyGameTodayResponseDTO toTodayResponse(
++            LocalDate date,
++            List<DailyChallenge> challenges,
++            Map<UUID, UserDailyGameResult> resultsByChallengeId,
++            Map<UUID, List<DailyChallengeHint>> hintsByChallengeId) {
++        return toTodayResponse(date, null, challenges, resultsByChallengeId, hintsByChallengeId);
++    }
++
+     public DailyGameTodayResponseDTO toTodayResponse(
+             LocalDate date,
++            LocalDate currentDate,
+             List<DailyChallenge> challenges,
+             Map<UUID, UserDailyGameResult> resultsByChallengeId,
+             Map<UUID, List<DailyChallengeHint>> hintsByChallengeId) {
+         List<DailyGameStateDTO> games = challenges.stream()
+                 .map(challenge -> toState(
+                         challenge,
+                         resultsByChallengeId.get(challenge.getId()),
+-                        hintsByChallengeId.getOrDefault(challenge.getId(), List.of())))
++                        hintsByChallengeId.getOrDefault(challenge.getId(), List.of()),
++                        date.equals(currentDate)))
+                 .toList();
+         return new DailyGameTodayResponseDTO(date, games);
+     }
+ 
+     public DailyGameAttemptResponseDTO toAttemptResponse(
+             DailyChallenge challenge, UserDailyGameResult result) {
+         return toAttemptResponse(challenge, result, List.of());
+     }
+ 
+     public DailyGameAttemptResponseDTO toAttemptResponse(
+@@ -49,44 +71,65 @@ public class DailyChallengeResponseAssembler {
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints) {
+         return toAttemptResponse(challenge, result, allHints, null);
+     }
+ 
+     public DailyGameAttemptResponseDTO toAttemptResponse(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints,
+             DailyGameGuessFeedbackDTO guessFeedback) {
++        return toAttemptResponse(challenge, result, allHints, guessFeedback, false);
++    }
++
++    public DailyGameAttemptResponseDTO toAttemptResponse(
++            DailyChallenge challenge,
++            UserDailyGameResult result,
++            List<DailyChallengeHint> allHints,
++            DailyGameGuessFeedbackDTO guessFeedback,
++            boolean includeAttempts) {
+         DailyGameView view = view(challenge, result, allHints);
++        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
++                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
+         return new DailyGameAttemptResponseDTO(
+                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
+                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+-                view.visibleImageUrls(), view.imageUrls(), guessFeedback);
++                view.visibleImageUrls(), view.imageUrls(), attempts, null, guessFeedback);
+     }
+ 
+     public DailyGameHistoryDTO toHistoryResponse(
+             LocalDate challengeDate, DailyChallenge challenge, UserDailyGameResult result) {
+         DailyGameView view = view(challenge, result, List.of());
+         return new DailyGameHistoryDTO(
+                 challengeDate, view.gameType(), view.targetKind(), view.maxAttempts(), view.status(),
+                 view.attemptsUsed(), view.score(), view.completedAt(), view.answer());
+     }
+ 
+     private DailyGameStateDTO toState(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints) {
++        return toState(challenge, result, allHints, false);
++    }
++
++    public DailyGameStateDTO toState(
++            DailyChallenge challenge,
++            UserDailyGameResult result,
++            List<DailyChallengeHint> allHints,
++            boolean includeAttempts) {
+         DailyGameView view = view(challenge, result, allHints);
++        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
++                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
+         return new DailyGameStateDTO(
+                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
+                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+-                view.visibleImageUrls(), view.imageUrls());
++                view.visibleImageUrls(), view.imageUrls(), attempts, null);
+     }
+ 
+     private DailyGameView view(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints) {
+         DailyGameViewStatus status = status(result);
+         int maxAttempts = challenge.getGameType().maxAttempts();
+         int attemptsUsed = result == null ? 0 : result.getAttemptsUsed();
+         int attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
+index 22164f5..087cbb9 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
+@@ -1,30 +1,35 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.common.exception.BadRequestException;
+ import com.watchwise.watchwise_api.common.exception.ConflictException;
+ import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
++import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.time.Clock;
+ import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.EnumSet;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Objects;
+@@ -33,34 +38,49 @@ import java.util.function.Function;
+ import java.util.stream.Collectors;
+ 
+ @Service
+ public class DailyGameServiceImpl implements DailyGameService {
+ 
+     private final DailyChallengeRepository challengeRepository;
+     private final DailyChallengeHintRepository hintRepository;
+     private final UserDailyGameResultRepository resultRepository;
+     private final DailyGameCandidateValidator candidateValidator;
+     private final DailyChallengeResponseAssembler responseAssembler;
++    private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
+     private final Clock clock;
+ 
+     public DailyGameServiceImpl(
+             DailyChallengeRepository challengeRepository,
+             DailyChallengeHintRepository hintRepository,
+             UserDailyGameResultRepository resultRepository,
+             DailyGameCandidateValidator candidateValidator,
+             DailyChallengeResponseAssembler responseAssembler,
+             Clock clock) {
++        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
++                responseAssembler, new DailyGameAttemptDetailsCodec(), clock);
++    }
++
++    @Autowired
++    public DailyGameServiceImpl(
++            DailyChallengeRepository challengeRepository,
++            DailyChallengeHintRepository hintRepository,
++            UserDailyGameResultRepository resultRepository,
++            DailyGameCandidateValidator candidateValidator,
++            DailyChallengeResponseAssembler responseAssembler,
++            DailyGameAttemptDetailsCodec attemptDetailsCodec,
++            Clock clock) {
+         this.challengeRepository = challengeRepository;
+         this.hintRepository = hintRepository;
+         this.resultRepository = resultRepository;
+         this.candidateValidator = candidateValidator;
+         this.responseAssembler = responseAssembler;
++        this.attemptDetailsCodec = attemptDetailsCodec;
+         this.clock = clock;
+     }
+ 
+     @Override
+     public DailyGameTodayResponseDTO getToday(UUID userId) {
+         return getDay(userId, LocalDate.now(clock));
+     }
+ 
+     @Override
+     public DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate) {
+@@ -71,37 +91,52 @@ public class DailyGameServiceImpl implements DailyGameService {
+         List<UUID> challengeIds = challenges.stream().map(DailyChallenge::getId).toList();
+         Map<UUID, UserDailyGameResult> results = resultRepository
+                 .findByUserIdAndDailyChallengeIdIn(userId, challengeIds)
+                 .stream()
+                 .collect(Collectors.toMap(result -> result.getDailyChallenge().getId(), Function.identity()));
+         Map<UUID, List<DailyChallengeHint>> hints = hintRepository
+                 .findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(challengeIds)
+                 .stream()
+                 .collect(Collectors.groupingBy(hint -> hint.getDailyChallenge().getId()));
+ 
+-        return responseAssembler.toTodayResponse(challengeDate, challenges, results, hints);
++        return responseAssembler.toTodayResponse(challengeDate, LocalDate.now(clock), challenges, results, hints);
++    }
++
++    @Override
++    public DailyGameStateDTO getGame(
++            UUID userId, LocalDate challengeDate, DailyGameType gameType, boolean majorRoles) {
++        requireGameType(gameType);
++        assertAvailableDate(challengeDate);
++        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
++                .orElseThrow(DailyGamesUnavailableException::new);
++        UserDailyGameResult result = resultRepository
++                .findByUserIdAndDailyChallengeIdIn(userId, List.of(challenge.getId()))
++                .stream()
++                .findFirst()
++                .orElse(null);
++        List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
++        return responseAssembler.toState(
++                challenge, result, hints, challengeDate.equals(LocalDate.now(clock)));
+     }
+ 
+     @Override
+     @Transactional
+     public DailyGameAttemptResponseDTO submitAttempt(
+             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request) {
+         return submitAttempt(userId, LocalDate.now(clock), gameType, request);
+     }
+ 
+     @Override
+     @Transactional
+     public DailyGameAttemptResponseDTO submitAttempt(
+             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request) {
+-        if (gameType == null) {
+-            throw new BadRequestException("A daily game type is required");
+-        }
++        requireGameType(gameType);
+         assertAvailableDate(challengeDate);
+         LocalDateTime now = LocalDateTime.now(clock);
+         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
+                 .orElseThrow(DailyGamesUnavailableException::new);
+ 
+         resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
+         UserDailyGameResult result = resultRepository
+                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
+                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
+         assertOpenAndHasAttempts(result, gameType);
+@@ -116,23 +151,75 @@ public class DailyGameServiceImpl implements DailyGameService {
+             result.setCompletedAt(now);
+         } else if (attemptNumber >= gameType.maxAttempts()) {
+             result.setScore(0);
+             result.setStatus(DailyGameResultStatus.FAILED);
+             result.setCompletedAt(now);
+         } else {
+             result.setScore(0);
+             result.setStatus(DailyGameResultStatus.IN_PROGRESS);
+             result.setCompletedAt(null);
+         }
++        appendAttemptDetails(challenge, result, attemptNumber, candidate, guessFeedback(gameType, challenge, candidate));
+         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+         return responseAssembler.toAttemptResponse(challenge, result, hints,
+-                guessFeedback(gameType, challenge, candidate));
++                guessFeedback(gameType, challenge, candidate), challengeDate.equals(LocalDate.now(clock)));
++    }
++
++    @Override
++    @Transactional
++    public DailyGameAttemptResponseDTO giveUp(UUID userId, DailyGameType gameType) {
++        return giveUp(userId, LocalDate.now(clock), gameType);
++    }
++
++    @Override
++    @Transactional
++    public DailyGameAttemptResponseDTO giveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
++        requireGameType(gameType);
++        assertAvailableDate(challengeDate);
++        LocalDateTime now = LocalDateTime.now(clock);
++        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
++                .orElseThrow(DailyGamesUnavailableException::new);
++        resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
++        UserDailyGameResult result = resultRepository
++                .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
++                .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
++        assertOpenAndHasAttempts(result, gameType);
++        result.setStatus(DailyGameResultStatus.FAILED);
++        result.setScore(0);
++        result.setCompletedAt(now);
++        result.setUpdatedAt(now);
++        List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
++        return responseAssembler.toAttemptResponse(
++                challenge, result, hints, null, challengeDate.equals(LocalDate.now(clock)));
++    }
++
++    private void appendAttemptDetails(
++            DailyChallenge challenge,
++            UserDailyGameResult result,
++            int attemptNumber,
++            DailyGameCandidateIdentity candidate,
++            DailyGameGuessFeedbackDTO episodeFeedback) {
++        if (!challenge.getChallengeDate().equals(LocalDate.now(clock))) {
++            return;
++        }
++        DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
++                candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
++                candidate.seasonNumber(), candidate.episodeNumber(), null, null, null);
++        result.setAttemptDetails(attemptDetailsCodec.append(
++                result.getAttemptDetails(),
++                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, null, null)));
++    }
++
++    private void requireGameType(DailyGameType gameType) {
++        if (gameType == null) {
++            throw new BadRequestException("A daily game type is required");
++        }
+     }
+ 
+     private DailyGameGuessFeedbackDTO guessFeedback(
+             DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
+         if (gameType != DailyGameType.EPISODE_BY_FRAME) {
+             return null;
+         }
+         boolean seriesCorrect = Objects.equals(challenge.getSeriesTmdbId(), candidate.seriesTmdbId());
+         boolean seasonCorrect = Objects.equals(challenge.getSeasonNumber(), candidate.seasonNumber());
+         boolean episodeCorrect = Objects.equals(challenge.getEpisodeNumber(), candidate.episodeNumber());
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
+index 1ef8992..55e8c71 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerIntegrationTest.java
+@@ -44,20 +44,21 @@ import org.testcontainers.junit.jupiter.Container;
+ import org.testcontainers.junit.jupiter.Testcontainers;
+ 
+ import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ import java.util.UUID;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.never;
+ import static org.mockito.Mockito.reset;
+ import static org.mockito.Mockito.times;
+ import static org.mockito.Mockito.verify;
+ import static org.mockito.Mockito.verifyNoInteractions;
+ import static org.mockito.Mockito.when;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ 
+@@ -117,20 +118,40 @@ class DailyGameControllerIntegrationTest {
+                 .thenReturn(new DailyGameTodayResponseDTO(LocalDate.of(2026, 9, 28), List.of(game)));
+ 
+         mockMvc.perform(get("/games/today").cookie(user.accessToken()))
+                 .andExpect(status().isOk())
+                 .andExpect(jsonPath("$.games[0].status").value("IN_PROGRESS"))
+                 .andExpect(jsonPath("$.games[0].answer").doesNotExist());
+ 
+         verify(dailyGameService).getToday(user.id());
+     }
+ 
++    @Test
++    @DisplayName("[getGame] Should Resolve The Specific Route - When A Game Type Is Requested After The Aggregate Route")
++    void shouldResolveTheSpecificRouteWhenAGameTypeIsRequestedAfterTheAggregateRoute() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollerspecific");
++        DailyGameStateDTO game = new DailyGameStateDTO(
++                DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 0, 10,
++                DailyGameViewStatus.NOT_PLAYED, "/hint.jpg", List.of(), 0, null, null);
++        when(dailyGameService.getGame(eq(user.id()), any(LocalDate.class),
++                eq(DailyGameType.MOVIE_BY_INFO), eq(true))).thenReturn(game);
++
++        mockMvc.perform(get("/games/{gameType}/today", DailyGameType.MOVIE_BY_INFO)
++                        .cookie(user.accessToken()))
++                .andExpect(status().isOk())
++                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
++
++        verify(dailyGameService).getGame(eq(user.id()), any(LocalDate.class),
++                eq(DailyGameType.MOVIE_BY_INFO), eq(true));
++        verify(dailyGameService, never()).getToday(user.id());
++    }
++
+     @Test
+     @DisplayName("[getToday] Should Return Unauthorized - When Access Token Is Missing")
+     void shouldReturnUnauthorizedWhenAccessTokenIsMissing() throws Exception {
+         mockMvc.perform(get("/games/today"))
+                 .andExpect(status().isUnauthorized())
+                 .andExpect(jsonPath("$.status").value(401))
+                 .andExpect(jsonPath("$.detail").doesNotExist())
+                 .andExpect(jsonPath("$.instance").doesNotExist());
+ 
+         verifyNoInteractions(dailyGameService);
+@@ -146,20 +167,33 @@ class DailyGameControllerIntegrationTest {
+                         .contentType(MediaType.APPLICATION_JSON)
+                         .content("{\"tmdbId\":\"550\"}"))
+                 .andExpect(status().isForbidden())
+                 .andExpect(jsonPath("$.status").value(403))
+                 .andExpect(jsonPath("$.detail").doesNotExist())
+                 .andExpect(jsonPath("$.instance").doesNotExist());
+ 
+         verifyNoInteractions(dailyGameService);
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Return Forbidden - When Csrf Header Is Missing")
++    void shouldReturnForbiddenWhenGiveUpCsrfHeaderIsMissing() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollergiveupcsrf");
++
++        mockMvc.perform(post("/games/{gameType}/give-up", DailyGameType.MOVIE_BY_INFO)
++                        .cookie(user.accessToken()))
++                .andExpect(status().isForbidden())
++                .andExpect(jsonPath("$.status").value(403));
++
++        verifyNoInteractions(dailyGameService);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Return Ok - When Access And Csrf Cookies Are Valid")
+     void shouldReturnOkWhenAccessAndCsrfCookiesAreValid() throws Exception {
+         RegisteredUser user = registerUser("dailycontrollerattempt");
+         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
+                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
+                 DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
+         when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+                 .thenReturn(response);
+ 
+@@ -230,20 +264,36 @@ class DailyGameControllerIntegrationTest {
+         when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+                 .thenThrow(new ConflictException("Daily game attempt is already finished"));
+ 
+         mockMvc.perform(attemptRequest(user, DailyGameType.MOVIE_BY_INFO, "{\"tmdbId\":\"550\"}"))
+                 .andExpect(status().isConflict())
+                 .andExpect(jsonPath("$.status").value(409))
+                 .andExpect(jsonPath("$.error").value("Conflict"))
+                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/attempt"));
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Return Conflict ApiError - When The Game Is Already Completed")
++    void shouldReturnConflictApiErrorWhenGiveUpGameIsAlreadyCompleted() throws Exception {
++        RegisteredUser user = registerUser("dailycontrollergiveupconflict");
++        when(dailyGameService.giveUp(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO)))
++                .thenThrow(new ConflictException("Daily game attempt is already finished"));
++
++        mockMvc.perform(post("/games/{gameType}/give-up", DailyGameType.MOVIE_BY_INFO)
++                        .cookie(user.accessToken(), user.csrfToken())
++                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
++                .andExpect(status().isConflict())
++                .andExpect(jsonPath("$.status").value(409))
++                .andExpect(jsonPath("$.error").value("Conflict"))
++                .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/give-up"));
++    }
++
+     @Test
+     @DisplayName("[getToday] Should Return ServiceUnavailable - When The Daily Set Is Missing")
+     void shouldReturnServiceUnavailableWhenTheDailySetIsMissing() throws Exception {
+         RegisteredUser user = registerUser("dailycontrollerunavailable");
+         when(dailyGameService.getToday(user.id())).thenThrow(new DailyGamesUnavailableException());
+ 
+         mockMvc.perform(get("/games/today").cookie(user.accessToken()))
+                 .andExpect(status().isServiceUnavailable())
+                 .andExpect(jsonPath("$.status").value(503))
+                 .andExpect(jsonPath("$.message").value("Daily games are temporarily unavailable"))
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
+index 933da91..45a2eb3 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/controller/DailyGameControllerTest.java
+@@ -1,20 +1,22 @@
+ package com.watchwise.watchwise_api.dailygame.controller;
+ 
+ import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
++import com.watchwise.watchwise_api.common.exception.ConflictException;
+ import com.watchwise.watchwise_api.common.security.RequestThrottler;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.DisplayName;
+@@ -105,20 +107,53 @@ class DailyGameControllerTest {
+         when(dailyGameService.getDay(CURRENT_USER_ID, historicalDate))
+                 .thenReturn(new DailyGameTodayResponseDTO(historicalDate, List.of()));
+ 
+         mockMvc.perform(get("/games/{challengeDate}", historicalDate))
+                 .andExpect(status().isOk())
+                 .andExpect(jsonPath("$.date").value("2026-09-27"));
+ 
+         verify(dailyGameService).getDay(CURRENT_USER_ID, historicalDate);
+     }
+ 
++    @Test
++    @DisplayName("[getGame] Should Delegate The Specific Game - When A Game Type Is Requested For Today")
++    void shouldDelegateTheSpecificGameWhenAGameTypeIsRequestedForToday() throws Exception {
++        when(dailyGameService.getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true)))
++                .thenReturn(new DailyGameStateDTO(
++                        GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
++                        "/poster.jpg", List.of(), 0, null, null));
++
++        mockMvc.perform(get("/games/{gameType}/today", GAME_TYPE))
++                .andExpect(status().isOk())
++                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
++
++        verify(dailyGameService).getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true));
++        verifyNoInteractions(dailyGameRankingService, dailyGameSearchService);
++    }
++
++    @Test
++    @DisplayName("[getGame] Should Preserve The Major Roles Toggle - When A Historical Game Is Requested")
++    void shouldPreserveTheMajorRolesToggleWhenAHistoricalGameIsRequested() throws Exception {
++        LocalDate historicalDate = LocalDate.of(2026, 9, 27);
++        when(dailyGameService.getGame(CURRENT_USER_ID, historicalDate, GAME_TYPE, false))
++                .thenReturn(new DailyGameStateDTO(
++                        GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
++                        "/poster.jpg", List.of(), 0, null, null));
++
++        mockMvc.perform(get("/games/{challengeDate}/{gameType}", historicalDate, GAME_TYPE)
++                        .param("majorRoles", "false"))
++                .andExpect(status().isOk())
++                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
++
++        verify(dailyGameService).getGame(CURRENT_USER_ID, historicalDate, GAME_TYPE, false);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Delegate And Return Response - When Attempt Is Valid")
+     void shouldSubmitAttemptWithCurrentUserAndRateLimit() throws Exception {
+         DailyGameAttemptResponseDTO response = attemptResponse();
+         when(dailyGameService.submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class)))
+                 .thenReturn(response);
+ 
+         mockMvc.perform(post("/games/{gameType}/attempt", GAME_TYPE)
+                         .contentType(MediaType.APPLICATION_JSON)
+                         .content("{\"tmdbId\":\"550\"}"))
+@@ -144,20 +179,47 @@ class DailyGameControllerTest {
+         mockMvc.perform(post("/games/{challengeDate}/{gameType}/attempt", historicalDate, GAME_TYPE)
+                         .contentType(MediaType.APPLICATION_JSON)
+                         .content("{\"tmdbId\":\"550\"}"))
+                 .andExpect(status().isOk())
+                 .andExpect(jsonPath("$.gameType").value(GAME_TYPE.name()));
+ 
+         verify(dailyGameService).submitAttempt(
+                 eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Delegate And Apply The Attempt Limit - When The Current Game Is Abandoned")
++    void shouldDelegateAndApplyTheAttemptLimitWhenTheCurrentGameIsAbandoned() throws Exception {
++        when(dailyGameService.giveUp(CURRENT_USER_ID, GAME_TYPE)).thenReturn(attemptResponse());
++
++        mockMvc.perform(post("/games/{gameType}/give-up", GAME_TYPE))
++                .andExpect(status().isOk())
++                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
++
++        verify(requestThrottler).checkAllowed(
++                "daily-game-attempt|" + CURRENT_USER_ID, 20, Duration.ofMinutes(5));
++        verify(dailyGameService).giveUp(CURRENT_USER_ID, GAME_TYPE);
++    }
++
++    @Test
++    @DisplayName("[giveUp] Should Return An ApiError Conflict - When The Game Is Already Terminal")
++    void shouldReturnAnApiErrorConflictWhenTheGameIsAlreadyTerminal() throws Exception {
++        when(dailyGameService.giveUp(CURRENT_USER_ID, GAME_TYPE))
++                .thenThrow(new ConflictException("Daily game attempt is already finished"));
++
++        mockMvc.perform(post("/games/{gameType}/give-up", GAME_TYPE))
++                .andExpect(status().isConflict())
++                .andExpect(jsonPath("$.status").value(409))
++                .andExpect(jsonPath("$.error").value("Conflict"))
++                .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/give-up"));
++    }
++
+     @Test
+     @DisplayName("[search] Should Delegate All Search Routes - When Candidates Are Requested")
+     void shouldDelegateAllSearchRoutesAndApplyOneSearchLimitPerRequest() throws Exception {
+         DailyGameSearchResultDTO movie = new DailyGameSearchResultDTO(
+                 DailyGameTargetKind.MOVIE, "550", null, null, null, null, "Fight Club", "/fight.jpg", null);
+         DailyGameSearchResultDTO series = new DailyGameSearchResultDTO(
+                 DailyGameTargetKind.SERIES, "1399", null, null, null, null, "Game of Thrones", "/got.jpg", null);
+         DailyGameSearchResultDTO episode = new DailyGameSearchResultDTO(
+                 DailyGameTargetKind.EPISODE, null, null, "1399", 1, 1, "Winter Is Coming", "/episode.jpg", LocalDate.now());
+         when(dailyGameSearchService.search(CURRENT_USER_ID, GAME_TYPE, "fight", 2, 5))
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodecTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodecTest.java
+new file mode 100644
+index 0000000..74496f0
+--- /dev/null
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCodecTest.java
+@@ -0,0 +1,48 @@
++package com.watchwise.watchwise_api.dailygame.service;
++
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
++import org.junit.jupiter.api.Test;
++
++import java.time.LocalDate;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++class DailyGameAttemptDetailsCodecTest {
++
++    private final DailyGameAttemptDetailsCodec codec = new DailyGameAttemptDetailsCodec();
++
++    @Test
++    void shouldAppendToAFreshMapAndReadAnImmutableAttemptList() {
++        DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(
++                1,
++                new DailyGameCandidateDTO(
++                        DailyGameTargetKind.MOVIE, "550", null, null, null, null,
++                        "Fight Club", "https://image.test/fight.jpg", LocalDate.of(1999, 10, 15)),
++                new DailyGameGuessFeedbackDTO(true, true, true, true), null, null);
++        Map<String, Object> original = new HashMap<>(Map.of("keep", "me"));
++
++        Map<String, Object> encoded = codec.append(original, attempt);
++
++        assertThat(encoded).isNotSameAs(original);
++        assertThat(original).containsExactlyEntriesOf(Map.of("keep", "me"));
++        assertThat(codec.read(encoded)).containsExactly(attempt);
++        assertThatThrownBy(() -> codec.read(encoded).add(attempt))
++                .isInstanceOf(UnsupportedOperationException.class);
++    }
++
++    @Test
++    void shouldReturnAnImmutableEmptyListWhenAttemptDetailsAreAbsent() {
++        List<DailyGameAttemptDTO> attempts = codec.read(null);
++
++        assertThat(attempts).isEmpty();
++        assertThatThrownBy(() -> attempts.add(null))
++                .isInstanceOf(UnsupportedOperationException.class);
++    }
++}
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+index fcf94fa..77f2749 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+@@ -1,18 +1,22 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+ import org.junit.jupiter.api.DisplayName;
+ import org.junit.jupiter.api.Test;
+ 
+ import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.UUID;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
+@@ -96,20 +100,40 @@ class DailyChallengeResponseAssemblerTest {
+     }
+ 
+     @Test
+     @DisplayName("[imageUrl] Should Build The Poster Url - When The Challenge Stores A Relative Tmdb Path")
+     void shouldBuildThePosterUrlWhenTheChallengeStoresARelativeTmdbPath() {
+         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(challenge("/fight-club.jpg"), result());
+ 
+         assertThat(response.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/fight-club.jpg");
+     }
+ 
++    @Test
++    @DisplayName("[attempts] Should Expose Current Day Attempts Without Revealing The Answer - When The Result Is Open")
++    void shouldExposeCurrentDayAttemptsWithoutRevealingTheAnswerWhenTheResultIsOpen() {
++        DailyChallenge challenge = challenge("/fight-club.jpg");
++        UserDailyGameResult result = result();
++        DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(
++                1,
++                new DailyGameCandidateDTO(
++                        DailyGameTargetKind.MOVIE, "680", null, null, null, null,
++                        "The Secret Guess", "/guess.jpg", LocalDate.of(2000, 1, 1)),
++                new DailyGameGuessFeedbackDTO(false, false, false, false), null, null);
++        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null, attempt));
++
++        DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
++                challenge, result, List.of(), null, true);
++
++        assertThat(response.attempts()).containsExactly(attempt);
++        assertThat(response.answer()).isNull();
++    }
++
+     private DailyChallenge challenge(String imagePath) {
+         return DailyChallenge.builder()
+                 .id(UUID.randomUUID())
+                 .challengeDate(LocalDate.of(2026, 9, 27))
+                 .gameType(DailyGameType.MOVIE_BY_POSTER)
+                 .targetKind(DailyGameTargetKind.MOVIE)
+                 .targetTmdbId("550")
+                 .answerKey("MOVIE:550")
+                 .imagePath(imagePath)
+                 .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+index a2e6960..4bda57d 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+@@ -247,30 +247,53 @@ class DailyGameServiceImplTest {
+         assertThat(response.attemptsRemaining()).isZero();
+         assertThat(response.answer()).isNotNull();
+         assertThat(result.getCompletedAt()).isEqualTo(NOW);
+     }
+ 
+     @Test
+     @DisplayName("[submitAttempt] Should Reject The Candidate Without Consuming An Attempt - When The Request Contains A Mismatched Field")
+     void shouldRejectTheCandidateWithoutConsumingAnAttemptWhenTheRequestContainsAMismatchedField() {
+         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
++        Map<String, Object> existingDetails = Map.of("attempts", List.of("existing"));
++        result.setAttemptDetails(existingDetails);
+         stubOpenSubmission(challenge, result);
+ 
+         assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
+                 request(null, "287", null, null, null)))
+                 .isInstanceOf(BadRequestException.class);
+ 
+         assertThat(result.getAttemptsUsed()).isZero();
++        assertThat(result.getAttemptDetails()).isSameAs(existingDetails);
+         verifyNoInteractions(tmdbClient);
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Reject A Terminal Result - When The User Gives Up After Finishing")
++    void shouldRejectAGiveUpWhenTheResultIsAlreadyTerminal() {
++        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
++        UserDailyGameResult result = result(challenge, 1, 10, DailyGameResultStatus.COMPLETED, NOW);
++        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
++                .thenReturn(Optional.of(challenge));
++        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(0);
++        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
++                .thenReturn(Optional.of(result));
++
++        assertThatThrownBy(() -> service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO))
++                .isInstanceOf(ConflictException.class);
++
++        assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.COMPLETED);
++        assertThat(result.getAttemptsUsed()).isOne();
++        assertThat(result.getScore()).isEqualTo(10);
++        verifyNoInteractions(hintRepository);
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Reject A Missing Candidate Without Consuming An Attempt - When TMDB Returns NotFound")
+     void shouldRejectAMissingCandidateWithoutConsumingAnAttemptWhenTmdbReturnsNotFound() {
+         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+         stubOpenSubmission(challenge, result);
+         when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                 .thenReturn(new TmdbLookupResult.NotFound<>());
+ 
+         assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
+@@ -327,20 +350,60 @@ class DailyGameServiceImplTest {
+     void shouldRejectTheSubmissionWhenTheChallengeIsMissingForToday() {
+         when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_POSTER))
+                 .thenReturn(Optional.empty());
+ 
+         assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
+                 request("550", null, null, null, null)))
+                 .isInstanceOf(DailyGamesUnavailableException.class);
+         verifyNoInteractions(resultRepository, tmdbClient);
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Fail Without Consuming An Attempt - When The User Gives Up Before Playing")
++    void shouldFailWithoutConsumingAnAttemptWhenTheUserGivesUp() {
++        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
++        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
++        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
++                .thenReturn(Optional.of(challenge));
++        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
++        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
++                .thenReturn(Optional.of(result));
++        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
++
++        DailyGameAttemptResponseDTO response = service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO);
++
++        assertThat(response.status()).isEqualTo(DailyGameViewStatus.FAILED);
++        assertThat(response.attemptsUsed()).isZero();
++        assertThat(response.score()).isZero();
++        assertThat(response.answer()).isNotNull();
++        assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.FAILED);
++        assertThat(result.getCompletedAt()).isEqualTo(NOW);
++    }
++
++    @Test
++    @DisplayName("[getGame] Should Return A NotPlayed State - When The User Has No Result For The Game")
++    void shouldReturnANotPlayedStateWhenTheUserHasNoResultForTheGame() {
++        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
++        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
++                .thenReturn(Optional.of(challenge));
++        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), eq(List.of(challenge.getId()))))
++                .thenReturn(List.of());
++        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
++
++        DailyGameStateDTO response = service().getGame(
++                USER_ID, TODAY, DailyGameType.MOVIE_BY_INFO, true);
++
++        assertThat(response.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
++        assertThat(response.attemptsUsed()).isZero();
++        assertThat(response.answer()).isNull();
++    }
++
+     @Test
+     @DisplayName("[submitAttempt] Should Use The Composite Episode Identity - When The Candidate Is Valid")
+     void shouldUseTheCompositeEpisodeIdentityWhenTheCandidateIsValid() {
+         DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
+         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+         stubOpenSubmission(challenge, result);
+         when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                 .thenReturn(new TmdbLookupResult.Found<>(mock()));
+ 
+         DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.EPISODE_BY_FRAME,
+@@ -463,20 +526,30 @@ class DailyGameServiceImplTest {
+     @DisplayName("[submitAttempt] Should Require A Transaction - When The Submission Method Is Inspected")
+     void shouldRequireATransactionWhenTheSubmissionMethodIsInspected() throws NoSuchMethodException {
+         Method method = DailyGameServiceImpl.class.getMethod("submitAttempt", UUID.class, DailyGameType.class,
+                 com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest.class);
+         Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
+ 
+         assertThat(transactional).isNotNull();
+         assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
+     }
+ 
++    @Test
++    @DisplayName("[giveUp] Should Require A Transaction - When The Give Up Method Is Inspected")
++    void shouldRequireATransactionWhenTheGiveUpMethodIsInspected() throws NoSuchMethodException {
++        Method method = DailyGameServiceImpl.class.getMethod("giveUp", UUID.class, DailyGameType.class);
++        Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
++
++        assertThat(transactional).isNotNull();
++        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
++    }
++
+     private DailyGameServiceImpl service() {
+         return new DailyGameServiceImpl(
+                 challengeRepository,
+                 hintRepository,
+                 resultRepository,
+                 new com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator(tmdbClient),
+                 new DailyChallengeResponseAssembler(),
+                 CLOCK);
+     }
+ 
+

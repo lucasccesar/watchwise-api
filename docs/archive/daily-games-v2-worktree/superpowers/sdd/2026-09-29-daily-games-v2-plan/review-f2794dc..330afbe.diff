@@ -1,0 +1,98 @@
+# Review package: f2794dc..330afbe
+
+## Commits
+330afbe fix(dailygame): restore legacy response constructor
+
+## Files changed
+ .../dailygame/dto/DailyGameAttemptResponseDTO.java | 21 +++++++++++++
+ .../dto/DailyGameAttemptResponseDTOTest.java       | 35 ++++++++++++++++++++++
+ 2 files changed, 56 insertions(+)
+
+## Diff
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
+index 6c04cf4..801ba00 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTO.java
+@@ -34,20 +34,41 @@ public record DailyGameAttemptResponseDTO(
+             DailyGameViewStatus status,
+             String imageUrl,
+             List<DailyGameHintDTO> hints,
+             int score,
+             LocalDateTime completedAt,
+             DailyGameAnswerDTO answer) {
+         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+                 score, completedAt, answer, null, null, null, null, null, null);
+     }
+ 
++    public DailyGameAttemptResponseDTO(
++            DailyGameType gameType,
++            DailyGameTargetKind targetKind,
++            int maxAttempts,
++            int attemptsUsed,
++            int attemptsRemaining,
++            DailyGameViewStatus status,
++            String imageUrl,
++            List<DailyGameHintDTO> hints,
++            int score,
++            LocalDateTime completedAt,
++            DailyGameAnswerDTO answer,
++            List<String> visibleImageUrls,
++            List<String> imageUrls,
++            List<DailyGameAttemptDTO> attempts,
++            DailyGameFilmographyStateDTO filmography,
++            DailyGameGuessFeedbackDTO guessFeedback) {
++        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
++                score, completedAt, answer, visibleImageUrls, imageUrls, attempts, null, filmography, guessFeedback);
++    }
++
+     public DailyGameAttemptResponseDTO(
+             DailyGameType gameType,
+             DailyGameTargetKind targetKind,
+             int maxAttempts,
+             int attemptsUsed,
+             int attemptsRemaining,
+             DailyGameViewStatus status,
+             String imageUrl,
+             List<DailyGameHintDTO> hints,
+             int score,
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTOTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTOTest.java
+new file mode 100644
+index 0000000..975eb74
+--- /dev/null
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/dto/DailyGameAttemptResponseDTOTest.java
+@@ -0,0 +1,35 @@
++package com.watchwise.watchwise_api.dailygame.dto;
++
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++
++import static org.junit.jupiter.api.Assertions.assertNull;
++
++class DailyGameAttemptResponseDTOTest {
++
++    @Test
++    void legacySixteenArgumentConstructorSetsCurrentAttemptToNull() {
++        DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
++                DailyGameType.MOVIE_BY_POSTER,
++                DailyGameTargetKind.MOVIE,
++                5,
++                1,
++                4,
++                DailyGameViewStatus.IN_PROGRESS,
++                null,
++                List.of(),
++                0,
++                null,
++                null,
++                null,
++                null,
++                List.of(),
++                null,
++                null);
++
++        assertNull(response.currentAttempt());
++    }
++}

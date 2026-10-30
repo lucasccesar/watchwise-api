@@ -1,0 +1,1657 @@
+# Review package: 6f1b230..6916f34
+
+## Commits
+6916f34 feat(daily-game): compare info game guesses
+--- FILES ---
+ .../DailyChallengeSnapshotAssembler.java           | 122 ++++++-
+ .../dailygame/generation/MovieByInfoGenerator.java |   7 +-
+ .../generation/SeriesByInfoGenerator.java          |   7 +-
+ .../service/DailyGameInfoComparisonService.java    |   9 +
+ .../impl/DailyChallengeResponseAssembler.java      |  10 +-
+ .../impl/DailyGameInfoComparisonServiceImpl.java   | 391 +++++++++++++++++++++
+ .../service/impl/DailyGameServiceImpl.java         |  39 +-
+ .../generation/DailyChallengeGeneratorTest.java    |  20 ++
+ .../impl/DailyChallengeResponseAssemblerTest.java  |  28 +-
+ .../impl/DailyGameInfoComparisonServiceTest.java   | 335 ++++++++++++++++++
+ .../service/impl/DailyGameServiceImplTest.java     |  39 ++
+ 11 files changed, 987 insertions(+), 20 deletions(-)
+--- DIFF ---
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
+index 3b90412..781d731 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeSnapshotAssembler.java
+@@ -1,20 +1,23 @@
+ package com.watchwise.watchwise_api.dailygame.generation;
+ 
+ import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbCastMember;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
++import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
++import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
++import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import org.springframework.stereotype.Component;
+ 
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ 
+ @Component
+ public class DailyChallengeSnapshotAssembler {
+@@ -59,33 +62,72 @@ public class DailyChallengeSnapshotAssembler {
+         put(answerSnapshot, "episodeName", name);
+         return candidate(DailyGameType.EPISODE_BY_FRAME, DailyGameTargetKind.EPISODE, null, seriesTmdbId,
+                 seasonNumber, episodeNumber, seriesTmdbId,
+                 "EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber, imagePath,
+                 answerSnapshot,
+                 displaySnapshot(imagePaths), List.of());
+     }
+ 
+     public DailyChallengeCandidate movieInfo(TmdbMovieFullDetails movie, String imagePath,
+                                              List<DailyChallengeCandidate.HintSnapshot> hints) {
++        return movieInfo(movie, imagePath, hints, null);
++    }
++
++    public DailyChallengeCandidate movieInfo(TmdbMovieFullDetails movie, String imagePath,
++                                             List<DailyChallengeCandidate.HintSnapshot> hints,
++                                             String certification) {
++        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null,
++                null, null, null, movie.title(), imagePath, movie.id());
++        putNames(answerSnapshot, "platforms", providerNames(movie.watchProviders()));
++        putNames(answerSnapshot, "genres", movie.genres() == null ? null
++                : movie.genres().stream().map(value -> value == null ? null : value.name()).toList());
++        put(answerSnapshot, "year", year(movie.releaseDate()));
++        put(answerSnapshot, "certification", certification);
++        put(answerSnapshot, "director", director(movie));
++        putNames(answerSnapshot, "cast", movie.credits() == null || movie.credits().cast() == null ? null
++                : movie.credits().cast().stream().map(value -> value == null ? null : value.name()).toList());
++        putNames(answerSnapshot, "productionCompanies", movie.productionCompanies() == null ? null
++                : movie.productionCompanies().stream().map(value -> value == null ? null : value.name()).toList());
++        put(answerSnapshot, "revenue", movie.revenue() == null || movie.revenue() <= 0 ? null : movie.revenue());
+         return candidate(DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, movie.id(), null, null, null,
+                 movie.id(), "MOVIE:" + movie.id(), imagePath,
+-                answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null, null, null, null, movie.title(), imagePath,
+-                        movie.id()),
++                answerSnapshot,
+                 displaySnapshot(imagePath), hints);
+     }
+ 
+     public DailyChallengeCandidate seriesInfo(TmdbTvFullDetails series, String imagePath,
+                                               List<DailyChallengeCandidate.HintSnapshot> hints) {
++        return seriesInfo(series, imagePath, hints, null);
++    }
++
++    public DailyChallengeCandidate seriesInfo(TmdbTvFullDetails series, String imagePath,
++                                              List<DailyChallengeCandidate.HintSnapshot> hints,
++                                              String certification) {
++        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.SERIES, series.id(), null,
++                null, null, null, series.name(), imagePath, series.id());
++        putNames(answerSnapshot, "platforms", providerNames(series.watchProviders()));
++        putNames(answerSnapshot, "genres", series.genres() == null ? null
++                : series.genres().stream().map(value -> value == null ? null : value.name()).toList());
++        put(answerSnapshot, "year", year(series.firstAirDate()));
++        put(answerSnapshot, "certification", certification);
++        putNames(answerSnapshot, "creators", series.createdBy() == null ? null
++                : series.createdBy().stream().map(value -> value == null ? null : value.name()).toList());
++        putNames(answerSnapshot, "cast", series.aggregateCredits() == null || series.aggregateCredits().cast() == null
++                ? null : series.aggregateCredits().cast().stream()
++                .map(value -> value == null ? null : value.name()).toList());
++        putNames(answerSnapshot, "productionCompanies", series.productionCompanies() == null ? null
++                : series.productionCompanies().stream().map(value -> value == null ? null : value.name()).toList());
++        put(answerSnapshot, "seasons", series.numberOfSeasons() == null || series.numberOfSeasons() <= 0
++                ? null : series.numberOfSeasons());
+         return candidate(DailyGameType.SERIES_BY_INFO, DailyGameTargetKind.SERIES, series.id(), null, null, null,
+                 series.id(), "SERIES:" + series.id(), imagePath,
+-                answerSnapshot(DailyGameTargetKind.SERIES, series.id(), null, null, null, null, series.name(), imagePath,
+-                        series.id()),
++                answerSnapshot,
+                 displaySnapshot(imagePath), hints);
+     }
+ 
+     public DailyChallengeCandidate actorFromMovie(String movieTmdbId, TmdbCastMember actor, String imagePath) {
+         return person(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, String.valueOf(actor.id()), actor.name(), imagePath,
+                 movieTmdbId, List.of());
+     }
+ 
+     public DailyChallengeCandidate actorFromSeries(String seriesTmdbId, TmdbAggregateCastMember actor, String imagePath) {
+         return person(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, String.valueOf(actor.id()), actor.name(), imagePath,
+@@ -142,11 +184,83 @@ public class DailyChallengeSnapshotAssembler {
+         if (value != null && !value.isBlank()) {
+             snapshot.put(field, value);
+         }
+     }
+ 
+     private static void put(Map<String, Object> snapshot, String field, Object value) {
+         if (value != null) {
+             snapshot.put(field, value);
+         }
+     }
++
++    private static void putNames(Map<String, Object> snapshot, String field, List<String> values) {
++        if (values == null) {
++            return;
++        }
++        List<String> normalized = values.stream()
++                .map(DailyChallengeSnapshotAssembler::trimmed)
++                .filter(value -> value != null)
++                .collect(java.util.stream.Collectors.collectingAndThen(
++                        java.util.stream.Collectors.toMap(value -> value.toLowerCase(java.util.Locale.ROOT),
++                                value -> value, (first, ignored) -> first, LinkedHashMap::new),
++                        map -> List.copyOf(map.values())));
++        if (!normalized.isEmpty()) {
++            snapshot.put(field, normalized);
++        }
++    }
++
++    private List<String> providerNames(TmdbWatchProviders providers) {
++        if (providers == null || providers.results() == null) {
++            return List.of();
++        }
++        TmdbRegionProviders region = providers.results().get("BR");
++        if (region == null) {
++            return List.of();
++        }
++        List<String> names = new java.util.ArrayList<>();
++        addProviderNames(names, region.flatrate());
++        addProviderNames(names, region.rent());
++        addProviderNames(names, region.buy());
++        return names;
++    }
++
++    private void addProviderNames(List<String> names, List<TmdbProvider> providers) {
++        if (providers != null) {
++            providers.stream().filter(value -> value != null).map(TmdbProvider::providerName).forEach(names::add);
++        }
++    }
++
++    private String director(TmdbMovieFullDetails movie) {
++        if (movie.credits() == null || movie.credits().crew() == null) {
++            return null;
++        }
++        return movie.credits().crew().stream()
++                .filter(value -> value != null && value.job() != null && "Director".equalsIgnoreCase(value.job()))
++                .map(value -> trimmed(value.name()))
++                .filter(value -> value != null)
++                .findFirst()
++                .orElse(null);
++    }
++
++    private Integer year(String date) {
++        if (date == null || date.isBlank()) {
++            return null;
++        }
++        try {
++            return java.time.LocalDate.parse(date).getYear();
++        } catch (java.time.format.DateTimeParseException ignored) {
++            try {
++                return Integer.valueOf(date.substring(0, 4));
++            } catch (RuntimeException ignoredAgain) {
++                return null;
++            }
++        }
++    }
++
++    private static String trimmed(String value) {
++        if (value == null) {
++            return null;
++        }
++        String normalized = value.trim();
++        return normalized.isBlank() ? null : normalized;
++    }
+ }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/MovieByInfoGenerator.java b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/MovieByInfoGenerator.java
+index ab92af8..6252b7a 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/MovieByInfoGenerator.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/MovieByInfoGenerator.java
+@@ -51,37 +51,38 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
+     }
+ 
+     private Optional<DailyChallengeCandidate> buildCandidate(TmdbMovieFullDetails movie) {
+         String imagePath = TmdbImageUrlBuilder.posterUrl(movie.posterPath());
+         List<DailyChallengeCandidate.HintSnapshot> hints = new ArrayList<>();
+         addHint(hints, "PLATFORM", DailyChallengeInfoSupport.providers(movie.watchProviders(), RATING_REGION));
+         addHint(hints, "GENRES", movie.genres() == null ? null : DailyChallengeGenerationSupport.joinNonBlank(
+                 movie.genres().stream().map(genre -> genre == null ? null : genre.name()).toList()));
+         addHint(hints, "YEAR", DailyChallengeGenerationSupport.date(movie.releaseDate())
+                 .map(date -> String.valueOf(date.getYear())).orElse(null));
+-        DailyChallengeInfoSupport.movieCertification(
++        String certification = DailyChallengeInfoSupport.movieCertification(
+                         DailyChallengeGenerationSupport.value(tmdbClient.getMovieReleaseDates(movie.id(),
+                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).orElse(null), RATING_REGION)
+-                .ifPresent(certification -> addHint(hints, "CERTIFICATION", certification));
++                .orElse(null);
++        addHint(hints, "CERTIFICATION", certification);
+         addHint(hints, "DIRECTOR", director(movie));
+         addHint(hints, "CAST", movie.credits() == null || movie.credits().cast() == null ? null
+                 : DailyChallengeGenerationSupport.joinNonBlank(movie.credits().cast().stream()
+                 .map(cast -> cast == null ? null : cast.name()).toList()));
+         addHint(hints, "PRODUCTION_COMPANIES", movie.productionCompanies() == null ? null
+                 : DailyChallengeGenerationSupport.joinNonBlank(movie.productionCompanies().stream()
+                 .map(company -> company == null ? null : company.name()).toList()));
+         addHint(hints, "REVENUE", movie.revenue() == null || movie.revenue() <= 0 ? null
+                 : String.valueOf(movie.revenue()));
+         if (hints.isEmpty()) {
+             return Optional.empty();
+         }
+-        return Optional.of(snapshotAssembler.movieInfo(movie, imagePath, hints));
++        return Optional.of(snapshotAssembler.movieInfo(movie, imagePath, hints, certification));
+     }
+ 
+     private boolean hasRequiredMetadata(TmdbMovieFullDetails movie) {
+         return movie != null && DailyChallengeGenerationSupport.validId(movie.id())
+                 && movie.title() != null && !movie.title().isBlank()
+                 && DailyChallengeGenerationSupport.validImage(movie.posterPath());
+     }
+ 
+     private String director(TmdbMovieFullDetails movie) {
+         if (movie.credits() == null || movie.credits().crew() == null) {
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/SeriesByInfoGenerator.java b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/SeriesByInfoGenerator.java
+index 4f6951e..519172b 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/generation/SeriesByInfoGenerator.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/generation/SeriesByInfoGenerator.java
+@@ -52,35 +52,36 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
+     }
+ 
+     private Optional<DailyChallengeCandidate> buildCandidate(TmdbTvFullDetails series) {
+         String imagePath = TmdbImageUrlBuilder.posterUrl(series.posterPath());
+         List<DailyChallengeCandidate.HintSnapshot> hints = new ArrayList<>();
+         addHint(hints, "PLATFORM", DailyChallengeInfoSupport.providers(series.watchProviders(), RATING_REGION));
+         addHint(hints, "GENRES", series.genres() == null ? null : DailyChallengeGenerationSupport.joinNonBlank(
+                 series.genres().stream().map(genre -> genre == null ? null : genre.name()).toList()));
+         addHint(hints, "YEAR", DailyChallengeGenerationSupport.date(series.firstAirDate())
+                 .map(date -> String.valueOf(date.getYear())).orElse(null));
+-        DailyChallengeInfoSupport.tvCertification(
++        String certification = DailyChallengeInfoSupport.tvCertification(
+                         DailyChallengeGenerationSupport.value(tmdbClient.getTvContentRatings(series.id(),
+                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).orElse(null), RATING_REGION)
+-                .ifPresent(certification -> addHint(hints, "CERTIFICATION", certification));
++                .orElse(null);
++        addHint(hints, "CERTIFICATION", certification);
+         addHint(hints, "CREATOR", series.createdBy() == null ? null : DailyChallengeGenerationSupport.joinNonBlank(
+                 series.createdBy().stream().map(creator -> creator == null ? null : creator.name()).toList()));
+         addHint(hints, "CAST", series.aggregateCredits() == null || series.aggregateCredits().cast() == null ? null
+                 : DailyChallengeGenerationSupport.joinNonBlank(series.aggregateCredits().cast().stream()
+                 .map(cast -> cast == null ? null : cast.name()).toList()));
+         addHint(hints, "NETWORKS_PRODUCTION_COMPANIES", networkAndCompanyNames(series));
+         addHint(hints, "COUNTS", counts(series));
+         if (hints.isEmpty()) {
+             return Optional.empty();
+         }
+-        return Optional.of(snapshotAssembler.seriesInfo(series, imagePath, hints));
++        return Optional.of(snapshotAssembler.seriesInfo(series, imagePath, hints, certification));
+     }
+ 
+     private boolean hasRequiredMetadata(TmdbTvFullDetails series) {
+         return series != null && DailyChallengeGenerationSupport.validId(series.id())
+                 && series.name() != null && !series.name().isBlank()
+                 && DailyChallengeGenerationSupport.validImage(series.posterPath());
+     }
+ 
+     private String networkAndCompanyNames(TmdbTvFullDetails series) {
+         List<String> names = new ArrayList<>();
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameInfoComparisonService.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameInfoComparisonService.java
+new file mode 100644
+index 0000000..a7c9c4b
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameInfoComparisonService.java
+@@ -0,0 +1,9 @@
++package com.watchwise.watchwise_api.dailygame.service;
++
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
++
++public interface DailyGameInfoComparisonService {
++
++    DailyGameInfoFeedbackDTO compare(DailyChallenge challenge, DailyGameCandidateIdentity candidate);
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+index f639a5b..d110abb 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssembler.java
+@@ -81,22 +81,21 @@ public class DailyChallengeResponseAssembler {
+         return toAttemptResponse(challenge, result, allHints, guessFeedback, false);
+     }
+ 
+     public DailyGameAttemptResponseDTO toAttemptResponse(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints,
+             DailyGameGuessFeedbackDTO guessFeedback,
+             boolean includeAttempts) {
+         DailyGameView view = view(challenge, result, allHints);
+-        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
+-                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
++        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
+         return new DailyGameAttemptResponseDTO(
+                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
+                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+                 view.visibleImageUrls(), view.imageUrls(), attempts, null, guessFeedback);
+     }
+ 
+     public DailyGameHistoryDTO toHistoryResponse(
+             LocalDate challengeDate, DailyChallenge challenge, UserDailyGameResult result) {
+         DailyGameView view = view(challenge, result, List.of());
+         return new DailyGameHistoryDTO(
+@@ -110,22 +109,21 @@ public class DailyChallengeResponseAssembler {
+             List<DailyChallengeHint> allHints) {
+         return toState(challenge, result, allHints, false);
+     }
+ 
+     public DailyGameStateDTO toState(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints,
+             boolean includeAttempts) {
+         DailyGameView view = view(challenge, result, allHints);
+-        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
+-                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
++        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
+         return new DailyGameStateDTO(
+                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
+                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+                 view.visibleImageUrls(), view.imageUrls(), attempts, null);
+     }
+ 
+     private DailyGameView view(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             List<DailyChallengeHint> allHints) {
+@@ -151,20 +149,24 @@ public class DailyChallengeResponseAssembler {
+                 && challenge.getTargetKind() == DailyGameTargetKind.EPISODE
+                 ? imagePaths.stream().map(path -> imageUrl(challenge, path)).toList()
+                 : null;
+         return new DailyGameView(
+                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
+                 status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
+                 result == null ? null : result.getCompletedAt(), terminal ? answer(challenge) : null,
+                 visibleImageUrls, imageUrls);
+     }
+ 
++    private List<DailyGameAttemptDTO> attempts(UserDailyGameResult result, boolean includeAttempts) {
++        return includeAttempts && result != null ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
++    }
++
+     private DailyGameViewStatus status(UserDailyGameResult result) {
+         if (result == null) {
+             return DailyGameViewStatus.NOT_PLAYED;
+         }
+         return switch (result.getStatus()) {
+             case IN_PROGRESS -> DailyGameViewStatus.IN_PROGRESS;
+             case COMPLETED -> DailyGameViewStatus.COMPLETED;
+             case FAILED -> DailyGameViewStatus.FAILED;
+         };
+     }
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceImpl.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceImpl.java
+new file mode 100644
+index 0000000..c581b89
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceImpl.java
+@@ -0,0 +1,391 @@
++package com.watchwise.watchwise_api.dailygame.service.impl;
++
++import com.watchwise.watchwise_api.common.exception.BadRequestException;
++import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
++import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
++import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
++import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
++import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
++import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
++import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
++import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
++import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
++import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRating;
++import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRatings;
++import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
++import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonDirection;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
++import org.springframework.stereotype.Service;
++
++import java.math.BigDecimal;
++import java.time.LocalDate;
++import java.time.format.DateTimeParseException;
++import java.util.ArrayList;
++import java.util.HashSet;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Set;
++import java.util.function.Function;
++import java.util.stream.Collectors;
++
++@Service
++public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparisonService {
++
++    private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
++    private static final String RATING_REGION = "BR";
++    private static final BigDecimal TEN_PERCENT = new BigDecimal("0.10");
++    private static final BigDecimal THIRTY_PERCENT = new BigDecimal("0.30");
++
++    private final TmdbClient tmdbClient;
++
++    public DailyGameInfoComparisonServiceImpl(TmdbClient tmdbClient) {
++        this.tmdbClient = tmdbClient;
++    }
++
++    @Override
++    public DailyGameInfoFeedbackDTO compare(DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
++        if (challenge == null || candidate == null || challenge.getAnswerSnapshot() == null) {
++            throw new BadRequestException("A daily game info comparison is required");
++        }
++        return switch (challenge.getGameType()) {
++            case MOVIE_BY_INFO -> compareMovie(challenge.getAnswerSnapshot(), candidate);
++            case SERIES_BY_INFO -> compareSeries(challenge.getAnswerSnapshot(), candidate);
++            default -> throw new BadRequestException("Info comparison is not supported for this daily game");
++        };
++    }
++
++    private DailyGameInfoFeedbackDTO compareMovie(Map<String, Object> secret,
++                                                   DailyGameCandidateIdentity candidate) {
++        requireTarget(candidate, "movie", com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind.MOVIE);
++        TmdbMovieFullDetails movie = found(tmdbClient.getMovieFullDetails(candidate.tmdbId(), LANGUAGE), "movie");
++        String certification = movieCertification(optional(tmdbClient.getMovieReleaseDates(
++                candidate.tmdbId(), LANGUAGE)));
++        List<String> platforms = providers(movie.watchProviders());
++        List<String> genres = names(movie.genres(), genre -> genre == null ? null : genre.name());
++        List<String> cast = names(movie.credits() == null ? null : movie.credits().cast(),
++                value -> value == null ? null : value.name());
++        List<String> productionCompanies = names(movie.productionCompanies(),
++                value -> value == null ? null : value.name());
++        String director = movie.credits() == null ? null : movie.credits().crew() == null ? null
++                : movie.credits().crew().stream()
++                .filter(value -> value != null && value.job() != null && "Director".equalsIgnoreCase(value.job()))
++                .map(TmdbCrewMember::name)
++                .map(this::trimmed)
++                .filter(value -> value != null)
++                .findFirst().orElse(null);
++        Integer year = year(movie.releaseDate());
++        Long revenue = positive(movie.revenue());
++        return feedback(
++                setCell(secret.get("platforms"), platforms),
++                setCell(secret.get("genres"), genres),
++                yearCell(secret.get("year"), year),
++                scalarCell(secret.get("certification"), certification),
++                scalarCell(secret.get("director"), director),
++                castCell(secret.get("cast"), cast),
++                setCell(secret.get("productionCompanies"), productionCompanies),
++                numericCell(secret.get("revenue"), revenue, false));
++    }
++
++    private DailyGameInfoFeedbackDTO compareSeries(Map<String, Object> secret,
++                                                    DailyGameCandidateIdentity candidate) {
++        requireTarget(candidate, "series", com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind.SERIES);
++        TmdbTvFullDetails series = found(tmdbClient.getTvFullDetails(candidate.tmdbId(), LANGUAGE), "series");
++        String certification = tvCertification(optional(tmdbClient.getTvContentRatings(
++                candidate.tmdbId(), LANGUAGE)));
++        List<String> platforms = providers(series.watchProviders());
++        List<String> genres = names(series.genres(), genre -> genre == null ? null : genre.name());
++        List<String> cast = names(series.aggregateCredits() == null ? null : series.aggregateCredits().cast(),
++                value -> value == null ? null : value.name());
++        List<String> productionCompanies = names(series.productionCompanies(),
++                value -> value == null ? null : value.name());
++        List<String> creators = names(series.createdBy(), value -> value == null ? null : value.name());
++        Integer year = year(series.firstAirDate());
++        Integer seasons = positive(series.numberOfSeasons());
++        Object creatorsSnapshot = secret.containsKey("creators")
++                ? secret.get("creators") : secret.get("directorOrCreators");
++        return feedback(
++                setCell(secret.get("platforms"), platforms),
++                setCell(secret.get("genres"), genres),
++                yearCell(secret.get("year"), year),
++                scalarCell(secret.get("certification"), certification),
++                setCell(creatorsSnapshot, creators),
++                castCell(secret.get("cast"), cast),
++                setCell(secret.get("productionCompanies"), productionCompanies),
++                numericCell(secret.get("seasons"), seasons, true));
++    }
++
++    private DailyGameInfoFeedbackDTO feedback(DailyGameComparisonCellDTO platforms,
++                                               DailyGameComparisonCellDTO genres,
++                                               DailyGameComparisonCellDTO year,
++                                               DailyGameComparisonCellDTO certification,
++                                               DailyGameComparisonCellDTO directorOrCreators,
++                                               DailyGameComparisonCellDTO cast,
++                                               DailyGameComparisonCellDTO productionCompanies,
++                                               DailyGameComparisonCellDTO revenueOrSeasons) {
++        return new DailyGameInfoFeedbackDTO(platforms, genres, year, certification, directorOrCreators,
++                cast, productionCompanies, revenueOrSeasons);
++    }
++
++    private DailyGameComparisonCellDTO setCell(Object secretValue, List<String> candidateValues) {
++        List<String> secretValues = values(secretValue);
++        if (secretValues.isEmpty() || candidateValues.isEmpty()) {
++            return noData();
++        }
++        Set<String> secretKeys = secretValues.stream().map(this::key).collect(Collectors.toCollection(HashSet::new));
++        List<String> matched = candidateValues.stream().filter(value -> secretKeys.contains(key(value))).toList();
++        DailyGameComparisonStatus status = sameSet(secretValues, candidateValues)
++                ? DailyGameComparisonStatus.MATCH
++                : matched.isEmpty() ? DailyGameComparisonStatus.NO_MATCH : DailyGameComparisonStatus.PARTIAL;
++        return cell(status, null, candidateValues, matched, matched.size());
++    }
++
++    private DailyGameComparisonCellDTO castCell(Object secretValue, List<String> candidateValues) {
++        List<String> secretValues = values(secretValue);
++        if (secretValues.isEmpty() || candidateValues.isEmpty()) {
++            return noData();
++        }
++        Set<String> secretKeys = secretValues.stream().map(this::key).collect(Collectors.toSet());
++        List<String> matched = candidateValues.stream().filter(value -> secretKeys.contains(key(value))).toList();
++        DailyGameComparisonStatus status = matched.isEmpty() ? DailyGameComparisonStatus.NO_MATCH
++                : matched.size() >= 3 ? DailyGameComparisonStatus.MATCH : DailyGameComparisonStatus.PARTIAL;
++        return cell(status, null, candidateValues, matched, matched.size());
++    }
++
++    private DailyGameComparisonCellDTO scalarCell(Object secretValue, String candidateValue) {
++        String secret = trimmed(secretValue == null ? null : String.valueOf(secretValue));
++        if (secret == null || candidateValue == null) {
++            return noData();
++        }
++        return cell(key(secret).equals(key(candidateValue)) ? DailyGameComparisonStatus.MATCH
++                        : DailyGameComparisonStatus.NO_MATCH,
++                null, candidateValue, List.of(), null);
++    }
++
++    private DailyGameComparisonCellDTO yearCell(Object secretValue, Integer candidateValue) {
++        Integer secret = integer(secretValue);
++        if (secret == null || candidateValue == null) {
++            return noData();
++        }
++        int difference = Math.abs(secret - candidateValue);
++        DailyGameComparisonStatus status = difference == 0 ? DailyGameComparisonStatus.MATCH
++                : difference == 1 ? DailyGameComparisonStatus.PARTIAL : DailyGameComparisonStatus.NO_MATCH;
++        return cell(status, direction(secret, candidateValue), candidateValue, List.of(), null);
++    }
++
++    private DailyGameComparisonCellDTO numericCell(Object secretValue, Number candidateValue, boolean exactOnly) {
++        Long secret = longValue(secretValue);
++        Long candidate = candidateValue == null ? null : candidateValue.longValue();
++        if (secret == null || candidate == null || secret <= 0 || candidate <= 0) {
++            return noData();
++        }
++        DailyGameComparisonStatus status;
++        if (secret.equals(candidate)) {
++            status = DailyGameComparisonStatus.MATCH;
++        } else if (exactOnly) {
++            status = DailyGameComparisonStatus.NO_MATCH;
++        } else {
++            BigDecimal difference = BigDecimal.valueOf(secret).subtract(BigDecimal.valueOf(candidate)).abs();
++            BigDecimal larger = BigDecimal.valueOf(Math.max(secret, candidate));
++            status = difference.compareTo(larger.multiply(TEN_PERCENT)) <= 0 ? DailyGameComparisonStatus.MATCH
++                    : difference.compareTo(larger.multiply(THIRTY_PERCENT)) <= 0
++                    ? DailyGameComparisonStatus.PARTIAL : DailyGameComparisonStatus.NO_MATCH;
++        }
++        return cell(status, direction(secret, candidate), candidateValue, List.of(), null);
++    }
++
++    private DailyGameComparisonDirection direction(Number secret, Number candidate) {
++        int comparison = Long.compare(secret.longValue(), candidate.longValue());
++        return comparison == 0 ? null
++                : comparison > 0 ? DailyGameComparisonDirection.SECRET_HIGHER
++                : DailyGameComparisonDirection.SECRET_LOWER;
++    }
++
++    private boolean sameSet(List<String> left, List<String> right) {
++        return left.stream().map(this::key).collect(Collectors.toSet())
++                .equals(right.stream().map(this::key).collect(Collectors.toSet()));
++    }
++
++    private DailyGameComparisonCellDTO noData() {
++        return cell(DailyGameComparisonStatus.NO_DATA, null, null, List.of(), null);
++    }
++
++    private DailyGameComparisonCellDTO cell(DailyGameComparisonStatus status,
++                                             DailyGameComparisonDirection direction,
++                                             Object displayValue, List<String> matchedValues, Integer matchCount) {
++        return new DailyGameComparisonCellDTO(status, direction, displayValue, matchedValues, matchCount);
++    }
++
++    private List<String> values(Object value) {
++        if (value instanceof List<?> list) {
++            return normalize(list.stream().map(String::valueOf).toList());
++        }
++        if (value instanceof String string) {
++            return normalize(List.of(string.split(",")));
++        }
++        return List.of();
++    }
++
++    private <T> List<String> names(List<T> source, Function<T, String> mapper) {
++        if (source == null) {
++            return List.of();
++        }
++        return normalize(source.stream().map(mapper).toList());
++    }
++
++    private List<String> normalize(List<String> values) {
++        Map<String, String> normalized = new LinkedHashMap<>();
++        values.stream().map(this::trimmed).filter(value -> value != null)
++                .forEach(value -> normalized.putIfAbsent(key(value), value));
++        return List.copyOf(normalized.values());
++    }
++
++    private List<String> providers(TmdbWatchProviders watchProviders) {
++        if (watchProviders == null || watchProviders.results() == null) {
++            return List.of();
++        }
++        TmdbRegionProviders region = watchProviders.results().get(RATING_REGION);
++        if (region == null) {
++            return List.of();
++        }
++        List<String> names = new ArrayList<>();
++        addProviders(names, region.flatrate());
++        addProviders(names, region.rent());
++        addProviders(names, region.buy());
++        return normalize(names);
++    }
++
++    private void addProviders(List<String> names, List<TmdbProvider> providers) {
++        if (providers != null) {
++            providers.stream().filter(value -> value != null).map(TmdbProvider::providerName).forEach(names::add);
++        }
++    }
++
++    private String movieCertification(TmdbMovieReleaseDates releaseDates) {
++        if (releaseDates == null || releaseDates.results() == null) {
++            return null;
++        }
++        return releaseDates.results().stream()
++                .filter(value -> value != null && RATING_REGION.equals(value.isoCode()))
++                .flatMap(value -> value.releaseDates() == null ? java.util.stream.Stream.empty()
++                        : value.releaseDates().stream())
++                .filter(value -> value != null)
++                .map(TmdbMovieReleaseDate::certification)
++                .map(this::trimmed)
++                .filter(value -> value != null)
++                .findFirst().orElse(null);
++    }
++
++    private String tvCertification(TmdbTvContentRatings ratings) {
++        if (ratings == null || ratings.results() == null) {
++            return null;
++        }
++        return ratings.results().stream()
++                .filter(value -> value != null && RATING_REGION.equals(value.isoCode()))
++                .map(TmdbTvContentRating::rating)
++                .map(this::trimmed)
++                .filter(value -> value != null)
++                .findFirst().orElse(null);
++    }
++
++    private Integer year(String value) {
++        if (value == null || value.isBlank()) {
++            return null;
++        }
++        try {
++            return LocalDate.parse(value).getYear();
++        } catch (DateTimeParseException ignored) {
++            try {
++                return Integer.valueOf(value.substring(0, 4));
++            } catch (RuntimeException ignoredAgain) {
++                return null;
++            }
++        }
++    }
++
++    private Long positive(Long value) {
++        return value == null || value <= 0 ? null : value;
++    }
++
++    private Integer positive(Integer value) {
++        return value == null || value <= 0 ? null : value;
++    }
++
++    private Integer integer(Object value) {
++        if (value instanceof Number number) {
++            return number.intValue();
++        }
++        try {
++            return value == null ? null : Integer.valueOf(String.valueOf(value));
++        } catch (NumberFormatException ignored) {
++            return null;
++        }
++    }
++
++    private Long longValue(Object value) {
++        if (value instanceof Number number) {
++            return number.longValue();
++        }
++        try {
++            return value == null ? null : Long.valueOf(String.valueOf(value));
++        } catch (NumberFormatException ignored) {
++            return null;
++        }
++    }
++
++    private String key(String value) {
++        return value.trim().toLowerCase(Locale.ROOT);
++    }
++
++    private String trimmed(Object value) {
++        if (value == null) {
++            return null;
++        }
++        String result = String.valueOf(value).trim();
++        return result.isBlank() ? null : result;
++    }
++
++    private void requireTarget(DailyGameCandidateIdentity candidate, String target,
++                               com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind expectedKind) {
++        if (candidate.targetKind() != expectedKind || candidate.tmdbId() == null || candidate.tmdbId().isBlank()) {
++            throw new BadRequestException("A " + target + " candidate is required");
++        }
++    }
++
++    private <T> T found(TmdbLookupResult<T> result, String target) {
++        if (result == null || result.isUnavailable()) {
++            throw new TmdbUnavailableException("TMDB is temporarily unavailable");
++        }
++        if (result.isNotFound()) {
++            throw new BadRequestException("The selected " + target + " does not exist");
++        }
++        if (result instanceof TmdbLookupResult.Found<T> found && found.value() != null) {
++            return found.value();
++        }
++        throw new TmdbUnavailableException("TMDB is temporarily unavailable");
++    }
++
++    private <T> T optional(TmdbLookupResult<T> result) {
++        if (result == null || result instanceof TmdbLookupResult.NotFound<T>) {
++            return null;
++        }
++        if (result.isUnavailable()) {
++            throw new TmdbUnavailableException("TMDB is temporarily unavailable");
++        }
++        if (result instanceof TmdbLookupResult.Found<T> found) {
++            return found.value();
++        }
++        return null;
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
+index 087cbb9..b2f33a4 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImpl.java
+@@ -1,34 +1,36 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.common.exception.BadRequestException;
+ import com.watchwise.watchwise_api.common.exception.ConflictException;
+ import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.time.Clock;
+ import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.EnumSet;
+ import java.util.List;
+ import java.util.Map;
+@@ -39,48 +41,63 @@ import java.util.stream.Collectors;
+ 
+ @Service
+ public class DailyGameServiceImpl implements DailyGameService {
+ 
+     private final DailyChallengeRepository challengeRepository;
+     private final DailyChallengeHintRepository hintRepository;
+     private final UserDailyGameResultRepository resultRepository;
+     private final DailyGameCandidateValidator candidateValidator;
+     private final DailyChallengeResponseAssembler responseAssembler;
+     private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
++    private final DailyGameInfoComparisonService infoComparisonService;
+     private final Clock clock;
+ 
+     public DailyGameServiceImpl(
+             DailyChallengeRepository challengeRepository,
+             DailyChallengeHintRepository hintRepository,
+             UserDailyGameResultRepository resultRepository,
+             DailyGameCandidateValidator candidateValidator,
+             DailyChallengeResponseAssembler responseAssembler,
+             Clock clock) {
+         this(challengeRepository, hintRepository, resultRepository, candidateValidator,
+-                responseAssembler, new DailyGameAttemptDetailsCodec(), clock);
++                responseAssembler, new DailyGameAttemptDetailsCodec(), null, clock);
++    }
++
++    public DailyGameServiceImpl(
++            DailyChallengeRepository challengeRepository,
++            DailyChallengeHintRepository hintRepository,
++            UserDailyGameResultRepository resultRepository,
++            DailyGameCandidateValidator candidateValidator,
++            DailyChallengeResponseAssembler responseAssembler,
++            DailyGameInfoComparisonService infoComparisonService,
++            Clock clock) {
++        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
++                responseAssembler, new DailyGameAttemptDetailsCodec(), infoComparisonService, clock);
+     }
+ 
+     @Autowired
+     public DailyGameServiceImpl(
+             DailyChallengeRepository challengeRepository,
+             DailyChallengeHintRepository hintRepository,
+             UserDailyGameResultRepository resultRepository,
+             DailyGameCandidateValidator candidateValidator,
+             DailyChallengeResponseAssembler responseAssembler,
+             DailyGameAttemptDetailsCodec attemptDetailsCodec,
++            DailyGameInfoComparisonService infoComparisonService,
+             Clock clock) {
+         this.challengeRepository = challengeRepository;
+         this.hintRepository = hintRepository;
+         this.resultRepository = resultRepository;
+         this.candidateValidator = candidateValidator;
+         this.responseAssembler = responseAssembler;
+         this.attemptDetailsCodec = attemptDetailsCodec;
++        this.infoComparisonService = infoComparisonService;
+         this.clock = clock;
+     }
+ 
+     @Override
+     public DailyGameTodayResponseDTO getToday(UUID userId) {
+         return getDay(userId, LocalDate.now(clock));
+     }
+ 
+     @Override
+     public DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate) {
+@@ -135,40 +152,42 @@ public class DailyGameServiceImpl implements DailyGameService {
+         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
+                 .orElseThrow(DailyGamesUnavailableException::new);
+ 
+         resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
+         UserDailyGameResult result = resultRepository
+                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
+                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
+         assertOpenAndHasAttempts(result, gameType);
+ 
+         DailyGameCandidateIdentity candidate = candidateValidator.validate(gameType, request);
++        DailyGameGuessFeedbackDTO episodeFeedback = guessFeedback(gameType, challenge, candidate);
++        DailyGameInfoFeedbackDTO infoFeedback = infoFeedback(gameType, challenge, candidate);
+         int attemptNumber = result.getAttemptsUsed() + 1;
+         result.setAttemptsUsed(attemptNumber);
+         result.setUpdatedAt(now);
+         if (challenge.getAnswerKey().equals(candidate.answerKey())) {
+             result.setScore(gameType.maxAttempts() - attemptNumber + 1);
+             result.setStatus(DailyGameResultStatus.COMPLETED);
+             result.setCompletedAt(now);
+         } else if (attemptNumber >= gameType.maxAttempts()) {
+             result.setScore(0);
+             result.setStatus(DailyGameResultStatus.FAILED);
+             result.setCompletedAt(now);
+         } else {
+             result.setScore(0);
+             result.setStatus(DailyGameResultStatus.IN_PROGRESS);
+             result.setCompletedAt(null);
+         }
+-        appendAttemptDetails(challenge, result, attemptNumber, candidate, guessFeedback(gameType, challenge, candidate));
++        appendAttemptDetails(challenge, result, attemptNumber, candidate, episodeFeedback, infoFeedback);
+         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+         return responseAssembler.toAttemptResponse(challenge, result, hints,
+-                guessFeedback(gameType, challenge, candidate), challengeDate.equals(LocalDate.now(clock)));
++                episodeFeedback, challengeDate.equals(LocalDate.now(clock)));
+     }
+ 
+     @Override
+     @Transactional
+     public DailyGameAttemptResponseDTO giveUp(UUID userId, DailyGameType gameType) {
+         return giveUp(userId, LocalDate.now(clock), gameType);
+     }
+ 
+     @Override
+     @Transactional
+@@ -190,30 +209,31 @@ public class DailyGameServiceImpl implements DailyGameService {
+         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+         return responseAssembler.toAttemptResponse(
+                 challenge, result, hints, null, challengeDate.equals(LocalDate.now(clock)));
+     }
+ 
+     private void appendAttemptDetails(
+             DailyChallenge challenge,
+             UserDailyGameResult result,
+             int attemptNumber,
+             DailyGameCandidateIdentity candidate,
+-            DailyGameGuessFeedbackDTO episodeFeedback) {
++            DailyGameGuessFeedbackDTO episodeFeedback,
++            DailyGameInfoFeedbackDTO infoFeedback) {
+         if (!challenge.getChallengeDate().equals(LocalDate.now(clock))) {
+             return;
+         }
+         DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
+                 candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
+                 candidate.seasonNumber(), candidate.episodeNumber(), null, null, null);
+         result.setAttemptDetails(attemptDetailsCodec.append(
+                 result.getAttemptDetails(),
+-                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, null, null)));
++                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback, null)));
+     }
+ 
+     private void requireGameType(DailyGameType gameType) {
+         if (gameType == null) {
+             throw new BadRequestException("A daily game type is required");
+         }
+     }
+ 
+     private DailyGameGuessFeedbackDTO guessFeedback(
+             DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
+@@ -221,20 +241,29 @@ public class DailyGameServiceImpl implements DailyGameService {
+             return null;
+         }
+         boolean seriesCorrect = Objects.equals(challenge.getSeriesTmdbId(), candidate.seriesTmdbId());
+         boolean seasonCorrect = Objects.equals(challenge.getSeasonNumber(), candidate.seasonNumber());
+         boolean episodeCorrect = Objects.equals(challenge.getEpisodeNumber(), candidate.episodeNumber());
+         return new DailyGameGuessFeedbackDTO(
+                 seriesCorrect, seasonCorrect, episodeCorrect,
+                 seriesCorrect && seasonCorrect && episodeCorrect);
+     }
+ 
++    private DailyGameInfoFeedbackDTO infoFeedback(
++            DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
++        if (infoComparisonService == null
++                || (gameType != DailyGameType.MOVIE_BY_INFO && gameType != DailyGameType.SERIES_BY_INFO)) {
++            return null;
++        }
++        return infoComparisonService.compare(challenge, candidate);
++    }
++
+     private void assertAvailableDate(LocalDate challengeDate) {
+         if (challengeDate == null || challengeDate.isAfter(LocalDate.now(clock))) {
+             throw new BadRequestException("Daily games are not available for a future date");
+         }
+     }
+ 
+     private void requireCompleteDailySet(List<DailyChallenge> challenges) {
+         if (challenges == null || challenges.size() != DailyGameType.values().length) {
+             throw new DailyGamesUnavailableException();
+         }
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
+index d435709..89bad71 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/generation/DailyChallengeGeneratorTest.java
+@@ -295,20 +295,29 @@ class DailyChallengeGeneratorTest {
+                 .thenReturn(found(new TmdbMovieReleaseDates("550", List.of(
+                         new TmdbRegionReleaseDates("US", List.of(new TmdbMovieReleaseDate("R", null, null, null, 3)))))));
+ 
+         DailyChallengeCandidate candidate = new MovieByInfoGenerator(tmdbClient, snapshotAssembler)
+                 .generate(CHALLENGE_DATE)
+                 .orElseThrow();
+ 
+         assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
+                 .containsExactly("PLATFORM", "GENRES", "YEAR", "DIRECTOR", "CAST", "PRODUCTION_COMPANIES", "REVENUE");
+         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
++        assertThat(candidate.answerSnapshot())
++                .containsEntry("platforms", List.of("Netflix"))
++                .containsEntry("genres", List.of("Drama", "Thriller"))
++                .containsEntry("year", 1999)
++                .containsEntry("director", "David Fincher")
++                .containsEntry("cast", List.of("Brad Pitt"))
++                .containsEntry("productionCompanies", List.of("Regency Enterprises"))
++                .containsEntry("revenue", 100853753L)
++                .doesNotContainKey("certification");
+     }
+ 
+     @Test
+     @DisplayName("[generate] Should Include BR Certification - When A BR Rating Exists")
+     void shouldIncludeBRCertificationWhenABRRatingExists() {
+         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                 .thenReturn(found(movieDetailsWithInfo("550")));
+         when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+@@ -317,20 +326,21 @@ class DailyChallengeGeneratorTest {
+ 
+         DailyChallengeCandidate candidate = new MovieByInfoGenerator(tmdbClient, snapshotAssembler)
+                 .generate(CHALLENGE_DATE)
+                 .orElseThrow();
+ 
+         assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
+                 .contains("CERTIFICATION");
+         assertThat(candidate.hints()).filteredOn(hint -> hint.hintType().equals("CERTIFICATION"))
+                 .extracting(DailyChallengeCandidate.HintSnapshot::hintValue)
+                 .containsExactly("18");
++        assertThat(candidate.answerSnapshot()).containsEntry("certification", "18");
+     }
+ 
+     @Test
+     @DisplayName("[generate] Should Omit Null Nested Metadata - When TMDB Lists Contain Null Elements")
+     void shouldOmitNullNestedMetadataWhenTmdbListsContainNullElements() {
+         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                 .thenReturn(found(movieDetailsWithNullNestedMetadata("550")));
+         when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+@@ -356,20 +366,30 @@ class DailyChallengeGeneratorTest {
+                         new TmdbTvContentRating("US", "TV-MA")))));
+ 
+         DailyChallengeCandidate candidate = new SeriesByInfoGenerator(tmdbClient, snapshotAssembler)
+                 .generate(CHALLENGE_DATE)
+                 .orElseThrow();
+ 
+         assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
+                 .containsExactly("PLATFORM", "GENRES", "YEAR", "CREATOR", "CAST", "NETWORKS_PRODUCTION_COMPANIES", "COUNTS");
+         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("REVENUE"));
+         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
++        assertThat(candidate.answerSnapshot())
++                .containsEntry("platforms", List.of("Netflix"))
++                .containsEntry("genres", List.of("Drama"))
++                .containsEntry("year", 2008)
++                .containsEntry("creators", List.of("Vince Gilligan"))
++                .containsEntry("cast", List.of("Bryan Cranston"))
++                .containsEntry("productionCompanies", List.of("Sony Pictures Television"))
++                .containsEntry("seasons", 5)
++                .doesNotContainKey("certification")
++                .doesNotContainKey("revenue");
+     }
+ 
+     @Test
+     @DisplayName("[generate] Should Use The Movie As Source - When An Eligible Movie Actor Exists")
+     void shouldUseTheMovieAsSourceWhenAnEligibleMovieActorExists() {
+         when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"))));
+         when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
+                 .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(
+                         List.of(new TmdbCastMember(103, "Uma Thurman", "Mia", "/uma.jpg")), List.of()))));
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+index 3de5582..c8e1fde 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyChallengeResponseAssemblerTest.java
+@@ -1,16 +1,20 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+ import org.junit.jupiter.api.DisplayName;
+ import org.junit.jupiter.api.Test;
+ 
+ import java.time.LocalDate;
+@@ -152,30 +156,52 @@ class DailyChallengeResponseAssemblerTest {
+     @Test
+     @DisplayName("[attempts] Should Expose Current Day Attempts Without Revealing The Answer - When The Result Is Open")
+     void shouldExposeCurrentDayAttemptsWithoutRevealingTheAnswerWhenTheResultIsOpen() {
+         DailyChallenge challenge = challenge("/fight-club.jpg");
+         UserDailyGameResult result = result();
+         DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(
+                 1,
+                 new DailyGameCandidateDTO(
+                         DailyGameTargetKind.MOVIE, "680", null, null, null, null,
+                         "The Secret Guess", "/guess.jpg", LocalDate.of(2000, 1, 1)),
+-                new DailyGameGuessFeedbackDTO(false, false, false, false), null, null);
++                new DailyGameGuessFeedbackDTO(false, false, false, false), infoFeedback(), null);
+         result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null, attempt));
+ 
+         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
+                 challenge, result, List.of(), null, true);
+ 
+         assertThat(response.attempts()).containsExactly(attempt);
++        assertThat(response.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
+         assertThat(response.answer()).isNull();
+     }
+ 
++    @Test
++    @DisplayName("[state] Should Expose Typed Info Feedback - When Current Day Attempts Are Requested")
++    void shouldExposeTypedInfoFeedbackWhenCurrentDayAttemptsAreRequested() {
++        DailyChallenge challenge = challenge("/fight-club.jpg");
++        UserDailyGameResult result = result();
++        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null,
++                new DailyGameAttemptDTO(1, null, null, infoFeedback(), null)));
++
++        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), true);
++
++        assertThat(state.attempts()).hasSize(1);
++        assertThat(state.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
++        assertThat(state.answer()).isNull();
++    }
++
++    private DailyGameInfoFeedbackDTO infoFeedback() {
++        DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
++                DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
++        return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
++    }
++
+     private DailyChallenge challenge(String imagePath) {
+         return DailyChallenge.builder()
+                 .id(UUID.randomUUID())
+                 .challengeDate(LocalDate.of(2026, 9, 27))
+                 .gameType(DailyGameType.MOVIE_BY_POSTER)
+                 .targetKind(DailyGameTargetKind.MOVIE)
+                 .targetTmdbId("550")
+                 .answerKey("MOVIE:550")
+                 .imagePath(imagePath)
+                 .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceTest.java
+new file mode 100644
+index 0000000..b847b32
+--- /dev/null
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameInfoComparisonServiceTest.java
+@@ -0,0 +1,335 @@
++package com.watchwise.watchwise_api.dailygame.service.impl;
++
++import com.watchwise.watchwise_api.common.tmdb.TmdbCastMember;
++import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
++import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
++import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
++import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
++import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
++import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
++import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
++import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
++import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
++import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
++import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
++import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
++import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonDirection;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
++import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
++import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDate;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DailyGameInfoComparisonServiceTest {
++
++    private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
++
++    @Mock
++    private TmdbClient tmdbClient;
++
++    @Test
++    @DisplayName("[compare] Should Apply Exact Partial And No Match Set Statuses - When Info Sets Overlap")
++    void shouldApplyExactPartialAndNoMatchSetStatusesWhenInfoSetsOverlap() {
++        DailyChallenge challenge = movieChallenge(snapshot(
++                "platforms", List.of("Netflix", "Prime Video"),
++                "genres", List.of("Drama", "Thriller"),
++                "productionCompanies", List.of("Warner Bros.")));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, 50L,
++                List.of(new TmdbGenre(18, "DRAMA"), new TmdbGenre(53, "Comedy")),
++                List.of("Prime Video", "Netflix"), List.of(), List.of(),
++                List.of(new TmdbProductionCompany(1, "A24", null, "US")));
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.platforms().status()).isEqualTo(DailyGameComparisonStatus.MATCH);
++        assertThat(feedback.platforms().matchedValues()).containsExactly("Prime Video", "Netflix");
++        assertThat(feedback.genres().status()).isEqualTo(DailyGameComparisonStatus.PARTIAL);
++        assertThat(feedback.genres().matchedValues()).containsExactly("DRAMA");
++        assertThat(feedback.productionCompanies().status()).isEqualTo(DailyGameComparisonStatus.NO_MATCH);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Compare Certification And Director Case Insensitively - When Movie Metadata Matches")
++    void shouldCompareCertificationAndDirectorCaseInsensitivelyWhenMovieMetadataMatches() {
++        DailyChallenge challenge = movieChallenge(snapshot(
++                "certification", "18",
++                "director", "David Fincher"));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, 50L,
++                List.of(), List.of(), List.of(),
++                List.of(new TmdbCrewMember(1, " david fincher ", "Director", null)), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++        when(tmdbClient.getMovieReleaseDates("680", LANGUAGE)).thenReturn(found(new TmdbMovieReleaseDates("680",
++                List.of(new TmdbRegionReleaseDates("BR", List.of(
++                        new TmdbMovieReleaseDate("18", null, null, null, 3)))))));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.certification().status()).isEqualTo(DailyGameComparisonStatus.MATCH);
++        assertThat(feedback.director().status()).isEqualTo(DailyGameComparisonStatus.MATCH);
++        assertThat(feedback.certification().displayValue()).isEqualTo("18");
++        assertThat(feedback.director().displayValue()).isEqualTo("david fincher");
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Creator Intersection As Partial - When Not Every Creator Matches")
++    void shouldMarkCreatorIntersectionAsPartialWhenNotEveryCreatorMatches() {
++        DailyChallenge challenge = seriesChallenge(snapshot(
++                "creators", List.of("Vince Gilligan", "Peter Gould")));
++        TmdbTvFullDetails candidate = series("1396", 5, List.of("vINCE gilligan"),
++                List.of(), List.of(), List.of());
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, seriesIdentity("1396"));
++
++        assertThat(feedback.creators().status()).isEqualTo(DailyGameComparisonStatus.PARTIAL);
++        assertThat(feedback.creators().matchedValues()).containsExactly("vINCE gilligan");
++        assertThat(feedback.creators().matchCount()).isEqualTo(1);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Complete Creator Set As Match - When All Creators Match")
++    void shouldMarkCompleteCreatorSetAsMatchWhenAllCreatorsMatch() {
++        DailyChallenge challenge = seriesChallenge(snapshot("creators", List.of("Vince Gilligan", "Peter Gould")));
++        TmdbTvFullDetails candidate = series("1396", 5, List.of("peter gould", "vince gilligan"),
++                List.of(), List.of(), List.of());
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, seriesIdentity("1396"));
++
++        assertThat(feedback.creators().status()).isEqualTo(DailyGameComparisonStatus.MATCH);
++        assertThat(feedback.creators().matchCount()).isEqualTo(2);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark One Or Two Shared Cast Members As Partial - When Cast Is Below Three")
++    void shouldMarkOneOrTwoSharedCastMembersAsPartialWhenCastIsBelowThree() {
++        DailyChallenge challenge = movieChallenge(snapshot("cast", List.of("A", "B", "C")));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, 50L,
++                List.of(), List.of(), List.of("B", "C"), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.cast().status()).isEqualTo(DailyGameComparisonStatus.PARTIAL);
++        assertThat(feedback.cast().matchedValues()).containsExactly("B", "C");
++        assertThat(feedback.cast().matchCount()).isEqualTo(2);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Three Shared Cast Members As Match - When Cast Reaches The Threshold")
++    void shouldMarkThreeSharedCastMembersAsMatchWhenCastReachesTheThreshold() {
++        DailyChallenge challenge = movieChallenge(snapshot("cast", List.of("A", "B", "C", "D")));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, 50L,
++                List.of(), List.of(), List.of("C", "A", "B"), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.cast().status()).isEqualTo(DailyGameComparisonStatus.MATCH);
++        assertThat(feedback.cast().matchedValues()).containsExactly("C", "A", "B");
++    }
++
++    @Test
++    @DisplayName("[compare] Should Use Secret Direction And One Year Partial Threshold - When Years Differ")
++    void shouldUseSecretDirectionAndOneYearPartialThresholdWhenYearsDiffer() {
++        DailyChallenge challenge = movieChallenge(snapshot("year", 2000));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 2001, 50L,
++                List.of(), List.of(), List.of(), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.year().status()).isEqualTo(DailyGameComparisonStatus.PARTIAL);
++        assertThat(feedback.year().direction()).isEqualTo(DailyGameComparisonDirection.SECRET_LOWER);
++        assertThat(feedback.year().displayValue()).isEqualTo(2001);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Year As No Match - When Difference Exceeds One Year")
++    void shouldMarkYearAsNoMatchWhenDifferenceExceedsOneYear() {
++        DailyChallenge challenge = movieChallenge(snapshot("year", 2000));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 2002, 50L,
++                List.of(), List.of(), List.of(), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.year().status()).isEqualTo(DailyGameComparisonStatus.NO_MATCH);
++        assertThat(feedback.year().direction()).isEqualTo(DailyGameComparisonDirection.SECRET_LOWER);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Revenue At Ten Percent As Match - When Relative Difference Uses The Larger Value")
++    void shouldMarkRevenueAtTenPercentAsMatchWhenRelativeDifferenceUsesTheLargerValue() {
++        assertThat(compareRevenue(900L, 1000L).revenue().status())
++                .isEqualTo(DailyGameComparisonStatus.MATCH);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Revenue At Thirty Percent As Partial - When Relative Difference Uses The Larger Value")
++    void shouldMarkRevenueAtThirtyPercentAsPartialWhenRelativeDifferenceUsesTheLargerValue() {
++        assertThat(compareRevenue(700L, 1000L).revenue().status())
++                .isEqualTo(DailyGameComparisonStatus.PARTIAL);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Revenue Above Thirty Percent As No Match - When Relative Difference Uses The Larger Value")
++    void shouldMarkRevenueAboveThirtyPercentAsNoMatchWhenRelativeDifferenceUsesTheLargerValue() {
++        assertThat(compareRevenue(699L, 1000L).revenue().status())
++                .isEqualTo(DailyGameComparisonStatus.NO_MATCH);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Compare Season Count With Direction - When Series Values Differ")
++    void shouldCompareSeasonCountWithDirectionWhenSeriesValuesDiffer() {
++        DailyChallenge challenge = seriesChallenge(snapshot("seasons", 5));
++        TmdbTvFullDetails candidate = series("1396", 4, List.of(), List.of(), List.of(), List.of());
++        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, seriesIdentity("1396"));
++
++        assertThat(feedback.seasons().status()).isEqualTo(DailyGameComparisonStatus.NO_MATCH);
++        assertThat(feedback.seasons().direction()).isEqualTo(DailyGameComparisonDirection.SECRET_HIGHER);
++        assertThat(feedback.seasons().displayValue()).isEqualTo(4);
++    }
++
++    @Test
++    @DisplayName("[compare] Should Mark Missing Metadata As No Data - When Either Side Lacks A Value")
++    void shouldMarkMissingMetadataAsNoDataWhenEitherSideLacksAValue() {
++        DailyChallenge challenge = movieChallenge(snapshot(
++                "platforms", List.of("Netflix"),
++                "revenue", 1000L));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, null,
++                List.of(), List.of(), List.of(), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++
++        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(challenge, movieIdentity("680"));
++
++        assertThat(feedback.platforms().status()).isEqualTo(DailyGameComparisonStatus.NO_DATA);
++        assertThat(feedback.revenue().status()).isEqualTo(DailyGameComparisonStatus.NO_DATA);
++        assertThat(feedback.platforms().displayValue()).isNull();
++        assertThat(feedback.revenue().matchedValues()).isEmpty();
++    }
++
++    @Test
++    @DisplayName("[compare] Should Propagate Tmdb Unavailable - When Candidate Detail Lookup Is Unavailable")
++    void shouldPropagateTmdbUnavailableWhenCandidateDetailLookupIsUnavailable() {
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(new TmdbLookupResult.Unavailable<>());
++
++        assertThatThrownBy(() -> new DailyGameInfoComparisonServiceImpl(tmdbClient)
++                .compare(movieChallenge(snapshot("year", 1994)), movieIdentity("680")))
++                .isInstanceOf(TmdbUnavailableException.class);
++    }
++
++    private DailyGameInfoFeedbackDTO compareRevenue(Long secretRevenue, Long candidateRevenue) {
++        DailyChallenge challenge = movieChallenge(snapshot("revenue", secretRevenue));
++        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, candidateRevenue,
++                List.of(), List.of(), List.of(), List.of(), List.of());
++        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
++        return new DailyGameInfoComparisonServiceImpl(tmdbClient).compare(challenge, movieIdentity("680"));
++    }
++
++    private DailyChallenge movieChallenge(Map<String, Object> info) {
++        return challenge(DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, info);
++    }
++
++    private DailyChallenge seriesChallenge(Map<String, Object> info) {
++        return challenge(DailyGameType.SERIES_BY_INFO, DailyGameTargetKind.SERIES, info);
++    }
++
++    private DailyChallenge challenge(DailyGameType type, DailyGameTargetKind targetKind,
++                                     Map<String, Object> info) {
++        Map<String, Object> snapshot = new LinkedHashMap<>();
++        snapshot.put("targetKind", targetKind.name());
++        snapshot.putAll(info);
++        return DailyChallenge.builder()
++                .challengeDate(LocalDate.of(2026, 9, 27))
++                .gameType(type)
++                .targetKind(targetKind)
++                .targetTmdbId(targetKind == DailyGameTargetKind.MOVIE ? "550" : "1396")
++                .answerKey(targetKind.name() + ":" + (targetKind == DailyGameTargetKind.MOVIE ? "550" : "1396"))
++                .imagePath("/poster.jpg")
++                .answerSnapshot(snapshot)
++                .displaySnapshot(Map.of("imageUrl", "/poster.jpg"))
++                .build();
++    }
++
++    private DailyGameCandidateIdentity movieIdentity(String id) {
++        return new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, id, null, null, null, null);
++    }
++
++    private DailyGameCandidateIdentity seriesIdentity(String id) {
++        return new DailyGameCandidateIdentity(DailyGameTargetKind.SERIES, id, null, null, null, null);
++    }
++
++    private TmdbMovieFullDetails movie(String id, String title, int year, Long revenue,
++                                       List<TmdbGenre> genres, List<String> platforms, List<String> cast,
++                                       List<TmdbCrewMember> crew, List<TmdbProductionCompany> companies) {
++        return new TmdbMovieFullDetails(id, title, title, null, "/poster.jpg", null, year + "-01-01", null,
++                genres, List.of(), new TmdbCredits(cast.stream()
++                .map(name -> new TmdbCastMember(null, name, null, null)).toList(), crew),
++                providers(platforms), null, null, revenue, companies, null);
++    }
++
++    private TmdbTvFullDetails series(String id, int seasons, List<String> creators,
++                                     List<TmdbGenre> genres, List<String> cast,
++                                     List<TmdbProductionCompany> companies) {
++        return new TmdbTvFullDetails(id, "Series", "Series", null, "/poster.jpg", null, "2000-01-01",
++                List.of(), genres, List.of(), creators.stream().map(name -> new com.watchwise.watchwise_api.common.tmdb.TmdbCreator(null, name, null)).toList(),
++                List.of(), null, new com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits(
++                cast.stream().map(name -> new com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember(null, name, null, List.of(), null)).toList(), List.of()),
++                providers(List.of()), null, seasons, 10, companies, null, "Ended");
++    }
++
++    private TmdbWatchProviders providers(List<String> names) {
++        if (names.isEmpty()) {
++            return null;
++        }
++        return new TmdbWatchProviders(Map.of("BR", new TmdbRegionProviders(
++                names.stream().map(name -> new TmdbProvider(name, null)).toList(), List.of(), List.of())));
++    }
++
++    private Map<String, Object> snapshot(Object... values) {
++        Map<String, Object> result = new LinkedHashMap<>();
++        for (int index = 0; index < values.length; index += 2) {
++            result.put((String) values[index], values[index + 1]);
++        }
++        return result;
++    }
++
++    private <T> TmdbLookupResult<T> found(T value) {
++        return new TmdbLookupResult.Found<>(value);
++    }
++}
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+index 3ebf8db..b08e88e 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameServiceImplTest.java
+@@ -1,32 +1,37 @@
+ package com.watchwise.watchwise_api.dailygame.service.impl;
+ 
+ import com.watchwise.watchwise_api.common.exception.BadRequestException;
+ import com.watchwise.watchwise_api.common.exception.ConflictException;
+ import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
++import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
++import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+ import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
+ import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
+ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
+ import org.junit.jupiter.api.DisplayName;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+ import org.mockito.InOrder;
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+ import org.springframework.core.annotation.AnnotatedElementUtils;
+ import org.springframework.transaction.annotation.Propagation;
+ import org.springframework.transaction.annotation.Transactional;
+ import java.lang.reflect.Method;
+@@ -67,20 +72,23 @@ class DailyGameServiceImplTest {
+ 
+     @Mock
+     private DailyChallengeHintRepository hintRepository;
+ 
+     @Mock
+     private UserDailyGameResultRepository resultRepository;
+ 
+     @Mock
+     private TmdbClient tmdbClient;
+ 
++    @Mock
++    private DailyGameInfoComparisonService infoComparisonService;
++
+     @Test
+     @DisplayName("[getToday] Should Return Eight NotPlayed States Without Creating Results - When The User Has No Results")
+     void shouldReturnEightNotPlayedStatesWithoutCreatingResultsWhenTheUserHasNoResults() {
+         List<DailyChallenge> challenges = allChallenges();
+         when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY)).thenReturn(challenges);
+         when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), any())).thenReturn(List.of());
+         when(hintRepository.findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(any())).thenReturn(allHints(challenges));
+ 
+         DailyGameTodayResponseDTO response = service().getToday(USER_ID);
+ 
+@@ -176,26 +184,50 @@ class DailyGameServiceImplTest {
+     }
+ 
+     @Test
+     @DisplayName("[submitAttempt] Should Assign Ten Points On The First Correct Info Guess - When The Candidate Matches A Ten Attempt Game")
+     void shouldAssignTenPointsOnTheFirstCorrectInfoGuessWhenTheCandidateMatchesATenAttemptGame() {
+         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+         stubOpenSubmission(challenge, result);
+         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                 .thenReturn(new TmdbLookupResult.Found<>(mock()));
++        when(infoComparisonService.compare(eq(challenge), any())).thenReturn(infoFeedback());
+ 
+         DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                 request("550", null, null, null, null));
+ 
+         assertThat(response.score()).isEqualTo(10);
+         assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
++        assertThat(response.attempts()).hasSize(1);
++        assertThat(response.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
++    }
++
++    @Test
++    @DisplayName("[submitAttempt] Should Preserve Attempts And Details - When Info Comparison Cannot Reach TMDB")
++    void shouldPreserveAttemptsAndDetailsWhenInfoComparisonCannotReachTmdb() {
++        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
++        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
++        Map<String, Object> existingDetails = Map.of("attempts", List.of("existing"));
++        result.setAttemptDetails(existingDetails);
++        stubOpenSubmission(challenge, result);
++        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
++                .thenReturn(new TmdbLookupResult.Found<>(mock()));
++        when(infoComparisonService.compare(eq(challenge), any()))
++                .thenThrow(new TmdbUnavailableException("TMDB is temporarily unavailable"));
++
++        assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
++                request("680", null, null, null, null)))
++                .isInstanceOf(TmdbUnavailableException.class);
++
++        assertThat(result.getAttemptsUsed()).isZero();
++        assertThat(result.getAttemptDetails()).isSameAs(existingDetails);
+     }
+ 
+     @Test
+     @DisplayName("[submitAttempt] Should Complete With One Point - When The Correct Candidate Is Submitted On The Final Attempt")
+     void shouldCompleteWithOnePointWhenTheCorrectCandidateIsSubmittedOnTheFinalAttempt() {
+         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+         UserDailyGameResult result = result(challenge, 9, 0, DailyGameResultStatus.IN_PROGRESS, null);
+         stubOpenSubmission(challenge, result);
+         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                 .thenReturn(new TmdbLookupResult.Found<>(mock()));
+@@ -565,23 +597,30 @@ class DailyGameServiceImplTest {
+         assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
+     }
+ 
+     private DailyGameServiceImpl service() {
+         return new DailyGameServiceImpl(
+                 challengeRepository,
+                 hintRepository,
+                 resultRepository,
+                 new com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator(tmdbClient),
+                 new DailyChallengeResponseAssembler(),
++                infoComparisonService,
+                 CLOCK);
+     }
+ 
++    private DailyGameInfoFeedbackDTO infoFeedback() {
++        DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
++                DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
++        return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
++    }
++
+     private void stubOpenSubmission(DailyChallenge challenge, UserDailyGameResult result) {
+         when(challengeRepository.findByChallengeDateAndGameType(TODAY, challenge.getGameType()))
+                 .thenReturn(Optional.of(challenge));
+         when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+         when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                 .thenReturn(Optional.of(result));
+     }
+ 
+     private void verifyNoBatchReads() {
+         verify(resultRepository, never()).findByUserIdAndDailyChallengeIdIn(any(), any());
+

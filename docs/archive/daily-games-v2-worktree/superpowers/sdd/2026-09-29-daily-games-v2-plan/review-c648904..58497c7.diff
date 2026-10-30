@@ -1,0 +1,385 @@
+# Review package: c6489048e37592cb34da9d6c61c0632f9ee2fb7f..58497c727a803781aa5114550c3d38e0d75528d7
+
+## Commits
+58497c7 feat(daily-game): retain current-day attempt details
+--- FILES ---
+ .../dailygame/entity/UserDailyGameResult.java      |  8 +++++
+ .../repository/UserDailyGameResultRepository.java  | 11 ++++++
+ .../DailyGameAttemptDetailsCleanupService.java     |  8 +++++
+ .../DailyGameAttemptDetailsCleanupServiceImpl.java | 22 ++++++++++++
+ .../DailyGameAttemptDetailsCleanupJob.java         | 25 ++++++++++++++
+ src/main/resources/application-dev.properties      |  1 +
+ .../V63__add-daily-game-attempt-details.sql        |  2 ++
+ .../repository/DailyGameRepositoryTest.java        | 35 +++++++++++++++++++
+ ...lyGameAttemptDetailsCleanupServiceImplTest.java | 39 ++++++++++++++++++++++
+ .../DailyGameAttemptDetailsCleanupJobTest.java     | 36 ++++++++++++++++++++
+ 10 files changed, 187 insertions(+)
+--- DIFF ---
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/entity/UserDailyGameResult.java b/src/main/java/com/watchwise/watchwise_api/dailygame/entity/UserDailyGameResult.java
+index dccf2ff..deeb74b 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/entity/UserDailyGameResult.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/entity/UserDailyGameResult.java
+@@ -11,22 +11,25 @@ import jakarta.persistence.GenerationType;
+ import jakarta.persistence.Id;
+ import jakarta.persistence.JoinColumn;
+ import jakarta.persistence.ManyToOne;
+ import jakarta.persistence.Table;
+ import lombok.AccessLevel;
+ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Getter;
+ import lombok.NoArgsConstructor;
+ import lombok.Setter;
++import org.hibernate.annotations.JdbcTypeCode;
++import org.hibernate.type.SqlTypes;
+ 
+ import java.time.LocalDateTime;
++import java.util.Map;
+ import java.util.UUID;
+ 
+ @Entity
+ @Table(name = "user_daily_game_results")
+ @Getter
+ @Builder
+ @NoArgsConstructor(access = AccessLevel.PROTECTED)
+ @AllArgsConstructor
+ public class UserDailyGameResult {
+ 
+@@ -46,20 +49,25 @@ public class UserDailyGameResult {
+     @Column(name = "attempts_used", nullable = false)
+     @Setter
+     @Builder.Default
+     private Integer attemptsUsed = 0;
+ 
+     @Column(name = "score", nullable = false)
+     @Setter
+     @Builder.Default
+     private Integer score = 0;
+ 
++    @JdbcTypeCode(SqlTypes.JSON)
++    @Column(name = "attempt_details", columnDefinition = "jsonb")
++    @Setter
++    private Map<String, Object> attemptDetails;
++
+     @Enumerated(EnumType.STRING)
+     @Column(name = "status", length = 20, nullable = false)
+     @Setter
+     @Builder.Default
+     private DailyGameResultStatus status = DailyGameResultStatus.IN_PROGRESS;
+ 
+     @Column(name = "completed_at")
+     @Setter
+     private LocalDateTime completedAt;
+ 
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/repository/UserDailyGameResultRepository.java b/src/main/java/com/watchwise/watchwise_api/dailygame/repository/UserDailyGameResultRepository.java
+index c7b731e..41e69d9 100644
+--- a/src/main/java/com/watchwise/watchwise_api/dailygame/repository/UserDailyGameResultRepository.java
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/repository/UserDailyGameResultRepository.java
+@@ -3,20 +3,21 @@ package com.watchwise.watchwise_api.dailygame.repository;
+ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+ import jakarta.persistence.LockModeType;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ import org.springframework.data.jpa.repository.Lock;
+ import org.springframework.data.jpa.repository.Modifying;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ 
++import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.Collection;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
+ 
+ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGameResult, UUID> {
+ 
+     interface DailyGameRankingProjection {
+ 
+@@ -38,20 +39,30 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
+             SELECT result FROM UserDailyGameResult result
+             WHERE result.user.id = :userId
+               AND result.dailyChallenge.id = :dailyChallengeId
+             """)
+     Optional<UserDailyGameResult> findByUserIdAndDailyChallengeIdForUpdate(
+             @Param("userId") UUID userId, @Param("dailyChallengeId") UUID dailyChallengeId);
+ 
+     List<UserDailyGameResult> findByUserIdAndDailyChallengeIdIn(
+             UUID userId, Collection<UUID> dailyChallengeIds);
+ 
++    @Modifying(clearAutomatically = true, flushAutomatically = true)
++    @Query(value = """
++            UPDATE user_daily_game_results result
++            SET attempt_details = NULL
++            FROM daily_challenges challenge
++            WHERE challenge.id = result.daily_challenge_id
++              AND challenge.challenge_date < :currentDate
++            """, nativeQuery = true)
++    int clearAttemptDetailsBefore(@Param("currentDate") LocalDate currentDate);
++
+     @Query(value = """
+             SELECT ranked.rank AS rank,
+                    ranked.user_id AS userId,
+                    ranked.username AS username,
+                    ranked.profile_picture AS profilePicture,
+                    ranked.score AS score,
+                    ranked.games_played AS gamesPlayed,
+                    ranked.attempts_used AS attemptsUsed
+             FROM (
+                 SELECT u.id AS user_id,
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCleanupService.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCleanupService.java
+new file mode 100644
+index 0000000..0da84e2
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/DailyGameAttemptDetailsCleanupService.java
+@@ -0,0 +1,8 @@
++package com.watchwise.watchwise_api.dailygame.service;
++
++import java.time.LocalDate;
++
++public interface DailyGameAttemptDetailsCleanupService {
++
++    int cleanup(LocalDate currentDate);
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImpl.java b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImpl.java
+new file mode 100644
+index 0000000..e8d5619
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImpl.java
+@@ -0,0 +1,22 @@
++package com.watchwise.watchwise_api.dailygame.service.impl;
++
++import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCleanupService;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.time.LocalDate;
++
++@Service
++@RequiredArgsConstructor
++public class DailyGameAttemptDetailsCleanupServiceImpl implements DailyGameAttemptDetailsCleanupService {
++
++    private final UserDailyGameResultRepository resultRepository;
++
++    @Override
++    @Transactional
++    public int cleanup(LocalDate currentDate) {
++        return resultRepository.clearAttemptDetailsBefore(currentDate);
++    }
++}
+diff --git a/src/main/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJob.java b/src/main/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJob.java
+new file mode 100644
+index 0000000..d8635c2
+--- /dev/null
++++ b/src/main/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJob.java
+@@ -0,0 +1,25 @@
++package com.watchwise.watchwise_api.dailygame.tracking;
++
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCleanupService;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++import java.time.Clock;
++import java.time.LocalDate;
++
++@Component
++public class DailyGameAttemptDetailsCleanupJob {
++
++    private final DailyGameAttemptDetailsCleanupService cleanupService;
++    private final Clock clock;
++
++    public DailyGameAttemptDetailsCleanupJob(DailyGameAttemptDetailsCleanupService cleanupService, Clock clock) {
++        this.cleanupService = cleanupService;
++        this.clock = clock;
++    }
++
++    @Scheduled(cron = "${app.daily-games.attempt-details-cleanup.cron}", zone = "UTC")
++    public void run() {
++        cleanupService.cleanup(LocalDate.now(clock));
++    }
++}
+diff --git a/src/main/resources/application-dev.properties b/src/main/resources/application-dev.properties
+index c692d58..1d0bbf6 100644
+--- a/src/main/resources/application-dev.properties
++++ b/src/main/resources/application-dev.properties
+@@ -96,20 +96,21 @@ app.tmdb.person-aggregate-cache-max-size=10000
+ app.tmdb.calendar-schedule-cache-ttl-hours=24
+ app.tmdb.calendar-schedule-cache-maximum-size=10000
+ app.tmdb.search-cache-ttl-minutes=10
+ app.tmdb.search-cache-max-size=10000
+ app.tmdb.discovery-cache-ttl-minutes=10
+ app.tmdb.discovery-cache-max-size=10000
+ app.tmdb.tv-content-ratings-cache-ttl-minutes=60
+ app.tmdb.tv-content-ratings-cache-max-size=10000
+ 
+ app.daily-games.generation.cron=0 */10 * * * *
++app.daily-games.attempt-details-cleanup.cron=0 5 0 * * *
+ app.daily-games.rating-region=BR
+ app.daily-games.generation-max-candidates=100
+ app.daily-games.search-cache-ttl-minutes=10
+ app.daily-games.search-cache-max-size=10000
+ 
+ app.content.runtime-aggregate-refresh-hours=168
+ 
+ app.content-tracking.cron=0 0 4 * * *
+ app.followed-person-tracking.cron=0 0 5 * * MON
+ app.calendar-schedule-refresh.cron=0 30 4 * * *
+diff --git a/src/main/resources/db/migration/V63__add-daily-game-attempt-details.sql b/src/main/resources/db/migration/V63__add-daily-game-attempt-details.sql
+new file mode 100644
+index 0000000..61edd0e
+--- /dev/null
++++ b/src/main/resources/db/migration/V63__add-daily-game-attempt-details.sql
+@@ -0,0 +1,2 @@
++ALTER TABLE user_daily_game_results
++    ADD COLUMN attempt_details JSONB;
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/repository/DailyGameRepositoryTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/repository/DailyGameRepositoryTest.java
+index 304f83a..163ee79 100644
+--- a/src/test/java/com/watchwise/watchwise_api/dailygame/repository/DailyGameRepositoryTest.java
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/repository/DailyGameRepositoryTest.java
+@@ -362,20 +362,55 @@ class DailyGameRepositoryTest {
+         DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                 LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+         LocalDateTime now = LocalDateTime.of(2026, 9, 27, 12, 0);
+         resultRepository.saveAndFlush(buildResult(user, challenge, now));
+ 
+         assertThatThrownBy(() -> resultRepository.saveAndFlush(buildResult(user, challenge, now)))
+                 .isInstanceOf(DataIntegrityViolationException.class)
+                 .hasMessageContaining("uq_user_daily_game_results_user_challenge");
+     }
+ 
++    @Test
++    @DisplayName("[clearAttemptDetailsBefore] Should Clear Attempt Details Only Before The Current GMT Date")
++    void shouldClearAttemptDetailsOnlyBeforeTheCurrentGmtDate() {
++        User user = userRepository.saveAndFlush(buildUser());
++        DailyChallenge expiredChallenge = challengeRepository.save(
++                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.MOVIE_BY_POSTER, "movie:expired"));
++        DailyChallenge currentChallenge = challengeRepository.saveAndFlush(
++                buildChallenge(LocalDate.of(2026, 9, 30), DailyGameType.SERIES_BY_POSTER, "series:current"));
++        UserDailyGameResult expiredResult = resultRepository.save(UserDailyGameResult.builder()
++                .user(user)
++                .dailyChallenge(expiredChallenge)
++                .attemptDetails(Map.of("attempts", 2))
++                .createdAt(NOW)
++                .updatedAt(NOW)
++                .build());
++        UserDailyGameResult currentResult = resultRepository.saveAndFlush(UserDailyGameResult.builder()
++                .user(user)
++                .dailyChallenge(currentChallenge)
++                .attemptDetails(Map.of("attempts", 1))
++                .createdAt(NOW)
++                .updatedAt(NOW)
++                .build());
++        resultRepository.flush();
++        UUID expiredResultId = expiredResult.getId();
++        UUID currentResultId = currentResult.getId();
++        entityManager.clear();
++
++        int cleared = resultRepository.clearAttemptDetailsBefore(LocalDate.of(2026, 9, 30));
++
++        assertThat(cleared).isEqualTo(1);
++        assertThat(resultRepository.findById(expiredResultId).orElseThrow().getAttemptDetails()).isNull();
++        assertThat(resultRepository.findById(currentResultId).orElseThrow().getAttemptDetails())
++                .containsKey("attempts");
++    }
++
+     @Test
+     @DisplayName("[save] Should Reject Negative Attempts")
+     void shouldRejectNegativeAttempts() {
+         User user = userRepository.saveAndFlush(buildUser());
+         DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                 LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+ 
+         assertThatThrownBy(() -> insertResultRow(
+                 UUID.randomUUID(), user.getId(), challenge.getId(), -1, 0, "IN_PROGRESS"))
+                 .isInstanceOf(DataIntegrityViolationException.class)
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImplTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImplTest.java
+new file mode 100644
+index 0000000..8c45b6b
+--- /dev/null
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/service/impl/DailyGameAttemptDetailsCleanupServiceImplTest.java
+@@ -0,0 +1,39 @@
++package com.watchwise.watchwise_api.dailygame.service.impl;
++
++import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDate;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoMoreInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DailyGameAttemptDetailsCleanupServiceImplTest {
++
++    @Mock
++    private UserDailyGameResultRepository resultRepository;
++
++    @InjectMocks
++    private DailyGameAttemptDetailsCleanupServiceImpl cleanupService;
++
++    @Test
++    @DisplayName("[cleanup] Should Delegate The Current Date And Return Cleared Row Count")
++    void shouldDelegateTheCurrentDateAndReturnClearedRowCount() {
++        LocalDate currentDate = LocalDate.of(2026, 9, 30);
++        when(resultRepository.clearAttemptDetailsBefore(currentDate)).thenReturn(4);
++
++        int cleared = cleanupService.cleanup(currentDate);
++
++        assertThat(cleared).isEqualTo(4);
++        verify(resultRepository).clearAttemptDetailsBefore(currentDate);
++        verifyNoMoreInteractions(resultRepository);
++    }
++}
+diff --git a/src/test/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJobTest.java b/src/test/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJobTest.java
+new file mode 100644
+index 0000000..a040665
+--- /dev/null
++++ b/src/test/java/com/watchwise/watchwise_api/dailygame/tracking/DailyGameAttemptDetailsCleanupJobTest.java
+@@ -0,0 +1,36 @@
++package com.watchwise.watchwise_api.dailygame.tracking;
++
++import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCleanupService;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.junit.jupiter.api.extension.ExtendWith;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDate;
++import java.time.ZoneOffset;
++
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoMoreInteractions;
++
++@ExtendWith(MockitoExtension.class)
++class DailyGameAttemptDetailsCleanupJobTest {
++
++    @Mock
++    private DailyGameAttemptDetailsCleanupService cleanupService;
++
++    @Test
++    @DisplayName("[run] Should Clean Up Before The Current UTC Date")
++    void shouldCleanUpBeforeTheCurrentUtcDate() {
++        DailyGameAttemptDetailsCleanupJob cleanupJob = new DailyGameAttemptDetailsCleanupJob(
++                cleanupService,
++                Clock.fixed(Instant.parse("2026-09-30T00:05:00Z"), ZoneOffset.UTC));
++
++        cleanupJob.run();
++
++        verify(cleanupService).cleanup(LocalDate.of(2026, 9, 30));
++        verifyNoMoreInteractions(cleanupService);
++    }
++}
+
