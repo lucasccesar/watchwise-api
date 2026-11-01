@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.diaryentry.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.common.dto.PageWithBackdropResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
@@ -54,7 +55,7 @@ public class DiaryEntryController {
     private long diaryBulkActionWindowMinutes;
 
     @GetMapping("/users/{userId}/diary")
-    public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
+    public ResponseEntity<PageWithBackdropResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer page,
@@ -72,7 +73,10 @@ public class DiaryEntryController {
         Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
                 getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId, score,
                 scoreFrom, scoreTo, sortBy);
-        return ResponseEntity.ok(PageResponseDTO.of(entries));
+        String backdropPath = entries.isEmpty() || entries.getContent().get(0).card() == null
+                ? null
+                : entries.getContent().get(0).card().backdropPath();
+        return ResponseEntity.ok(PageWithBackdropResponseDTO.of(entries, backdropPath));
     }
 
     @GetMapping("/users/{userId}/diary/view")

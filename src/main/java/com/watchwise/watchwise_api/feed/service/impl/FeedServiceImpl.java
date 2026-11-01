@@ -133,7 +133,7 @@ public class FeedServiceImpl implements FeedService {
                 .map(item -> toFeedItemView(item, cards))
                 .toList();
         return new FeedPageViewDTO(content, rawFeed.size(), rawFeed.nextCursor(), rawFeed.hasNext(),
-                followedIds.size(), loadFollowedUserPreviews(followedIds));
+                followedIds.size(), loadFollowedUserPreviews(followedIds), firstBackdropPath(content));
     }
 
     private RawFeedPage selectRawFeedPage(UUID userId, String cursor, Integer size, List<UUID> followedIds) {
@@ -424,6 +424,33 @@ public class FeedServiceImpl implements FeedService {
                         .map(content -> cardFor(content, cards))
                         .toList();
         return new FeedItemViewDTO(item, contentCard, top5Preview, pickTargetCards);
+    }
+
+    private String firstBackdropPath(List<FeedItemViewDTO> items) {
+        for (FeedItemViewDTO item : items) {
+            ContentCardDTO firstCard = firstMediaCard(item);
+            if (firstCard != null) {
+                return firstCard.backdropPath();
+            }
+        }
+        return null;
+    }
+
+    private ContentCardDTO firstMediaCard(FeedItemViewDTO item) {
+        if (item.card() != null) {
+            return item.card();
+        }
+        if (item.top5Preview() != null) {
+            ContentCardDTO top5Card = firstCard(item.top5Preview().cards());
+            if (top5Card != null) {
+                return top5Card;
+            }
+        }
+        return firstCard(item.pickTargetCards());
+    }
+
+    private ContentCardDTO firstCard(List<ContentCardDTO> cards) {
+        return cards == null ? null : cards.stream().filter(Objects::nonNull).findFirst().orElse(null);
     }
 
     private ContentCardDTO cardFor(ContentRefDTO content, Map<ContentCoordinate, ContentCardDTO> cards) {

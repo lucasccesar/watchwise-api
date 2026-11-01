@@ -15,6 +15,7 @@ public record ContentCardDTO(
         Integer episodeNumber,
         String title,
         String posterPath,
+        String backdropPath,
         String customPosterUrl,
         LocalDate releaseDate,
         Integer releaseYear,
@@ -44,6 +45,7 @@ public record ContentCardDTO(
             String customPosterUrl,
             LocalDate releaseDate,
             Integer releaseYear,
+            Double tmdbVoteAverage,
             Integer runtimeMinutes,
             Integer totalRuntimeMinutes,
             Integer numberOfSeasons,
@@ -52,7 +54,32 @@ public record ContentCardDTO(
             ContentCardStatsDTO stats,
             ContentCardViewerStateDTO viewerState,
             ContentPreviewStatus previewStatus) {
-        this(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, posterPath,
+        this(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, posterPath, null,
+                customPosterUrl, releaseDate, releaseYear, tmdbVoteAverage, runtimeMinutes, totalRuntimeMinutes,
+                numberOfSeasons, numberOfEpisodes, genres, stats, viewerState, previewStatus);
+    }
+
+    public ContentCardDTO(
+            UUID contentId,
+            ContentType type,
+            String tmdbId,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            Integer episodeNumber,
+            String title,
+            String posterPath,
+            String customPosterUrl,
+            LocalDate releaseDate,
+            Integer releaseYear,
+            Integer runtimeMinutes,
+            Integer totalRuntimeMinutes,
+            Integer numberOfSeasons,
+            Integer numberOfEpisodes,
+            List<String> genres,
+            ContentCardStatsDTO stats,
+            ContentCardViewerStateDTO viewerState,
+            ContentPreviewStatus previewStatus) {
+        this(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, posterPath, null,
                 customPosterUrl, releaseDate, releaseYear, null, runtimeMinutes, totalRuntimeMinutes,
                 numberOfSeasons, numberOfEpisodes, genres, stats, viewerState, previewStatus);
     }

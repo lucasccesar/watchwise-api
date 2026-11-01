@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
@@ -284,6 +285,8 @@ public class ContentCardAssembler {
         String posterPath = spec.posterPath() != null
                 ? spec.posterPath()
                 : metadataValue(metadata, TmdbCardMetadata::posterPath);
+        String backdropPath = TmdbImageUrlBuilder.backdropUrl(
+                metadataValue(metadata, TmdbCardMetadata::backdropPath));
         LocalDate releaseDate = spec.releaseDate() != null
                 ? spec.releaseDate()
                 : parseDate(metadataValue(metadata, TmdbCardMetadata::releaseDate));
@@ -318,6 +321,7 @@ public class ContentCardAssembler {
                 coordinate.episodeNumber(),
                 title,
                 posterPath,
+                backdropPath,
                 customPosterUrl,
                 releaseDate,
                 releaseDate == null ? null : releaseDate.getYear(),

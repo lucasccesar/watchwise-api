@@ -194,7 +194,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 page.getTotalElements(),
                 page.getTotalPages(),
                 page.hasNext(),
-                aggregate);
+                aggregate,
+                cards.isEmpty() || cards.get(0).card() == null ? null : cards.get(0).card().backdropPath());
     }
 
     private String normalizeGenre(String genre) {

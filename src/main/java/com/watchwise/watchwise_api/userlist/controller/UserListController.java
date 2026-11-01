@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.common.dto.PageWithBackdropResponseDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
@@ -39,7 +40,7 @@ public class UserListController {
     private final UserListDetailViewService userListDetailViewService;
 
     @GetMapping("/users/me/lists/view")
-    public ResponseEntity<PageResponseDTO<UserListCardDTO>> getMyListView(
+    public ResponseEntity<PageWithBackdropResponseDTO<UserListCardDTO>> getMyListView(
             @RequestParam(required = false) UserListViewSource source,
             @RequestParam(required = false) UserListViewItemType itemType,
             @RequestParam(required = false) String genre,
@@ -48,8 +49,10 @@ public class UserListController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        return getListView(new UserListViewRequest(getCurrentUserId(), null, UserListViewQueryMode.MY,
+        Page<UserListCardDTO> view = userListViewService.getView(new UserListViewRequest(
+                getCurrentUserId(), null, UserListViewQueryMode.MY,
                 source, null, itemType, genre, sortBy, sortDirection, page, size));
+        return ResponseEntity.ok(PageWithBackdropResponseDTO.of(view, firstPreviewBackdrop(view)));
     }
 
     @GetMapping("/users/{userId}/lists/view")
@@ -82,6 +85,15 @@ public class UserListController {
 
     private ResponseEntity<PageResponseDTO<UserListCardDTO>> getListView(UserListViewRequest request) {
         return ResponseEntity.ok(PageResponseDTO.of(userListViewService.getView(request)));
+    }
+
+    private String firstPreviewBackdrop(Page<UserListCardDTO> view) {
+        for (UserListCardDTO list : view.getContent()) {
+            if (list != null && !list.previewCards().isEmpty()) {
+                return list.previewCards().get(0).backdropPath();
+            }
+        }
+        return null;
     }
 
     @GetMapping("/users/{userId}/lists")

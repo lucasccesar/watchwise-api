@@ -10,10 +10,16 @@ public record FeedPageViewDTO(
         String nextCursor,
         boolean hasNext,
         long followingCount,
-        List<UserPreviewDTO> followedUsersPreview) {
+        List<UserPreviewDTO> followedUsersPreview,
+        String backdropPath) {
 
     public FeedPageViewDTO {
         content = content == null ? List.of() : List.copyOf(content);
         followedUsersPreview = followedUsersPreview == null ? List.of() : List.copyOf(followedUsersPreview);
+    }
+
+    public FeedPageViewDTO(List<FeedItemViewDTO> content, int size, String nextCursor, boolean hasNext,
+            long followingCount, List<UserPreviewDTO> followedUsersPreview) {
+        this(content, size, nextCursor, hasNext, followingCount, followedUsersPreview, null);
     }
 }
