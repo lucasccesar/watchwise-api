@@ -1129,6 +1129,7 @@ class UserControllerIntegrationTest {
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetprivate", "targetprivate")
                 .orElseThrow();
         targetUser.setDescription("Bio remains visible while the profile is private");
+        targetUser.setBanner("https://example.com/private-banner.png");
         userRepository.saveAndFlush(targetUser);
 
         mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
@@ -1136,8 +1137,11 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$.username").value("targetprivate"))
                 .andExpect(jsonPath("$.description").value("Bio remains visible while the profile is private"))
                 .andExpect(jsonPath("$.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.banner").value("https://example.com/private-banner.png"))
+                .andExpect(jsonPath("$.followersCount").value(0))
+                .andExpect(jsonPath("$.followingCount").value(0))
                 .andExpect(jsonPath("$.totalMinutesWatchedMovies").doesNotExist())
-                .andExpect(jsonPath("$.followersCount").doesNotExist());
+                .andExpect(jsonPath("$.createdAt").doesNotExist());
     }
 
     @Test

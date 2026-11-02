@@ -326,9 +326,11 @@ public class UserServiceImpl implements UserService {
     }
 
     private PublicUserProfileDTO privateProfileWithVisibleBio(User user) {
+        long followersCount = followerRepository.countByFollowedIdAndStatus(user.getId(), FollowStatus.ACCEPTED);
+        long followingCount = followerRepository.countByFollowerIdAndStatus(user.getId(), FollowStatus.ACCEPTED);
         return new PublicUserProfileDTO(user.getId(), user.getUsername(), user.getName(), user.getDescription(),
                 user.getProfilePicture(), user.getIsProfilePublic(), null, null, null, null, null, null,
-                null, null, null, null, null, ViewerProfileRelation.NOT_FOLLOWING,
+                null, null, user.getBanner(), followersCount, followingCount, ViewerProfileRelation.NOT_FOLLOWING,
                 UserBlockRelationship.NONE, false);
     }
 

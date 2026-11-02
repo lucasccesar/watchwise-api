@@ -394,6 +394,7 @@ class UserServiceImplTest {
         UUID id = savedUser.getId();
         savedUser.setIsProfilePublic(false);
         savedUser.setDescription("Visible biography");
+        savedUser.setBanner("https://example.com/private-banner.png");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         doThrow(new ForbiddenException("This user profile is private"))
                 .when(userVisibilityService).assertCanView(viewerId, id);
@@ -405,8 +406,10 @@ class UserServiceImplTest {
         assertThat(result.name()).isEqualTo(savedUser.getName());
         assertThat(result.description()).isEqualTo("Visible biography");
         assertThat(result.profilePicture()).isEqualTo(savedUser.getProfilePicture());
+        assertThat(result.banner()).isEqualTo("https://example.com/private-banner.png");
         assertThat(result.totalMinutesWatchedMovies()).isNull();
-        assertThat(result.followersCount()).isNull();
+        assertThat(result.followersCount()).isZero();
+        assertThat(result.followingCount()).isZero();
         assertThat(result.viewerRelation()).isEqualTo(ViewerProfileRelation.NOT_FOLLOWING);
         verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
     }
