@@ -283,7 +283,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 commentCountsByEntryId.getOrDefault(entry.getId(), 0L),
                 watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                 customPosterUrl(entry, cardsByCoordinate, fallbackPostersByContentId),
-                cardFor(entry.getContent(), cardsByCoordinate)));
+                cardFor(entry.getContent(), cardsByCoordinate),
+                seriesTitleFor(entry.getContent(), cardsByCoordinate),
+                seriesPosterPathFor(entry.getContent(), cardsByCoordinate)));
     }
 
     @Override
@@ -307,7 +309,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 : card.customPosterUrl();
 
         return enrichDiaryEntryResponse(entry, likedEntryIds.contains(diaryEntryId), commentsCount,
-                watchedWith, customPosterUrl, card);
+                watchedWith, customPosterUrl, card, seriesTitleFor(entry.getContent(), cardsByCoordinate),
+                seriesPosterPathFor(entry.getContent(), cardsByCoordinate));
     }
 
     @Override
@@ -721,6 +724,28 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 ? diaryEntryRepository.findContentReviewKeys(contentId, viewerId, pageRequest)
                 : diaryEntryRepository.findContentReviewKeys(contentId, viewerId, sort.name(), pageRequest);
 
+        return mapReviewKeys(viewerId, pageRequest, reviewKeys, false);
+    }
+
+    @Override
+    public Page<ContentReviewResponseDTO> getUserReviews(
+            UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewDiary(viewerId, userId, target);
+
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<DiaryEntryRepository.ContentReviewKey> reviewKeys = diaryEntryRepository.findUserReviewKeys(
+                userId, pageRequest);
+        return mapReviewKeys(viewerId, pageRequest, reviewKeys, true);
+    }
+
+    private Page<ContentReviewResponseDTO> mapReviewKeys(
+            UUID viewerId,
+            PageRequest pageRequest,
+            Page<DiaryEntryRepository.ContentReviewKey> reviewKeys,
+            boolean includeSeriesPresentation) {
+
         List<UUID> diaryIds = reviewKeys.getContent().stream()
                 .filter(key -> ContentReviewSource.DIARY.name().equals(key.getSource()))
                 .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
@@ -788,12 +813,24 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         commentCountsByDiaryId, commentCountsByDroppedId, watchedWithByEntryId,
                         customPosterByAuthorAndContent))
                 .toList();
-        Map<UUID, ContentCardDTO> cardsByReviewId = assembleReviewCards(viewerId, reviews);
+        Map<UUID, ReviewCardPresentation> cardsByReviewId = assembleReviewCards(
+                viewerId, reviews, includeSeriesPresentation);
         reviews = reviews.stream()
-                .map(review -> review.withCard(cardsByReviewId.get(review.id())))
+                .map(review -> {
+                    ReviewCardPresentation presentation = cardsByReviewId.get(review.id());
+                    if (presentation == null) return review;
+                    ContentReviewResponseDTO withCard = review.withCard(presentation.card());
+                    return includeSeriesPresentation
+                            ? withCard.withSeriesPresentation(presentation.seriesTitle(), presentation.seriesPosterPath())
+                            : withCard;
+                })
                 .toList();
 
         return new PageImpl<>(reviews, pageRequest, reviewKeys.getTotalElements());
+    }
+
+    private record ReviewCardPresentation(
+            ContentCardDTO card, String seriesTitle, String seriesPosterPath) {
     }
 
     private ContentReviewResponseDTO toContentReviewResponse(
@@ -846,8 +883,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 likedDroppedIds.contains(entry.getId()), List.of(), null);
     }
 
-    private Map<UUID, ContentCardDTO> assembleReviewCards(
-            UUID viewerId, Collection<ContentReviewResponseDTO> reviews) {
+    private Map<UUID, ReviewCardPresentation> assembleReviewCards(
+            UUID viewerId, Collection<ContentReviewResponseDTO> reviews, boolean includeSeriesPresentation) {
         if (reviews == null || reviews.isEmpty()) {
             return Map.of();
         }
@@ -863,14 +900,23 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         ContentReviewResponseDTO::userId,
                         LinkedHashMap::new,
                         Collectors.toList()));
-        Map<UUID, ContentCardDTO> cardsByReviewId = new LinkedHashMap<>();
+        Map<UUID, ReviewCardPresentation> cardsByReviewId = new LinkedHashMap<>();
         for (Map.Entry<UUID, List<ContentReviewResponseDTO>> ownerGroup : reviewsByOwner.entrySet()) {
-            List<ContentCardSpec> specs = distinctCardSpecs(ownerGroup.getValue().stream()
+            List<ContentCardSpec> contentSpecs = ownerGroup.getValue().stream()
                     .map(ContentReviewResponseDTO::content)
                     .filter(content -> content != null && content.type() != null)
                     .map(content -> new ContentCardSpec(
                             toCoordinate(content), null, null, null, content.runtimeMinutes()))
-                    .toList());
+                    .toList();
+            List<ContentCardSpec> seriesSpecs = !includeSeriesPresentation ? List.of() : ownerGroup.getValue().stream()
+                    .map(ContentReviewResponseDTO::content)
+                    .filter(this::hasSeriesPresentation)
+                    .map(content -> new ContentCardSpec(
+                            new ContentCoordinate(ContentType.SERIES, content.seriesTmdbId(), null, null, null),
+                            null, null, null, null))
+                    .toList();
+            List<ContentCardSpec> specs = distinctCardSpecs(
+                    java.util.stream.Stream.concat(contentSpecs.stream(), seriesSpecs.stream()).toList());
             if (specs.isEmpty()) {
                 continue;
             }
@@ -884,11 +930,24 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             ownerGroup.getValue().forEach(review -> {
                 ContentRefDTO content = review.content();
                 if (content != null && content.type() != null) {
-                    cardsByReviewId.put(review.id(), cards.get(toCoordinate(content)));
+                    ContentCardDTO seriesCard = hasSeriesPresentation(content)
+                            ? cards.get(new ContentCoordinate(ContentType.SERIES, content.seriesTmdbId(), null, null, null))
+                            : null;
+                    cardsByReviewId.put(review.id(), new ReviewCardPresentation(
+                            cards.get(toCoordinate(content)),
+                            seriesCard == null ? null : seriesCard.title(),
+                            seriesCard == null ? null : seriesCard.posterPath()));
                 }
             });
         }
         return cardsByReviewId;
+    }
+
+    private boolean hasSeriesPresentation(ContentRefDTO content) {
+        return content != null
+                && (content.type() == ContentType.EPISODE || content.type() == ContentType.SEASON)
+                && content.seriesTmdbId() != null
+                && !content.seriesTmdbId().isBlank();
     }
 
     private List<ContentCardSpec> distinctCardSpecs(Collection<ContentCardSpec> specs) {
@@ -1265,10 +1324,19 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private DiaryEntryResponseDTO enrichDiaryEntryResponse(
             DiaryEntry entry, boolean likedByMe, long commentsCount,
             List<UserPreviewDTO> watchedWith, String customPosterUrl, ContentCardDTO card) {
+        return enrichDiaryEntryResponse(entry, likedByMe, commentsCount, watchedWith, customPosterUrl, card, null, null);
+    }
+
+    private DiaryEntryResponseDTO enrichDiaryEntryResponse(
+            DiaryEntry entry, boolean likedByMe, long commentsCount,
+            List<UserPreviewDTO> watchedWith, String customPosterUrl, ContentCardDTO card,
+            String seriesTitle, String seriesPosterPath) {
         return diaryEntryMapper.diaryEntryToResponseDto(entry, likedByMe, watchedWith)
                 .withCommentsCount(commentsCount)
                 .withCustomPosterUrl(customPosterUrl)
-                .withCard(card);
+                .withCard(card)
+                .withSeriesTitle(seriesTitle)
+                .withSeriesPosterPath(seriesPosterPath);
     }
 
     private DiaryEntryResponseDTO enrichDiaryEntryResponse(
@@ -1284,12 +1352,22 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private Map<ContentCoordinate, ContentCardDTO> assembleDiaryCards(
             UUID viewerId, User target, Collection<DiaryEntry> entries) {
-        List<ContentCardSpec> specs = distinctCardSpecs(entries.stream()
+        List<ContentCardSpec> specs = new ArrayList<>(entries.stream()
                 .map(DiaryEntry::getContent)
                 .filter(content -> content != null && content.getType() != null)
                 .map(content -> new ContentCardSpec(
                         ContentCoordinate.from(content), null, null, null, content.getRuntimeMinutes()))
                 .toList());
+        specs.addAll(entries.stream()
+                .map(DiaryEntry::getContent)
+                .filter(content -> content != null && content.getType() == ContentType.EPISODE)
+                .map(Content::getSeriesTmdbId)
+                .filter(seriesTmdbId -> seriesTmdbId != null && !seriesTmdbId.isBlank())
+                .map(seriesTmdbId -> new ContentCardSpec(
+                        new ContentCoordinate(ContentType.SERIES, seriesTmdbId, null, null, null),
+                        null, null, null, null))
+                .toList());
+        specs = distinctCardSpecs(specs);
         if (specs.isEmpty()) {
             return Map.of();
         }
@@ -1317,6 +1395,25 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             return null;
         }
         return cardsByCoordinate.get(ContentCoordinate.from(content));
+    }
+
+    private String seriesPosterPathFor(Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
+        ContentCardDTO seriesCard = seriesCardFor(content, cardsByCoordinate);
+        return seriesCard == null ? null : seriesCard.posterPath();
+    }
+
+    private String seriesTitleFor(Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
+        ContentCardDTO seriesCard = seriesCardFor(content, cardsByCoordinate);
+        return seriesCard == null ? null : seriesCard.title();
+    }
+
+    private ContentCardDTO seriesCardFor(Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
+        if (content == null || content.getType() != ContentType.EPISODE
+                || content.getSeriesTmdbId() == null || content.getSeriesTmdbId().isBlank()) {
+            return null;
+        }
+        return cardsByCoordinate.get(new ContentCoordinate(
+                ContentType.SERIES, content.getSeriesTmdbId(), null, null, null));
     }
 
     private String customPosterUrl(

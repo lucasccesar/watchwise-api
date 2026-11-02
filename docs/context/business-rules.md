@@ -204,6 +204,9 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   (`ContentCardSpec`/`ContentCardAssembler`): título, poster, data e runtime conhecidos não pulam a
   consulta leve se gêneros ainda não foram fornecidos; o resolver continua sendo uma leitura cacheada,
   sem criar `Content`.
+- **Cards de EPISODE usam o backdrop da série-pai** (`ContentCardAssembler`): título, poster, data e
+  runtime continuam vindo dos metadados do episódio, mas `backdropPath` é enriquecido pela consulta
+  cacheada da série. Sem ID ou backdrop da série, o campo fica nulo; o still do episódio não é fallback.
 - **Cache compartilhado nunca contém estado sensível do viewer** (`TmdbClient.getCardMetadata` e
   `ContentCardAssembler`): o cache canônico é chaveado pela coordenada e idioma e pode ser reutilizado
   entre usuários; viewerState e customPosterUrl são obtidos fora dele. O cache de Trending segue a
@@ -719,10 +722,32 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   padrão de todo outro campo de `applyPatch`.
 - **Login exige e-mail verificado** (`UserServiceImpl.login`) — credenciais corretas mas
   `isEmailVerified = false` retorna `403` (`Email not verified`), não autentica.
-- **Cadastro tradicional fica pendente até confirmar o e-mail** (`UserServiceImpl.startRegistration`,
-  `PendingRegistration`, `EmailConfirmationService`) — a linha `User` só é criada após o token de uso
-  único ser validado. O token e a prova do navegador são guardados como hashes; a resposta do cadastro
-  não contém usuário nem cookies de sessão. OAuth continua autenticando somente e-mails já confirmados.
+- **Provisionamento de conta de teste é administrativo e opcional** (`AdminTestUserController`,
+  `TestUserProvisioningServiceImpl`) — `POST /admin/test-users` só existe com
+  `app.auth.test-user-provisioning.enabled=true` (padrão false) e exige role `ADMIN` lida do banco
+  mais CSRF válido. Cria um usuário `USER` privado e já verificado com endereço sintético em
+  `watchwise.invalid`; o administrador define uma senha forte, persistida apenas como hash. A resposta
+  `no-store` não inclui a senha. Repetir a mesma solicitação retorna a conta anterior, permitindo
+  recuperar o email caso a primeira resposta se perca; username com cadastro pendente é rejeitado.
+  Isso não altera o cadastro público, que mantém a auto-confirmação desativada por padrão em prod. Em
+  prod, a rota é habilitada pela variável
+  `WATCHWISE_TEST_USER_PROVISIONING_ENABLED=true` e deve ser desligada após o provisionamento.
+- **Promoção do primeiro ADMIN usa um segredo temporário** (`AdminBootstrapController`,
+  `AdminBootstrapServiceImpl`) — `POST /admin/bootstrap` só é registrado quando
+  `WATCHWISE_ADMIN_BOOTSTRAP_TOKEN` contém ao menos 32 caracteres URL-safe. O segredo é comparado em
+  tempo constante e a operação é serializada por advisory lock transacional (bloqueio no PostgreSQL)
+  para permitir apenas uma promoção, mesmo sob chamadas concorrentes. Só promove uma conta `USER` já
+  existente com e-mail verificado, e somente se ainda não houver ADMIN; não cria conta nem confirma
+  e-mail. Remover a variável do Heroku após o uso desabilita a rota.
+- **Confirmação de e-mail no cadastro depende do perfil** (`EmailConfirmationService.startRegistration`,
+  `AuthController.register`) — o padrão e o perfil `prod` mantêm o cadastro pendente até validar o token
+  de uso único; token e prova do navegador são guardados como hashes, e a sessão só é emitida após a
+  confirmação. No perfil `dev`, `app.auth.registration.auto-confirm=true` cria a conta imediatamente,
+  marca o e-mail como verificado, não chama o remetente e retorna `201` com cookies de sessão e CSRF.
+  Em prod, `WATCHWISE_REGISTRATION_AUTO_CONFIRM` sobrescreve a propriedade e assume `false` quando ausente.
+  Se temporariamente definida como `true`, qualquer cadastro público feito nesse período recebe o mesmo
+  tratamento imediato; volte para `false` logo após criar a conta desejada. Com auto-confirmação desligada,
+  o fluxo pendente retorna `202`. OAuth continua autenticando somente e-mails já confirmados.
 - **Reenvio de confirmação é vinculado à prova do cadastro** (`POST /auth/confirm-email/resend`) — um
   e-mail informado sem a prova correspondente não produz envio e recebe a mesma resposta genérica. O
   token é invalidado/substituído antes de emitir outro; o Resend sender não grava nem registra o token.

@@ -54,6 +54,16 @@ public class DiaryEntryController {
     @Value("${app.rate-limit.diary-bulk-action.window-minutes}")
     private long diaryBulkActionWindowMinutes;
 
+    @GetMapping("/users/{userId}/reviews")
+    public ResponseEntity<PageResponseDTO<ContentReviewResponseDTO>> getUserReviews(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        Page<ContentReviewResponseDTO> reviews = diaryEntryService.getUserReviews(
+                getCurrentUserId(), userId, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(reviews));
+    }
+
     @GetMapping("/users/{userId}/diary")
     public ResponseEntity<PageWithBackdropResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
             @PathVariable UUID userId,

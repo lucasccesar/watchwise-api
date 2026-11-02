@@ -158,6 +158,7 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
                 .toList();
         return new UserListDetailViewResponseDTO(
                 page.userList().getId(),
+                preview(page.userList().getUser()),
                 page.userList().getName(),
                 page.userList().getDescription(),
                 page.userList().getVisibility(),

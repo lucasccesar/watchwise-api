@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-10-28.
+Última atualização: 2026-11-01.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -5809,3 +5809,17 @@ O `viewerState` dos mesmos cards agora inclui `inWatchlist`, resolvido para o us
 Os cards Trending agora retornam `releaseDate` como data completa do TMDB (`release_date` de filmes ou `first_air_date` de séries) quando válida. A interface pode exibi-la para lançamentos futuros; `year` permanece no contrato.
 
 Na Home, `recentlyWatched[].card` e `nextEpisodes[]` agora incluem `tmdbVoteAverage` quando o TMDB fornece a nota. O campo é distinto de `communityAverageScore`; `recentlyWatched` usa a metadata do conteúdo e Continue Watching usa a nota do próximo episódio já presente na resposta da temporada.
+
+## 2026-10-30 — Cadastro automático no perfil dev
+
+O cadastro no perfil `dev` agora cria a conta com e-mail verificado sem enviar confirmação, autentica a sessão e retorna `201` com cookies de acesso, refresh e CSRF. Os perfis padrão e `prod` continuam exigindo confirmação por e-mail e retornando `202`; a opção de auto-confirmação permanece desabilitada fora do `dev`. Cadastros imediatos mantêm as validações e proteções existentes contra duplicidade e removem provas pendentes anteriores para o mesmo e-mail.
+
+## 2026-11-01 — Backdrops nas telas de leitura
+
+Os cards de conteúdo agora incluem o backdrop TMDB como URL `w1280`, reutilizando os metadados resolvidos pelo `ContentCardAssembler`; para EPISODE, o backdrop vem da série-pai e não do still do episódio. `GET /feed`, `GET /users/{userId}/diary`, `GET /users/{userId}/watchlist/view` e `GET /users/me/lists/view` também retornam `backdropPath` no envelope, escolhido pelo primeiro card de conteúdo na ordem exibida; ausência de conteúdo ou imagem retorna `null`. Os contratos OpenAPI foram atualizados sem alterar persistência nem filtros.
+
+Foi adicionado `POST /admin/test-users`, desligado por padrão e restrito a `ADMIN` persistido com CSRF válido, para provisionar uma conta privada sem e-mail real. O serviço gera um endereço em `watchwise.invalid`, marca o e-mail como verificado e recebe uma senha definida pelo administrador, armazenada somente como hash. Repetir a mesma solicitação retorna a conta criada antes, sem criar duplicatas; em produção, a variável `WATCHWISE_TEST_USER_PROVISIONING_ENABLED` habilita a rota e deve voltar a `false` depois. O cadastro público e a configuração de confirmação de produção permanecem inalterados.
+
+Foi adicionado `POST /admin/bootstrap`, ausente quando `WATCHWISE_ADMIN_BOOTSTRAP_TOKEN` não contém ao menos 32 caracteres URL-safe. O segredo permite promover, uma única vez enquanto não houver ADMIN, uma conta `USER` já cadastrada e com e-mail verificado; a promoção é protegida por bloqueio transacional no PostgreSQL e não altera a confirmação de e-mail nem cria credenciais. A rota não usa sessão ou CSRF, compara o segredo em tempo constante e retorna `no-store`; remover a variável do Heroku a desabilita.
+
+O perfil `prod` agora aceita `WATCHWISE_REGISTRATION_AUTO_CONFIRM`, com padrão `false`, para controlar temporariamente a confirmação de email no cadastro pelo painel do Heroku. Quando definido como `true`, todos os novos cadastros são marcados como verificados e recebem sessão sem envio de confirmação; retorne a variável para `false` após criar a conta desejada. O cadastro continua exigindo confirmação por padrão.

@@ -64,6 +64,9 @@ public interface DiaryEntryService {
     Page<ContentReviewResponseDTO> getReviewsForContent(
             UUID viewerId, UUID contentId, ContentReviewSort sort, Integer pageNumber, Integer pageSize);
 
+    Page<ContentReviewResponseDTO> getUserReviews(
+            UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize);
+
     DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO);
 
     List<DiaryEntryResponseDTO> createDiaryEntriesInBulk(UUID userId, DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO);

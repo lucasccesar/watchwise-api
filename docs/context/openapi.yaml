@@ -42,6 +42,10 @@ tags:
     description: Usuários enviam denúncias sem receber histórico ou acesso aos snapshots.
   - name: Admin Reports
     description: A fila de moderação e os snapshots são acessíveis somente a usuários com role ADMIN persistida.
+  - name: Admin Test Users
+    description: Provisionamento de conta de teste, desabilitado por padrão e acessível somente a ADMIN persistido.
+  - name: Admin Bootstrap
+    description: Promoção temporária da primeira conta ADMIN existente, por segredo configurado fora da API.
   - name: Diary
   - name: Imports
     description: Jobs de importação autenticados, owner-scoped e versionados; somente modos com handler registrado podem receber arquivos.
@@ -393,10 +397,16 @@ paths:
                   default: true
                   description: Se o perfil é público ou privado. Escolha do usuário; assume público se omitido.
       responses:
+        "201":
+          description: >
+            Cadastro confirmado imediatamente quando `app.auth.registration.auto-confirm=true` — no perfil
+            dev ou, temporariamente em prod, com `WATCHWISE_REGISTRATION_AUTO_CONFIRM=true`. A conta é criada
+            com o e-mail verificado e a resposta emite cookies de sessão e CSRF. Em prod o padrão é false;
+            enquanto true, todos os novos cadastros são auto-confirmados.
         "202":
           description: >
-            Cadastro pendente de confirmação. Um cookie de prova de registro é emitido; os cookies
-            de sessão são emitidos somente depois da confirmação do e-mail.
+            Cadastro pendente de confirmação quando a auto-confirmação está desabilitada. Um cookie de prova
+            de registro é emitido; os cookies de sessão são emitidos somente depois da confirmação.
         "400":
           description: Dados inválidos (falha de validação)
         "409":
@@ -405,8 +415,8 @@ paths:
           description: >
             Muitas tentativas de cadastro vindas desse IP. Tente
             novamente após o período configurado.
-        "502": { description: O provedor de e-mail falhou ao entregar a confirmação }
-        "503": { description: O envio de e-mail não está configurado }
+        "502": { description: O provedor de e-mail falhou ao entregar a confirmação no fluxo pendente }
+        "503": { description: O envio de e-mail não está configurado no fluxo pendente }
 
   /auth/confirm-email:
     post:
@@ -3210,7 +3220,7 @@ paths:
           description: Página de cards
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/UserListCardPage" }
+              schema: { $ref: "#/components/schemas/MyUserListCardPage" }
         "400": { description: Parâmetro, filtro, ordenação ou paginação inválidos; corpo ApiError }
         "401": { description: Não autenticado }
   /users/{userId}/lists/view:
@@ -3938,6 +3948,36 @@ paths:
         "204": { description: Curtida removida }
 
   # ---------- DIARY / LOG ----------
+  /users/{userId}/reviews:
+    get:
+      tags: [Diary]
+      summary: Listar reviews publicadas por um usuário
+      description: >
+        Retorna em ordem decrescente de data as reviews escritas de filmes e episódios do diário,
+        junto com reviews escritas de séries e temporadas. Somente eventos com texto não vazio são
+        incluídos. A visibilidade segue as mesmas regras do diário: dono, perfil público ou perfil
+        privado seguido com status ACCEPTED, e bloqueios entre viewer e dono impedem o acesso.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: Página unificada de reviews do usuário.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/ContentReview" }
+        "401": { description: Não autenticado }
+        "403": { description: Perfil privado não visível ou usuário bloqueado }
+        "404": { description: Usuário não encontrado }
+
   /users/{userId}/diary:
     get:
       tags: [Diary]
@@ -3998,14 +4038,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/PageMeta"
-                  - type: object
-                    properties:
-                      content:
-                        type: array
-                        items: { $ref: "#/components/schemas/DiaryEntry" }
+              schema: { $ref: "#/components/schemas/DiaryEntryPageView" }
         "400":
           description: >
             Número/tamanho de página inválido, year inválido, userId não é um
@@ -4494,6 +4527,83 @@ paths:
         "401": { description: Não autenticado }
         "403": { description: Cookie/header CSRF ausente ou inválido }
         "404": { description: Alvo inexistente ou inacessível fora da exceção de bloqueio }
+
+  /admin/bootstrap:
+    post:
+      tags: [Admin Bootstrap]
+      summary: Promover a primeira conta para ADMIN
+      description: >
+        Disponível somente quando `WATCHWISE_ADMIN_BOOTSTRAP_TOKEN` contém ao menos 32 caracteres ASCII
+        em formato URL-safe. Não exige sessão nem CSRF: autentica exclusivamente pelo segredo enviado no
+        header. Promove somente uma conta `USER` já existente e com e-mail verificado, e somente enquanto
+        não houver nenhuma conta `ADMIN`. O acesso é serializado no banco para impedir duas promoções
+        simultâneas. A resposta usa `Cache-Control: no-store`. Remova a variável de ambiente após a promoção.
+      security: []
+      parameters:
+        - name: X-Admin-Bootstrap-Token
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 32
+            pattern: '^[A-Za-z0-9_-]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminBootstrapRequestDTO" }
+      responses:
+        "200":
+          description: Conta existente promovida para ADMIN.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminBootstrapResponseDTO" }
+        "400": { description: Username inválido }
+        "401": { description: Header de bootstrap ausente ou segredo inválido }
+        "404": { description: Conta não encontrada ou endpoint desabilitado }
+        "409": { description: Já existe ADMIN, ou a conta alvo não é USER com email verificado }
+
+  /admin/test-users:
+    post:
+      tags: [Admin Test Users]
+      summary: Criar conta privada de teste
+      description: >
+        Disponível somente quando `app.auth.test-user-provisioning.enabled=true` (desabilitado por padrão).
+        Exige role ADMIN persistida e CSRF válido. Gera um e-mail em `watchwise.invalid`, marca a conta
+        como verificada e privada, e recebe a senha definida pelo administrador no corpo da requisição;
+        a senha não é devolvida nem armazenada em texto claro. Uma repetição com o mesmo username, nome
+        e senha retorna a conta criada anteriormente, permitindo recuperar o e-mail se a primeira
+        resposta se perder. As respostas usam `Cache-Control: no-store`. O cadastro público não é alterado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminTestUserCreationDTO" }
+      responses:
+        "200":
+          description: Repetição idempotente; retorna a conta de teste já criada para as mesmas credenciais.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTestUserCreatedDTO" }
+        "201":
+          description: Conta privada criada; use a senha enviada na requisição para fazer login.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTestUserCreatedDTO" }
+        "400": { description: Username ou senha inválidos }
+        "401": { description: Não autenticado }
+        "403": { description: Role ADMIN necessária ou cookie/header CSRF ausente ou inválido }
+        "404": { description: Endpoint desabilitado pela configuração }
+        "409": { description: Username já está em uso ou possui cadastro pendente }
 
   /admin/reports:
     get:
@@ -6155,6 +6265,23 @@ components:
         totalPages: { type: integer }
         hasNext: { type: boolean }
 
+    DiaryEntryPageView:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [content, backdropPath]
+          properties:
+            content:
+              type: array
+              items: { $ref: "#/components/schemas/DiaryEntry" }
+            backdropPath:
+              type: string
+              format: uri
+              nullable: true
+              description: >
+                TMDB w1280 URL from the first diary entry in the filtered and sorted page. With the
+                default NEWEST order, hasReview=true selects the newest entry that has a review.
+
     ContentSeasonSelectionDTO:
       type: object
       properties:
@@ -6237,6 +6364,21 @@ components:
             content:
               type: array
               items: { $ref: "#/components/schemas/UserListCardDTO" }
+
+    MyUserListCardPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [content, backdropPath]
+          properties:
+            content:
+              type: array
+              items: { $ref: "#/components/schemas/UserListCardDTO" }
+            backdropPath:
+              type: string
+              format: uri
+              nullable: true
+              description: TMDB w1280 URL from the first media preview in list page order.
 
     CursorPageMeta:
       type: object
@@ -6767,11 +6909,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/CursorPageMeta"
         - type: object
-          required: [content, followingCount, followedUsersPreview]
+          required: [content, followingCount, followedUsersPreview, backdropPath]
           properties:
             content:
               type: array
               items: { $ref: "#/components/schemas/FeedItemView" }
+            backdropPath:
+              type: string
+              format: uri
+              nullable: true
+              description: TMDB w1280 URL from the first media card in feed order.
             followingCount:
               type: integer
               format: int64
@@ -6821,12 +6968,17 @@ components:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
         - type: object
-          required: [content, aggregate]
+          required: [content, aggregate, backdropPath]
           properties:
             content:
               type: array
               items: { $ref: "#/components/schemas/WatchlistCard" }
             aggregate: { $ref: "#/components/schemas/WatchlistAggregate" }
+            backdropPath:
+              type: string
+              format: uri
+              nullable: true
+              description: TMDB w1280 URL from the first card in the filtered and sorted page.
 
     DroppedEntry:
       type: object
@@ -6926,8 +7078,8 @@ components:
           nullable: true
           description: Optional visual card assembled for the selected review page; does not replace content or social fields.
         comment: { type: string, nullable: true }
-        score: { type: integer, nullable: true, description: Only populated for DIARY reviews. }
-        watchedDate: { type: string, format: date, nullable: true }
+        score: { type: integer, nullable: true, description: Publication score for DIARY and CONTENT_REVIEW sources; null for DROPPED. }
+        watchedDate: { type: string, format: date, nullable: true, description: Watch date for DIARY; null for CONTENT_REVIEW and DROPPED. }
         watchNumber: { type: integer, nullable: true }
         watchedInTheater: { type: boolean, nullable: true }
         customPosterUrl: { type: string, format: uri, nullable: true }
@@ -6940,6 +7092,8 @@ components:
         watchedWith:
           type: array
           items: { $ref: "#/components/schemas/UserPreviewDTO" }
+        seriesTitle: { type: string, nullable: true, description: Parent series title for episode and season review presentation. }
+        seriesPosterPath: { type: string, nullable: true, description: Parent series poster path for episode and season review presentation. }
 
     ProfileDiaryPreview:
       type: object
@@ -7579,6 +7733,11 @@ components:
         episodeNumber: { type: integer, nullable: true }
         title: { type: string, nullable: true }
         posterPath: { type: string, nullable: true }
+        backdropPath:
+          type: string
+          format: uri
+          nullable: true
+          description: TMDB backdrop URL in w1280, when available; EPISODE cards use the parent series backdrop.
         customPosterUrl: { type: string, format: uri, nullable: true }
         releaseDate: { type: string, format: date, nullable: true }
         releaseYear: { type: integer, nullable: true }
@@ -8253,6 +8412,10 @@ components:
         a GET /contents/details por item.
       properties:
         id: { type: string, format: uuid }
+        owner:
+          allOf:
+            - $ref: "#/components/schemas/UserPreviewDTO"
+          description: Autor da lista em formato resumido.
         name: { type: string }
         description: { type: string, nullable: true }
         visibility: { type: string, enum: [PUBLIC, FOLLOWERS, PRIVATE] }
@@ -8745,6 +8908,14 @@ components:
           allOf: [{ $ref: "#/components/schemas/ContentCard" }]
           nullable: true
           description: Optional visual card for list/review/history screen consumers.
+        seriesTitle:
+          type: string
+          nullable: true
+          description: Title of the parent series when content.type is EPISODE; resolved with the diary page cards.
+        seriesPosterPath:
+          type: string
+          nullable: true
+          description: Poster path for the parent series when content.type is EPISODE; resolved with the diary page cards.
         comment: { type: string, nullable: true }
         score: { type: integer, nullable: true }
         watchedDate: { type: string, format: date, nullable: true }
@@ -9153,6 +9324,36 @@ components:
         status: { $ref: "#/components/schemas/ReportCaseStatus" }
         submittedAt: { type: string, format: date-time }
       description: Confirmação sem caseId, snapshot ou notas internas; reporter não possui endpoint de histórico.
+    AdminBootstrapRequestDTO:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 60, pattern: "^[^@]+$" }
+    AdminBootstrapResponseDTO:
+      type: object
+      required: [id, username, role]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [ADMIN] }
+    AdminTestUserCreationDTO:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 60, pattern: "^[^@]+$" }
+        name: { type: string, maxLength: 120, nullable: true, description: Se omitido ou em branco, usa username. }
+        password:
+          type: string
+          minLength: 16
+          description: Deve conter maiúscula, minúscula e dígito, ter no mínimo 16 caracteres e no máximo 72 bytes UTF-8; enviada por HTTPS e armazenada somente como hash.
+    AdminTestUserCreatedDTO:
+      type: object
+      required: [id, username, email, created]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email: { type: string, format: email, description: Endereço sintético em watchwise.invalid; não recebe e-mails. }
+        created: { type: boolean, description: True when this request created the account; false for an idempotent retry. }
     AdminReportCaseDTO:
       type: object
       required: [id, targetType, targetId, status, submissionsCount, createdAt, updatedAt]

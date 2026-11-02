@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.dto;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 
 import java.time.LocalDateTime;
@@ -9,6 +10,7 @@ import java.util.UUID;
 
 public record UserListDetailViewResponseDTO(
         UUID id,
+        UserPreviewDTO owner,
         String name,
         String description,
         UserListVisibility visibility,

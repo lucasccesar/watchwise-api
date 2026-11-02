@@ -134,6 +134,48 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         String getSource();
     }
 
+    @Query(value = """
+            SELECT review_id, source
+            FROM (
+                SELECT d.id AS review_id, 'DIARY' AS source,
+                       COALESCE(d.watched_date::timestamp, d.created_at AT TIME ZONE 'UTC') AS activity_at
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('MOVIE', 'EPISODE')
+                  AND d.comment IS NOT NULL AND btrim(d.comment) <> ''
+                UNION ALL
+                SELECT r.id AS review_id, 'CONTENT_REVIEW' AS source,
+                       COALESCE(r.source_published_at AT TIME ZONE 'UTC',
+                                r.source_published_on::timestamp,
+                                r.created_at AT TIME ZONE 'UTC') AS activity_at
+                FROM content_reviews r
+                WHERE r.user_id = :userId
+                  AND r.content_type IN ('SERIES', 'SEASON')
+                  AND r.publication_kind = 'WRITTEN_REVIEW'
+                  AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
+            ) reviews
+            ORDER BY activity_at DESC, review_id DESC
+            """, countQuery = """
+            SELECT COUNT(*)
+            FROM (
+                SELECT d.id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('MOVIE', 'EPISODE')
+                  AND d.comment IS NOT NULL AND btrim(d.comment) <> ''
+                UNION ALL
+                SELECT r.id
+                FROM content_reviews r
+                WHERE r.user_id = :userId
+                  AND r.content_type IN ('SERIES', 'SEASON')
+                  AND r.publication_kind = 'WRITTEN_REVIEW'
+                  AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
+            ) reviews
+            """, nativeQuery = true)
+    Page<ContentReviewKey> findUserReviewKeys(@Param("userId") UUID userId, Pageable pageable);
+
     default Page<ContentReviewKey> findContentReviewKeys(
             UUID contentId, UUID viewerId, Pageable pageable) {
         return findContentReviewKeys(contentId, viewerId, ContentReviewSort.RECENT.name(), pageable);

@@ -30,7 +30,9 @@ public record ContentReviewResponseDTO(
         long commentsCount,
         Boolean likedByMe,
         List<UserPreviewDTO> watchedWith,
-        ContentCardDTO card
+        ContentCardDTO card,
+        String seriesTitle,
+        String seriesPosterPath
 ) {
     public static ContentReviewResponseDTO fromDiary(DiaryEntryResponseDTO entry) {
         return fromDiary(entry, null);
@@ -41,7 +43,8 @@ public record ContentReviewResponseDTO(
                 entry.id(), ContentReviewSource.DIARY, entry.userId(), reviewer, entry.content(), entry.comment(),
                 entry.score(), entry.watchedDate(), entry.watchNumber(), entry.watchedInTheater(),
                 entry.customPosterUrl(), entry.ignore(), entry.createdAt(), entry.updatedAt(), entry.likesCount(),
-                entry.commentsCount(), entry.likedByMe(), entry.watchedWith(), entry.card());
+                entry.commentsCount(), entry.likedByMe(), entry.watchedWith(), entry.card(),
+                entry.seriesTitle(), entry.seriesPosterPath());
     }
 
     public static ContentReviewResponseDTO fromContentReview(
@@ -56,13 +59,21 @@ public record ContentReviewResponseDTO(
                         ? review.getSourcePublishedOn().atStartOfDay()
                         : LocalDateTime.ofInstant(review.getCreatedAt(), ZoneOffset.UTC),
                 LocalDateTime.ofInstant(review.getUpdatedAt(), ZoneOffset.UTC),
-                likesCount, commentsCount, likedByMe, List.of(), null);
+                likesCount, commentsCount, likedByMe, List.of(), null, null, null);
     }
 
     public ContentReviewResponseDTO withCard(ContentCardDTO card) {
         return new ContentReviewResponseDTO(
                 id, source, userId, reviewer, content, comment, score, watchedDate, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
+    }
+
+    public ContentReviewResponseDTO withSeriesPresentation(String title, String posterPath) {
+        return new ContentReviewResponseDTO(
+                id, source, userId, reviewer, content, comment, score, watchedDate, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                title, posterPath);
     }
 
     public ContentReviewResponseDTO(UUID id, ContentReviewSource source, UUID userId, ContentRefDTO content,
@@ -70,6 +81,16 @@ public record ContentReviewResponseDTO(
             String customPosterUrl, Boolean ignore, LocalDateTime createdAt, LocalDateTime updatedAt,
             Integer likesCount, Boolean likedByMe, List<UserPreviewDTO> watchedWith) {
         this(id, source, userId, null, content, comment, score, watchedDate, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, watchedWith, null);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, watchedWith, null, null, null);
+    }
+
+    public ContentReviewResponseDTO(UUID id, ContentReviewSource source, UUID userId, UserPreviewDTO reviewer,
+            ContentRefDTO content, String comment, Integer score, LocalDate watchedDate, Integer watchNumber,
+            Boolean watchedInTheater, String customPosterUrl, Boolean ignore, LocalDateTime createdAt,
+            LocalDateTime updatedAt, Integer likesCount, long commentsCount, Boolean likedByMe,
+            List<UserPreviewDTO> watchedWith, ContentCardDTO card) {
+        this(id, source, userId, reviewer, content, comment, score, watchedDate, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                null, null);
     }
 }

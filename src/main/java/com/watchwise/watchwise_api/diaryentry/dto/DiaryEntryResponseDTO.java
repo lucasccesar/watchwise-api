@@ -28,24 +28,43 @@ public record DiaryEntryResponseDTO(
         long commentsCount,
         Boolean likedByMe,
         List<UserPreviewDTO> watchedWith,
-        ContentCardDTO card
+        ContentCardDTO card,
+        String seriesTitle,
+        String seriesPosterPath
 ) {
     public DiaryEntryResponseDTO withCustomPosterUrl(String customPosterUrl) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
     }
 
     public DiaryEntryResponseDTO withCommentsCount(long commentsCount) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
     }
 
     public DiaryEntryResponseDTO withCard(ContentCardDTO card) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
+    }
+
+    public DiaryEntryResponseDTO withSeriesTitle(String seriesTitle) {
+        return new DiaryEntryResponseDTO(
+                id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
+    }
+
+    public DiaryEntryResponseDTO withSeriesPosterPath(String seriesPosterPath) {
+        return new DiaryEntryResponseDTO(
+                id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath);
     }
 
     public DiaryEntryResponseDTO(UUID id, UUID userId, ContentRefDTO content, String comment, Integer score,
@@ -53,7 +72,7 @@ public record DiaryEntryResponseDTO(
             Boolean ignore, LocalDateTime createdAt, LocalDateTime updatedAt, Integer likesCount,
             Boolean likedByMe) {
         this(id, userId, content, comment, score, watchedDate, null, watchNumber, watchedInTheater, customPosterUrl,
-                ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, List.of(), null);
+                ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, List.of(), null, null, null);
     }
 
     public DiaryEntryResponseDTO(UUID id, UUID userId, ContentRefDTO content, String comment, Integer score,
@@ -61,7 +80,7 @@ public record DiaryEntryResponseDTO(
             Boolean ignore, LocalDateTime createdAt, LocalDateTime updatedAt, Integer likesCount,
             Boolean likedByMe, List<UserPreviewDTO> watchedWith) {
         this(id, userId, content, comment, score, watchedDate, null, watchNumber, watchedInTheater, customPosterUrl,
-                ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, watchedWith, null);
+                ignore, createdAt, updatedAt, likesCount, 0L, likedByMe, watchedWith, null, null, null);
     }
 
     public DiaryEntryResponseDTO(UUID id, UUID userId, ContentRefDTO content, String comment, Integer score,
@@ -69,6 +88,7 @@ public record DiaryEntryResponseDTO(
             Boolean ignore, LocalDateTime createdAt, LocalDateTime updatedAt, Integer likesCount,
             long commentsCount, Boolean likedByMe, List<UserPreviewDTO> watchedWith, ContentCardDTO card) {
         this(id, userId, content, comment, score, watchedDate, null, watchNumber, watchedInTheater,
-                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card);
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                null, null);
     }
 }

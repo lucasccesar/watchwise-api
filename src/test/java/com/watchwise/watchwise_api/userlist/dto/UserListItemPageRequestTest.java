@@ -105,7 +105,8 @@ class UserListItemPageRequestTest {
         List<UserListDetailItemDTO> source = new ArrayList<>();
         source.add(visualItem(card(), null, LocalDateTime.now()));
         UserListDetailViewResponseDTO response = new UserListDetailViewResponseDTO(
-                UUID.randomUUID(), "List", null, UserListVisibility.PUBLIC, 0.0,
+                UUID.randomUUID(), new UserPreviewDTO(UUID.randomUUID(), "owner", "Owner", null, true),
+                "List", null, UserListVisibility.PUBLIC, 0.0,
                 LocalDateTime.now(), LocalDateTime.now(), 0, false, 1L, 0L, 0L, null,
                 UserListItemScope.MOVIE_OR_SERIES, new PageResponseDTO<>(source, 1, 24, 1, 1, false));
 
