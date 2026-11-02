@@ -6,7 +6,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -16,10 +15,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Map;
+import java.util.Objects;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, DiaryEntryRepositoryCustom {
 
@@ -850,9 +852,8 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     List<DiaryEntry> findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType, Pageable pageable);
 
-    @EntityGraph(attributePaths = "content")
     @Query(value = """
-            SELECT d.*
+            SELECT d.id
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
@@ -861,10 +862,31 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                      d.created_at DESC,
                      d.id DESC
             """, nativeQuery = true)
-    List<DiaryEntry> findRecentHomeEntries(
+    List<UUID> findRecentHomeEntryIds(
             @Param("userId") UUID userId,
             @Param("contentTypes") Collection<String> contentTypes,
             Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.id IN :entryIds
+            """)
+    List<DiaryEntry> findHomeEntriesWithContentByIdIn(@Param("entryIds") Collection<UUID> entryIds);
+
+    default List<DiaryEntry> findRecentHomeEntries(
+            UUID userId, Collection<String> contentTypes, Pageable pageable) {
+        List<UUID> entryIds = findRecentHomeEntryIds(userId, contentTypes, pageable);
+        if (entryIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, DiaryEntry> entriesById = findHomeEntriesWithContentByIdIn(entryIds).stream()
+                .collect(Collectors.toMap(DiaryEntry::getId, entry -> entry));
+        return entryIds.stream()
+                .map(entriesById::get)
+                .filter(Objects::nonNull)
+                .toList();
+    }
 
     // --- Month/Year in Review + All Time Stats aggregations ---
 
