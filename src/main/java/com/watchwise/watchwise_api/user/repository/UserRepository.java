@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.user.repository;
 
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.entity.UserRole;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -34,6 +35,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByIdForListCreation(@Param("id") UUID id);
 
     Optional<User> findByUsernameIgnoreCase(String username);
+
+    boolean existsByRole(UserRole role);
 
     @Modifying
     @Query("update User u set u.sessionsInvalidatedAt = :at, u.authVersion = u.authVersion + 1 where u.id = :userId")

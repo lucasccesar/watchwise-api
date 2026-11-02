@@ -129,11 +129,11 @@ public class SecurityConfig {
                         .sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
                         .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh",
                                 "/auth/logout", "/auth/confirm-email", "/auth/confirm-email/resend",
-                                "/auth/password-reset/request", "/auth/password-reset/confirm"))
+                                "/auth/password-reset/request", "/auth/password-reset/confirm", "/admin/bootstrap"))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/logout-all").authenticated()
-                        .requestMatchers("/auth/**", "/error").permitAll()
+                        .requestMatchers("/auth/**", "/admin/bootstrap", "/error").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(jsonAuthenticationEntryPoint)
