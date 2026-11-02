@@ -36,7 +36,8 @@ public record FeedItemViewDTO(
         List<Top5EntryResponseDTO> top5,
         ContentCardDTO card,
         FeedTop5PreviewDTO top5Preview,
-        List<ContentCardDTO> pickTargetCards) {
+        List<ContentCardDTO> pickTargetCards,
+        String seriesTitle) {
 
     public FeedItemViewDTO {
         recentComments = recentComments == null ? null : List.copyOf(recentComments);
@@ -51,6 +52,14 @@ public record FeedItemViewDTO(
         this(item.eventType(), item.id(), item.user(), item.content(), item.top5Type(), item.score(), item.comment(),
                 item.likesCount(), item.likedByMe(), item.commentsCount(), item.recentComments(), item.watchedWith(),
                 item.pick(), item.picksTemplate(), item.dailyGameResult(), item.createdAt(), item.top5(), card,
-                top5Preview, pickTargetCards);
+                top5Preview, pickTargetCards, null);
+    }
+
+    public FeedItemViewDTO(FeedItemDTO item, ContentCardDTO card, FeedTop5PreviewDTO top5Preview,
+            List<ContentCardDTO> pickTargetCards, String seriesTitle) {
+        this(item.eventType(), item.id(), item.user(), item.content(), item.top5Type(), item.score(), item.comment(),
+                item.likesCount(), item.likedByMe(), item.commentsCount(), item.recentComments(), item.watchedWith(),
+                item.pick(), item.picksTemplate(), item.dailyGameResult(), item.createdAt(), item.top5(), card,
+                top5Preview, pickTargetCards, seriesTitle);
     }
 }

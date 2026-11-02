@@ -362,6 +362,11 @@ public class FeedServiceImpl implements FeedService {
                 continue;
             }
             addCardSpec(specsByCoordinate, item.content());
+            ContentCoordinate episodeSeriesCoordinate = episodeSeriesCoordinate(item);
+            if (episodeSeriesCoordinate != null) {
+                specsByCoordinate.putIfAbsent(episodeSeriesCoordinate,
+                        new ContentCardSpec(episodeSeriesCoordinate, null, null, null, null));
+            }
             if (item.top5() != null) {
                 item.top5().stream()
                         .map(Top5EntryResponseDTO::content)
@@ -423,7 +428,27 @@ public class FeedServiceImpl implements FeedService {
                         .filter(Objects::nonNull)
                         .map(content -> cardFor(content, cards))
                         .toList();
-        return new FeedItemViewDTO(item, contentCard, top5Preview, pickTargetCards);
+        return new FeedItemViewDTO(item, contentCard, top5Preview, pickTargetCards,
+                seriesTitleFor(item, cards));
+    }
+
+    private ContentCoordinate episodeSeriesCoordinate(FeedItemDTO item) {
+        if (item.eventType() != FeedEventType.DIARY_ENTRY || item.content() == null
+                || item.content().type() != ContentType.EPISODE
+                || item.content().seriesTmdbId() == null || item.content().seriesTmdbId().isBlank()) {
+            return null;
+        }
+        return new ContentCoordinate(ContentType.SERIES, item.content().seriesTmdbId(), null, null, null);
+    }
+
+    private String seriesTitleFor(FeedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
+        ContentCoordinate seriesCoordinate = episodeSeriesCoordinate(item);
+        if (seriesCoordinate == null || cards == null) {
+            return null;
+        }
+        ContentCardDTO seriesCard = cards.get(seriesCoordinate);
+        return seriesCard == null || seriesCard.title() == null || seriesCard.title().isBlank()
+                ? null : seriesCard.title();
     }
 
     private String firstBackdropPath(List<FeedItemViewDTO> items) {
