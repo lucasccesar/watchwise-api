@@ -1,8 +1,13 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
+import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.dto.SeasonCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.dto.SeriesCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
@@ -20,9 +25,14 @@ import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader;
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import lombok.RequiredArgsConstructor;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -42,7 +52,6 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class CalendarServiceImpl implements CalendarService {
 
     private final CalendarInterestReader interestReader;
@@ -51,15 +60,88 @@ public class CalendarServiceImpl implements CalendarService {
     private final CalendarScheduleSynchronizer scheduleSynchronizer;
     private final CalendarWatchedContentReader watchedContentReader;
     private final Clock clock;
+    private final TmdbCardMetadataResolver tmdbCardMetadataResolver;
     private final CalendarEventAssembler eventAssembler = new CalendarEventAssembler();
+
+    @Autowired
+    public CalendarServiceImpl(
+            CalendarInterestReader interestReader,
+            CalendarScheduleSnapshotStore snapshotStore,
+            CalendarScheduleProvider scheduleProvider,
+            CalendarScheduleSynchronizer scheduleSynchronizer,
+            CalendarWatchedContentReader watchedContentReader,
+            Clock clock,
+            TmdbCardMetadataResolver tmdbCardMetadataResolver) {
+        this.interestReader = interestReader;
+        this.snapshotStore = snapshotStore;
+        this.scheduleProvider = scheduleProvider;
+        this.scheduleSynchronizer = scheduleSynchronizer;
+        this.watchedContentReader = watchedContentReader;
+        this.clock = clock;
+        this.tmdbCardMetadataResolver = tmdbCardMetadataResolver;
+    }
+
+    CalendarServiceImpl(
+            CalendarInterestReader interestReader,
+            CalendarScheduleSnapshotStore snapshotStore,
+            CalendarScheduleProvider scheduleProvider,
+            CalendarScheduleSynchronizer scheduleSynchronizer,
+            CalendarWatchedContentReader watchedContentReader,
+            Clock clock) {
+        this(interestReader, snapshotStore, scheduleProvider, scheduleSynchronizer, watchedContentReader, clock, null);
+    }
 
     @Override
     public CalendarResponseDTO getMonth(UUID userId, YearMonth month) {
         CalendarReadResult read = readCalendar(userId);
+        List<CalendarEventDTO> events = eventAssembler.assemble(assemblyInput(read, month));
         return new CalendarResponseDTO(
                 month,
                 read.interest().preferredRegion(),
-                eventAssembler.assemble(assemblyInput(read, month)));
+                events,
+                resolveFirstBackdropPath(events, read.interest().preferredLanguage()));
+    }
+
+    private String resolveFirstBackdropPath(List<CalendarEventDTO> events, String language) {
+        if (events.isEmpty() || tmdbCardMetadataResolver == null) {
+            return null;
+        }
+
+        ContentCoordinate coordinate = coordinateFor(events.get(0).content());
+        if (coordinate == null) {
+            return null;
+        }
+
+        TmdbLookupResult<TmdbCardMetadata> lookup = tmdbCardMetadataResolver.resolve(coordinate, language);
+        if (lookup instanceof TmdbLookupResult.Found<TmdbCardMetadata> found) {
+            return TmdbImageUrlBuilder.backdropUrl(found.value().backdropPath());
+        }
+        return null;
+    }
+
+    private ContentCoordinate coordinateFor(CalendarEventContentDTO content) {
+        if (content instanceof MovieCalendarContentDTO movie) {
+            return isBlank(movie.tmdbId())
+                    ? null
+                    : new ContentCoordinate(ContentType.MOVIE, movie.tmdbId(), null, null, null);
+        }
+        if (content == null) {
+            return null;
+        }
+
+        String seriesTmdbId = switch (content) {
+            case EpisodeCalendarContentDTO episode -> episode.seriesTmdbId();
+            case SeasonCalendarContentDTO season -> season.seriesTmdbId();
+            case SeriesCalendarContentDTO series -> series.seriesTmdbId();
+            default -> null;
+        };
+        return isBlank(seriesTmdbId)
+                ? null
+                : new ContentCoordinate(ContentType.SERIES, seriesTmdbId, null, null, null);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     @Override

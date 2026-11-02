@@ -6,5 +6,10 @@ import java.util.List;
 public record CalendarResponseDTO(
         YearMonth month,
         String region,
-        List<CalendarEventDTO> events) {
+        List<CalendarEventDTO> events,
+        String backdropPath) {
+
+    public CalendarResponseDTO(YearMonth month, String region, List<CalendarEventDTO> events) {
+        this(month, region, events, null);
+    }
 }
