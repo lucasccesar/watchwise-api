@@ -128,6 +128,7 @@ public class ContentCardAssembler {
                         spec -> new CardData(
                                 spec,
                                 metadataByCoordinate.get(spec.coordinate()),
+                                metadataByCoordinate.get(seriesCoordinateFor(spec)),
                                 resolution.existingContentIdsByCoordinate().get(spec.coordinate()),
                                 resolution.statesByCoordinate().get(spec.coordinate()),
                                 statsByContentId,
@@ -158,13 +159,31 @@ public class ContentCardAssembler {
             return metadataByCoordinate;
         }
 
-        List<CompletableFuture<CardMetadata>> futures = specs.stream()
+        Set<ContentCoordinate> seriesBackdropCoordinates = specs.stream()
+                .map(this::seriesCoordinateFor)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<ContentCoordinate, ContentCardSpec> specsByCoordinate = specs.stream()
+                .collect(Collectors.toMap(
+                        ContentCardSpec::coordinate,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+        for (ContentCoordinate seriesCoordinate : seriesBackdropCoordinates) {
+            specsByCoordinate.putIfAbsent(seriesCoordinate,
+                    new ContentCardSpec(seriesCoordinate, null, null, null, null));
+        }
+        List<ContentCardSpec> metadataSpecs = List.copyOf(specsByCoordinate.values());
+
+        List<CompletableFuture<CardMetadata>> futures = metadataSpecs.stream()
                 .map(spec -> CompletableFuture.supplyAsync(
-                        () -> metadata(spec, context, requestedFields), metadataResolutionExecutor))
+                        () -> metadata(spec, context, requestedFields,
+                                seriesBackdropCoordinates.contains(spec.coordinate())),
+                        metadataResolutionExecutor))
                 .toList();
-        for (int index = 0; index < specs.size(); index++) {
+        for (int index = 0; index < metadataSpecs.size(); index++) {
             try {
-                metadataByCoordinate.put(specs.get(index).coordinate(), futures.get(index).join());
+                metadataByCoordinate.put(metadataSpecs.get(index).coordinate(), futures.get(index).join());
             } catch (CompletionException exception) {
                 Throwable cause = exception.getCause();
                 if (cause instanceof RuntimeException runtimeException) throw runtimeException;
@@ -230,9 +249,10 @@ public class ContentCardAssembler {
     private CardMetadata metadata(
             ContentCardSpec spec,
             ContentCardContext context,
-            Set<ContentCardFieldSet> requestedFields) {
+            Set<ContentCardFieldSet> requestedFields,
+            boolean forceTmdbLookup) {
         if (!requestedFields.contains(ContentCardFieldSet.BASIC_METADATA)
-                || hasAllKnownMetadata(spec)) {
+                || (!forceTmdbLookup && hasAllKnownMetadata(spec))) {
             return new CardMetadata(null, ContentPreviewStatus.AVAILABLE);
         }
 
@@ -281,12 +301,15 @@ public class ContentCardAssembler {
         ContentCardSpec spec = data.spec();
         ContentCoordinate coordinate = spec.coordinate();
         TmdbCardMetadata metadata = data.metadata().metadata();
+        TmdbCardMetadata backdropMetadata = coordinate.type() == ContentType.EPISODE
+                ? data.seriesMetadata() == null ? null : data.seriesMetadata().metadata()
+                : metadata;
         String title = spec.title() != null ? spec.title() : metadataValue(metadata, TmdbCardMetadata::title);
         String posterPath = spec.posterPath() != null
                 ? spec.posterPath()
                 : metadataValue(metadata, TmdbCardMetadata::posterPath);
         String backdropPath = TmdbImageUrlBuilder.backdropUrl(
-                metadataValue(metadata, TmdbCardMetadata::backdropPath));
+                metadataValue(backdropMetadata, TmdbCardMetadata::backdropPath));
         LocalDate releaseDate = spec.releaseDate() != null
                 ? spec.releaseDate()
                 : parseDate(metadataValue(metadata, TmdbCardMetadata::releaseDate));
@@ -371,6 +394,15 @@ public class ContentCardAssembler {
         return metadata == null ? null : getter.apply(metadata);
     }
 
+    private ContentCoordinate seriesCoordinateFor(ContentCardSpec spec) {
+        ContentCoordinate coordinate = spec.coordinate();
+        return coordinate.type() == ContentType.EPISODE
+                && coordinate.seriesTmdbId() != null
+                && !coordinate.seriesTmdbId().isBlank()
+                ? new ContentCoordinate(ContentType.SERIES, coordinate.seriesTmdbId(), null, null, null)
+                : null;
+    }
+
     private LocalDate parseDate(String value) {
         if (value == null || value.isBlank()) {
             return null;
@@ -390,6 +422,7 @@ public class ContentCardAssembler {
     private record CardData(
             ContentCardSpec spec,
             CardMetadata metadata,
+            CardMetadata seriesMetadata,
             UUID contentId,
             ContentViewerStateDTO resolutionState,
             Map<UUID, ContentStatsResponseDTO> statsByContentId,
