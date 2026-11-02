@@ -104,7 +104,8 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int HOME_NEXT_EPISODES_LIMIT = 4;
     private static final int HOME_UPCOMING_RELEASES_LIMIT = 6;
     private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
-    private static final Set<ContentType> HOME_WATCHED_CONTENT_TYPES = Set.of(ContentType.MOVIE, ContentType.EPISODE);
+    private static final Set<String> HOME_WATCHED_CONTENT_TYPES =
+            Set.of(ContentType.MOVIE.name(), ContentType.EPISODE.name());
     private static final Set<ContentCardFieldSet> HOME_CARD_FIELDS = Set.of(
             ContentCardFieldSet.BASIC_METADATA,
             ContentCardFieldSet.TMDB_VOTE_AVERAGE,
@@ -343,17 +344,7 @@ public class SummaryServiceImpl implements SummaryService {
     }
 
     private List<DiaryEntryResponseDTO> computeRecentlyWatched(UUID userId) {
-        PageRequest topN = PageRequest.of(0, HOME_RECENTLY_WATCHED_LIMIT);
-
-        Stream<DiaryEntry> movies = diaryEntryRepository
-                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.MOVIE, topN).stream();
-        Stream<DiaryEntry> episodes = diaryEntryRepository
-                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.EPISODE, topN).stream();
-
-        List<DiaryEntry> entries = Stream.concat(movies, episodes)
-                .sorted(Comparator.comparing(DiaryEntry::getCreatedAt).reversed())
-                .limit(HOME_RECENTLY_WATCHED_LIMIT)
-                .toList();
+        List<DiaryEntry> entries = loadHomeRecentlyWatchedEntries(userId);
         return toDiaryEntryResponseDtos(entries, loadPostersForOwner(userId, entries));
     }
 

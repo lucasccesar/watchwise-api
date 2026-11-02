@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -849,15 +850,20 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     List<DiaryEntry> findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType, Pageable pageable);
 
-    @Query("""
-            SELECT d FROM DiaryEntry d JOIN FETCH d.content
-            WHERE d.user.id = :userId
-            AND d.content.type IN :contentTypes
-            ORDER BY d.createdAt DESC, d.id DESC
-            """)
+    @EntityGraph(attributePaths = "content")
+    @Query(value = """
+            SELECT d.*
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+              AND c.type IN (:contentTypes)
+            ORDER BY COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at) DESC,
+                     d.created_at DESC,
+                     d.id DESC
+            """, nativeQuery = true)
     List<DiaryEntry> findRecentHomeEntries(
             @Param("userId") UUID userId,
-            @Param("contentTypes") Collection<ContentType> contentTypes,
+            @Param("contentTypes") Collection<String> contentTypes,
             Pageable pageable);
 
     // --- Month/Year in Review + All Time Stats aggregations ---
