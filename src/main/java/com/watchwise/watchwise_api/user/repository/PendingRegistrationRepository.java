@@ -19,6 +19,8 @@ public interface PendingRegistrationRepository extends JpaRepository<PendingRegi
 
     long countByEmailIgnoreCaseAndExpiresAtAfter(String email, LocalDateTime now);
 
+    boolean existsByUsernameIgnoreCaseAndExpiresAtAfter(String username, LocalDateTime now);
+
     @Query("SELECT r.email FROM PendingRegistration r WHERE r.confirmationTokenHash = :tokenHash")
     Optional<String> findEmailByConfirmationTokenHash(@Param("tokenHash") String tokenHash);
 
