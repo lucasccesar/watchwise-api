@@ -300,11 +300,12 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
             return Map.of();
         }
         EnumSet<ContentCardFieldSet> fields = EnumSet.noneOf(ContentCardFieldSet.class);
-        if (sort == WatchlistSort.TITLE || hasMissingRuntime(candidates)) {
+        if (sort == WatchlistSort.TITLE || sort == WatchlistSort.RATING || hasMissingRuntime(candidates)) {
             fields.add(ContentCardFieldSet.BASIC_METADATA);
         }
         if (sort == WatchlistSort.RATING) {
             fields.add(ContentCardFieldSet.STATS);
+            fields.add(ContentCardFieldSet.TMDB_VOTE_AVERAGE);
         }
         if (fields.isEmpty()) {
             return Map.of();
@@ -332,8 +333,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                         left.releaseDate(), right.releaseDate(), descending);
                 case RUNTIME -> compareNullable(
                         runtimeMinutes(sortCards, left), runtimeMinutes(sortCards, right), descending);
-                case RATING -> compareNullable(
-                        rating(sortCards, left), rating(sortCards, right), descending);
+                case RATING -> compareRatings(sortCards, left, right, descending);
                 case TITLE -> compareNullable(
                         title(sortCards, left), title(sortCards, right), descending);
             };
@@ -382,6 +382,25 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private Double rating(Map<ContentCoordinate, ContentCardDTO> cards, ViewCandidate candidate) {
         ContentCardDTO card = cards.get(ContentCoordinate.from(candidate.entry().getContent()));
         return card == null || card.stats() == null ? null : card.stats().averageScore();
+    }
+
+    private int compareRatings(
+            Map<ContentCoordinate, ContentCardDTO> cards,
+            ViewCandidate left,
+            ViewCandidate right,
+            boolean descending) {
+        int communityCompared = compareNullable(
+                rating(cards, left), rating(cards, right), descending);
+        if (communityCompared != 0) {
+            return communityCompared;
+        }
+        return compareNullable(
+                tmdbVoteAverage(cards, left), tmdbVoteAverage(cards, right), descending);
+    }
+
+    private Double tmdbVoteAverage(Map<ContentCoordinate, ContentCardDTO> cards, ViewCandidate candidate) {
+        ContentCardDTO card = cards.get(ContentCoordinate.from(candidate.entry().getContent()));
+        return card == null ? null : card.tmdbVoteAverage();
     }
 
     private String title(Map<ContentCoordinate, ContentCardDTO> cards, ViewCandidate candidate) {
