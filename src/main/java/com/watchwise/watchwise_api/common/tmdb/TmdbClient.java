@@ -637,20 +637,27 @@ public class TmdbClient {
 
     public TmdbLookupResult<TmdbContentImages> getMovieImages(String tmdbId) {
         return cachedLookup(tmdbContentImagesCache, "movie|" + tmdbId,
-                () -> callWithRetry(() -> tmdbRestClient.get()
+                () -> callWithRetry(() -> requireContentImagesBody(tmdbRestClient.get()
                                 .uri("/movie/{id}/images", tmdbId)
                                 .retrieve()
-                                .body(TmdbContentImages.class),
+                                .body(TmdbContentImages.class)),
                         "movie images " + tmdbId));
     }
 
     public TmdbLookupResult<TmdbContentImages> getTvImages(String tmdbId) {
         return cachedLookup(tmdbContentImagesCache, "tv|" + tmdbId,
-                () -> callWithRetry(() -> tmdbRestClient.get()
+                () -> callWithRetry(() -> requireContentImagesBody(tmdbRestClient.get()
                                 .uri("/tv/{id}/images", tmdbId)
                                 .retrieve()
-                                .body(TmdbContentImages.class),
+                                .body(TmdbContentImages.class)),
                         "tv images " + tmdbId));
+    }
+
+    private TmdbContentImages requireContentImagesBody(TmdbContentImages images) {
+        if (images == null) {
+            throw new RestClientException("TMDB images response has no body");
+        }
+        return images;
     }
 
     private <T> TmdbLookupResult<TmdbSearchPage<T>> loadDiscoveryPage(
