@@ -427,7 +427,8 @@ public class TmdbClient {
                 : (int) Math.round(details.episodeRunTime().stream().mapToInt(Integer::intValue).average().orElse(0));
         return new TmdbCardMetadata(
                 details.name(), details.posterPath(), details.firstAirDate(), runtime,
-                genreNames(details.genres()), details.numberOfSeasons(), details.backdropPath(), details.voteAverage());
+                genreNames(details.genres()), details.numberOfSeasons(), details.backdropPath(),
+                details.voteAverage(), details.numberOfEpisodes());
     }
 
     private TmdbCardMetadata seasonCardMetadata(TmdbSeasonFullDetails details) {

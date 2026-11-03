@@ -11,6 +11,9 @@ import org.mapstruct.ReportingPolicy;
 public interface WatchlistEntryMapper {
 
     @Mapping(target = "releaseDate", ignore = true)
+    @Mapping(target = "numberOfEpisodes", ignore = true)
+    @Mapping(target = "tmdbVoteAverage", ignore = true)
+    @Mapping(target = "communityAverageScore", ignore = true)
     WatchlistEntryResponseDTO watchlistEntryToResponseDto(WatchlistEntry entry);
 
 }

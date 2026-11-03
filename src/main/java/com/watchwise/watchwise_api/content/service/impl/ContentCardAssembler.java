@@ -317,6 +317,9 @@ public class ContentCardAssembler {
                 ? spec.runtimeMinutes()
                 : metadata == null ? null : metadata.runtimeMinutes();
         Integer numberOfSeasons = metadata == null ? null : metadata.numberOfSeasons();
+        Integer numberOfEpisodes = coordinate.type() == ContentType.SERIES && metadata != null
+                ? metadata.numberOfEpisodes()
+                : null;
         List<String> genres = spec.genres() != null
                 ? spec.genres()
                 : metadata == null ? null : metadata.genres();
@@ -352,7 +355,7 @@ public class ContentCardAssembler {
                 runtimeMinutes,
                 null,
                 numberOfSeasons,
-                null,
+                numberOfEpisodes,
                 genres,
                 stats,
                 viewerState,

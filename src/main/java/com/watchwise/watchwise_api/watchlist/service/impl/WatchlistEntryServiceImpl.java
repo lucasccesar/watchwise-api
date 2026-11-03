@@ -95,8 +95,13 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
     private static final int VIEW_DEFAULT_PAGE_SIZE = 30;
+    private static final Set<ContentCardFieldSet> RESPONSE_CARD_FIELDS = Set.of(
+            ContentCardFieldSet.BASIC_METADATA,
+            ContentCardFieldSet.TMDB_VOTE_AVERAGE,
+            ContentCardFieldSet.STATS);
     private static final Set<ContentCardFieldSet> VIEW_CARD_FIELDS = Set.of(
             ContentCardFieldSet.BASIC_METADATA,
+            ContentCardFieldSet.TMDB_VOTE_AVERAGE,
             ContentCardFieldSet.STATS,
             ContentCardFieldSet.SOCIAL_METADATA);
 
@@ -115,8 +120,14 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 : watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type, pageRequest);
         List<WatchlistEntry> entriesForDateResolution = entriesForDateResolution(userId, type, entries);
         var dates = releaseDateSnapshotService.resolve(target, entriesForDateResolution).releaseDates();
-        Page<WatchlistEntryResponseDTO> mapped = entries.map(entry -> withReleaseDate(
-                watchlistEntryMapper.watchlistEntryToResponseDto(entry), dates.get(entry.getId())));
+        Map<ContentCoordinate, ContentCardDTO> cards = assembleResponseCards(target, userId, entries.getContent());
+        Page<WatchlistEntryResponseDTO> mapped = entries.map(entry -> {
+            WatchlistEntryResponseDTO response = withReleaseDate(
+                    watchlistEntryMapper.watchlistEntryToResponseDto(entry), dates.get(entry.getId()));
+            Content content = entry.getContent();
+            ContentCardDTO card = content == null ? null : cards.get(ContentCoordinate.from(content));
+            return withCardEnrichment(response, card);
+        });
         long upcomingCount = releaseDateSnapshotService.countUpcoming(
                 userId, type, target.getPreferredRegion(), LocalDate.now());
         return WatchlistPageResponseDTO.of(mapped, upcomingCount);
@@ -421,6 +432,23 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         return assembleCards(target, ownerId, candidates, VIEW_CARD_FIELDS);
     }
 
+    private Map<ContentCoordinate, ContentCardDTO> assembleResponseCards(
+            User target, UUID ownerId, List<WatchlistEntry> entries) {
+        List<ContentCardSpec> specs = entries.stream()
+                .map(WatchlistEntry::getContent)
+                .filter(Objects::nonNull)
+                .map(content -> new ContentCardSpec(ContentCoordinate.from(content), null, null, null, null))
+                .toList();
+        if (specs.isEmpty()) {
+            return Map.of();
+        }
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs,
+                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), ownerId, null),
+                RESPONSE_CARD_FIELDS);
+        return cards == null ? Map.of() : cards;
+    }
+
     private Map<ContentCoordinate, ContentCardDTO> assembleCards(
             User target,
             UUID ownerId,
@@ -468,7 +496,21 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
             WatchlistEntryResponseDTO response, LocalDate releaseDate) {
         return new WatchlistEntryResponseDTO(
                 response.id(), response.type(), response.content(), response.position(),
-                response.createdAt(), response.updatedAt(), releaseDate);
+                response.createdAt(), response.updatedAt(), releaseDate,
+                response.numberOfEpisodes(), response.tmdbVoteAverage(), response.communityAverageScore());
+    }
+
+    private WatchlistEntryResponseDTO withCardEnrichment(
+            WatchlistEntryResponseDTO response, ContentCardDTO card) {
+        Double communityAverageScore = card == null || card.stats() == null
+                ? null
+                : card.stats().averageScore();
+        return new WatchlistEntryResponseDTO(
+                response.id(), response.type(), response.content(), response.position(),
+                response.createdAt(), response.updatedAt(), response.releaseDate(),
+                card == null ? null : card.numberOfEpisodes(),
+                card == null ? null : card.tmdbVoteAverage(),
+                communityAverageScore);
     }
 
     private void assertCanViewWatchlist(UUID viewerId, UUID targetUserId, User target) {
