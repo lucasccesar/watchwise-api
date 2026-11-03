@@ -1,8 +1,11 @@
 package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.content.dto.ContentImageDTO;
 import com.watchwise.watchwise_api.content.dto.ContentEpisodeSelectionDTO;
 import com.watchwise.watchwise_api.content.dto.ContentSeasonSelectionDTO;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
+import com.watchwise.watchwise_api.content.service.ContentImagesService;
 import com.watchwise.watchwise_api.content.service.ContentSelectionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +25,7 @@ import java.util.UUID;
 public class ContentSelectionController {
 
     private final ContentSelectionService contentSelectionService;
+    private final ContentImagesService contentImagesService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.search.max-requests}")
@@ -48,6 +52,24 @@ public class ContentSelectionController {
         checkRateLimit(viewerId);
         return ResponseEntity.ok(
                 contentSelectionService.listEpisodes(viewerId, seriesTmdbId, seasonNumber, includeUnreleased));
+    }
+
+    @GetMapping("/contents/selection/{type}/{tmdbId}/posters")
+    public ResponseEntity<List<ContentImageDTO>> listPosters(
+            @PathVariable MovieOrSeriesType type,
+            @PathVariable String tmdbId) {
+        UUID viewerId = getCurrentUserId();
+        checkRateLimit(viewerId);
+        return ResponseEntity.ok(contentImagesService.listPosters(type, tmdbId));
+    }
+
+    @GetMapping("/contents/selection/{type}/{tmdbId}/backdrops")
+    public ResponseEntity<List<ContentImageDTO>> listBackdrops(
+            @PathVariable MovieOrSeriesType type,
+            @PathVariable String tmdbId) {
+        UUID viewerId = getCurrentUserId();
+        checkRateLimit(viewerId);
+        return ResponseEntity.ok(contentImagesService.listBackdrops(type, tmdbId));
     }
 
     private void checkRateLimit(UUID viewerId) {

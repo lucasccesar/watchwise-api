@@ -16,6 +16,7 @@ public final class CacheBudgetAllocator {
             "tmdbSeasonFullDetailsCache",
             "tmdbEpisodeFullDetailsCache",
             "tmdbEpisodeImagesCache",
+            "tmdbContentImagesCache",
             "tmdbPersonAggregateCache",
             "tmdbPersonDetailsCache",
             "tmdbMovieReleaseDatesCache",

@@ -39,6 +39,13 @@ public class TmdbClient {
         this.imageTransport = imageTransport;
     }
 
+    private Cache<String, TmdbLookupResult<TmdbContentImages>> tmdbContentImagesCache;
+
+    @Autowired
+    void setTmdbContentImagesCache(Cache<String, TmdbLookupResult<TmdbContentImages>> tmdbContentImagesCache) {
+        this.tmdbContentImagesCache = tmdbContentImagesCache;
+    }
+
     public TmdbLookupResult<TmdbImageBytes> getImageBytes(String storedPath) {
         String path = normalizeImagePath(storedPath);
         return callWithRetry(() -> imageTransport.fetch(path), "image " + path);
@@ -626,6 +633,24 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbEpisodeImages.class),
                         "episode images " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
+    }
+
+    public TmdbLookupResult<TmdbContentImages> getMovieImages(String tmdbId) {
+        return cachedLookup(tmdbContentImagesCache, "movie|" + tmdbId,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri("/movie/{id}/images", tmdbId)
+                                .retrieve()
+                                .body(TmdbContentImages.class),
+                        "movie images " + tmdbId));
+    }
+
+    public TmdbLookupResult<TmdbContentImages> getTvImages(String tmdbId) {
+        return cachedLookup(tmdbContentImagesCache, "tv|" + tmdbId,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri("/tv/{id}/images", tmdbId)
+                                .retrieve()
+                                .body(TmdbContentImages.class),
+                        "tv images " + tmdbId));
     }
 
     private <T> TmdbLookupResult<TmdbSearchPage<T>> loadDiscoveryPage(
