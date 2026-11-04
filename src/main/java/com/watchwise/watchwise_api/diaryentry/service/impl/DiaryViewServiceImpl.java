@@ -119,7 +119,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                         null, null, null, null, null, null, null);
             }
             return new DiaryViewGroupedItemDTO("GROUPED", series, backdropPaths.get(row.seriesTmdbId()),
-                    row.groupType(), row.seasonCount(),
+                    row.groupType(), row.seasonCount(), row.seasonNumbers(),
                     row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
         });
     }

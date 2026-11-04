@@ -11,12 +11,14 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,7 +68,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 (rs, index) -> new GroupedDiaryViewKey(mapRow(rs, index), rs.getLong("group_size"),
                         ContentType.valueOf(rs.getString("group_type")),
                         rs.getObject("group_date", LocalDate.class), uuid(rs, "series_content_id"),
-                        rs.getString("series_key"), rs.getInt("season_count"), rs.getInt("episode_count"),
+                        rs.getString("series_key"), rs.getInt("season_count"),
+                        integerList(rs, "season_numbers"), rs.getInt("episode_count"),
                         rs.getObject("total_runtime", Long.class)));
         long total = jdbc.queryForObject(cte + " SELECT COUNT(*) FROM result", parameters, Long.class);
         return new PageImpl<>(rows, pageable, total);
@@ -123,8 +126,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                        p.anchor_diary_entry_id AS anchor_entry_id,
                        p.completed_on AS watched_date,
                        p.ordered_at,
-                       COALESCE(completion_tail.created_at, anchor.created_at) AS group_sort_at,
-                       COALESCE(completion_tail.id, anchor.id) AS group_sort_id,
+                       anchor.created_at AS group_sort_at,
+                       anchor.id AS group_sort_id,
                        rating.score AS score,
                        EXISTS (SELECT 1
                                FROM content_reviews review
@@ -140,21 +143,6 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                   AND rating.content_id = p.content_id
                 JOIN diary_entries anchor ON anchor.id = p.anchor_diary_entry_id
                                            AND anchor.user_id = p.user_id
-                LEFT JOIN LATERAL (
-                    SELECT candidate.created_at, candidate.id
-                    FROM diary_entries candidate
-                    JOIN contents episode ON episode.id = candidate.content_id
-                    WHERE candidate.user_id = p.user_id
-                      AND candidate.watch_number = p.watch_number
-                      AND episode.type = 'EPISODE'
-                      AND episode.series_tmdb_id = COALESCE(c.series_tmdb_id, c.tmdb_id)
-                      AND COALESCE((candidate.watched_at AT TIME ZONE 'UTC')::date,
-                                   candidate.watched_date, candidate.created_at::date)
-                          = COALESCE(p.completed_on, anchor.created_at::date)
-                      AND (p.content_type <> 'SEASON' OR episode.season_number = c.season_number)
-                    ORDER BY candidate.created_at ASC, candidate.id ASC
-                    LIMIT 1
-                ) completion_tail ON TRUE
                 JOIN user_series_history_states state
                   ON state.user_id = p.user_id
                  AND state.series_tmdb_id = COALESCE(c.series_tmdb_id, c.tmdb_id)
@@ -207,6 +195,20 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
 
     private UUID uuid(ResultSet resultSet, String column) throws SQLException {
         return resultSet.getObject(column, UUID.class);
+    }
+
+    private List<Integer> integerList(ResultSet resultSet, String column) throws SQLException {
+        Array sqlArray = resultSet.getArray(column);
+        if (sqlArray == null) {
+            return List.of();
+        }
+        try {
+            return Arrays.stream((Object[]) sqlArray.getArray())
+                    .map(Integer.class::cast)
+                    .toList();
+        } finally {
+            sqlArray.free();
+        }
     }
 
     private Instant instant(ResultSet resultSet, String column) throws SQLException {

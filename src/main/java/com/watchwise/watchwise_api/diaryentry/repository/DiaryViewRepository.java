@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public interface DiaryViewRepository {
@@ -24,7 +25,7 @@ public interface DiaryViewRepository {
 
     record GroupedDiaryViewKey(DiaryViewKey item, long groupSize, ContentType groupType,
             LocalDate groupDate, UUID seriesContentId, String seriesTmdbId,
-            int seasonCount, int episodeCount, Long totalRuntimeMinutes) { }
+            int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes) { }
 
     record DiaryViewKey(
             String kind,

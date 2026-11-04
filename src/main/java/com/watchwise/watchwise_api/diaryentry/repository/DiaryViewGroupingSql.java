@@ -44,6 +44,8 @@ final class DiaryViewGroupingSql {
                 ), metrics AS (
                     SELECT run_id, COUNT(*)::integer AS episode_count,
                            COUNT(DISTINCT season_number)::integer AS season_count,
+                           array_agg(DISTINCT season_number ORDER BY season_number)
+                               FILTER (WHERE season_number IS NOT NULL) AS season_numbers,
                            CASE WHEN COUNT(*) = COUNT(runtime_minutes) THEN SUM(runtime_minutes) END AS total_runtime
                     FROM metric_events GROUP BY run_id
                 ), result AS (
@@ -51,7 +53,9 @@ final class DiaryViewGroupingSql {
                            CASE r.type_rank WHEN 3 THEN 'SERIES' WHEN 2 THEN 'SEASON' ELSE 'EPISODE' END AS group_type,
                            sc.id AS series_content_id,
                            COALESCE(m.episode_count, 0) AS episode_count,
-                           COALESCE(m.season_count, 0) AS season_count, m.total_runtime
+                           COALESCE(m.season_count, 0) AS season_count,
+                           COALESCE(m.season_numbers, ARRAY[]::integer[]) AS season_numbers,
+                           m.total_runtime
                     FROM runs r JOIN numbered n ON n.position = r.first_position
                     LEFT JOIN metrics m ON m.run_id = r.run_id
                     LEFT JOIN contents sc ON sc.type = 'SERIES' AND sc.tmdb_id = n.series_key
@@ -61,8 +65,8 @@ final class DiaryViewGroupingSql {
 
     static String order() {
         return "group_sort_at DESC NULLS LAST, group_sort_id DESC NULLS LAST, " +
-                "CASE WHEN kind = 'PERSISTED_ENTRY' THEN 0 ELSE 1 END, " +
-                "CASE content_type WHEN 'EPISODE' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'SERIES' THEN 2 ELSE 3 END, " +
+                "CASE WHEN kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END, " +
+                "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END, " +
                 "ordered_at DESC, target_id DESC";
     }
 }
