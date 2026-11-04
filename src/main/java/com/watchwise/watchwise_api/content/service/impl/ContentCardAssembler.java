@@ -96,6 +96,7 @@ public class ContentCardAssembler {
 
         Set<ContentCardFieldSet> requestedFields = normalizedFields(fields);
         boolean viewerStateRequested = requestedFields.contains(ContentCardFieldSet.VIEWER_STATE)
+                || requestedFields.contains(ContentCardFieldSet.WATCHLIST_MEMBERSHIP)
                 || requestedFields.contains(ContentCardFieldSet.WATCHLIST_PROGRESS);
         UUID viewerId = viewerStateRequested ? context.viewerId() : null;
         List<ContentCoordinate> coordinates = distinctSpecs.stream()
@@ -332,6 +333,7 @@ public class ContentCardAssembler {
                         : data.statsByContentId().get(data.contentId()))
                 : null;
         ContentCardViewerStateDTO viewerState = requestedFields.contains(ContentCardFieldSet.VIEWER_STATE)
+                || requestedFields.contains(ContentCardFieldSet.WATCHLIST_MEMBERSHIP)
                 || requestedFields.contains(ContentCardFieldSet.WATCHLIST_PROGRESS)
                 ? toViewerState(data.resolutionState(), requestedFields)
                 : null;
@@ -376,6 +378,7 @@ public class ContentCardAssembler {
             return null;
         }
         boolean includeViewerState = requestedFields.contains(ContentCardFieldSet.VIEWER_STATE);
+        boolean includeWatchlistMembership = requestedFields.contains(ContentCardFieldSet.WATCHLIST_MEMBERSHIP);
         boolean includeWatchlistProgress = requestedFields.contains(ContentCardFieldSet.WATCHLIST_PROGRESS);
         return new ContentCardViewerStateDTO(
                 includeViewerState || includeWatchlistProgress ? state.watchStatus() : null,
@@ -384,7 +387,7 @@ public class ContentCardAssembler {
                 includeViewerState ? state.lastWatchNumber() : null,
                 includeViewerState ? state.watchedInTheater() : null,
                 includeViewerState ? state.playsCount() : null,
-                includeWatchlistProgress ? state.inWatchlist() : null,
+                includeWatchlistMembership || includeWatchlistProgress ? state.inWatchlist() : null,
                 includeWatchlistProgress ? state.dropped() : null,
                 includeWatchlistProgress ? state.watchedEpisodeCount() : null,
                 includeWatchlistProgress ? state.releasedEpisodeCount() : null,

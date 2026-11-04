@@ -54,6 +54,7 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
             ContentCardFieldSet.BASIC_METADATA,
             ContentCardFieldSet.STATS,
             ContentCardFieldSet.VIEWER_STATE,
+            ContentCardFieldSet.WATCHLIST_MEMBERSHIP,
             ContentCardFieldSet.SOCIAL_METADATA);
 
     private final UserListItemPageReader pageReader;

@@ -117,7 +117,8 @@ class UserListDetailViewServiceImplTest {
         assertEquals(VIEWER_ID, context.getValue().viewerId());
         assertEquals(OWNER_ID, context.getValue().posterUserId());
         assertEquals(Set.of(ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS,
-                ContentCardFieldSet.VIEWER_STATE, ContentCardFieldSet.SOCIAL_METADATA), fields.getValue());
+                ContentCardFieldSet.VIEWER_STATE, ContentCardFieldSet.WATCHLIST_MEMBERSHIP,
+                ContentCardFieldSet.SOCIAL_METADATA), fields.getValue());
         assertEquals(WatchStatus.WATCHED, movieCard.viewerState().watchStatus());
     }
 
