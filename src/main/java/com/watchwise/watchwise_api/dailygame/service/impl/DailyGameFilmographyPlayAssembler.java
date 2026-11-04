@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyActorReferenceDTO;
@@ -60,7 +61,7 @@ public class DailyGameFilmographyPlayAssembler {
                 continue;
             }
             DailyGameCandidateDTO candidate = matchingActorCandidate(attempt.candidate(), guessedActor.personTmdbId());
-            String profileUrl = candidate == null ? null : candidate.imageUrl();
+            String profileUrl = candidate == null ? null : TmdbImagePathBuilder.imagePath(candidate.imageUrl());
             actorViews.add(new DailyGameFilmographyActorViewDTO(
                     guessedActor.personTmdbId(), guessedActor.name(),
                     profileUrl,
@@ -137,7 +138,7 @@ public class DailyGameFilmographyPlayAssembler {
                     highlighted,
                     integer(raw.get("year")),
                     strings(raw.get("genres")),
-                    revealed ? string(raw.get("posterUrl")) : null,
+                    revealed ? TmdbImagePathBuilder.imagePath(string(raw.get("posterUrl"))) : null,
                     episodeCount,
                     string(raw.get("period")),
                     revealed ? string(raw.get("character")) : null,

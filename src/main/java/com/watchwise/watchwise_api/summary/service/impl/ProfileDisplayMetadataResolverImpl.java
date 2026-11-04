@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.summary.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
@@ -43,7 +43,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
                 return new ProfileHighlightContentDTO(
                         ContentType.MOVIE, content.getId(), content.getTmdbId(), null,
                         details.title(), releaseYearOf(details.releaseDate()),
-                        TmdbImageUrlBuilder.posterUrl(details.posterPath()), customPosterUrl);
+                        TmdbImagePathBuilder.posterPath(details.posterPath()), customPosterUrl);
             } catch (TmdbUnavailableException exception) {
                 return null;
             }
@@ -60,7 +60,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
                 return new ProfileHighlightContentDTO(
                         ContentType.SERIES, content.getId(), content.getTmdbId(), null,
                         details.name(), releaseYearOf(details.firstAirDate()),
-                        TmdbImageUrlBuilder.posterUrl(details.posterPath()), customPosterUrl);
+                        TmdbImagePathBuilder.posterPath(details.posterPath()), customPosterUrl);
             } catch (TmdbUnavailableException exception) {
                 return null;
             }
@@ -85,7 +85,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
             return new ProfileHighlightContentDTO(
                     ContentType.SERIES, null, null, seriesTmdbId,
                     details.name(), releaseYearOf(details.firstAirDate()),
-                    TmdbImageUrlBuilder.posterUrl(details.posterPath()),
+                    TmdbImagePathBuilder.posterPath(details.posterPath()),
                     posters == null ? null : posters.get(seriesTmdbId));
         } catch (TmdbUnavailableException exception) {
             return null;

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service;
 
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
@@ -184,7 +185,7 @@ public class DailyGameAttemptDetailsCodec {
                 nullableInteger(candidate.get("seasonNumber")),
                 nullableInteger(candidate.get("episodeNumber")),
                 string(candidate.get("title")),
-                string(candidate.get("imageUrl")),
+                TmdbImagePathBuilder.imagePath(string(candidate.get("imageUrl"))),
                 candidate.get("date") == null ? null : LocalDate.parse(string(candidate.get("date"))));
     }
 
@@ -256,7 +257,7 @@ public class DailyGameAttemptDetailsCodec {
         return new DailyGameFilmographyEntryDTO(
                 string(entry.get("workId")), string(entry.get("title")), bool(entry.get("revealed")),
                 bool(entry.get("highlighted")), nullableInteger(entry.get("year")),
-                strings(entry.get("genres")), string(entry.get("posterUrl")),
+                strings(entry.get("genres")), TmdbImagePathBuilder.imagePath(string(entry.get("posterUrl"))),
                 nullableInteger(entry.get("episodeCount")), string(entry.get("period")),
                 string(entry.get("character")), string(entry.get("entryKey")));
     }

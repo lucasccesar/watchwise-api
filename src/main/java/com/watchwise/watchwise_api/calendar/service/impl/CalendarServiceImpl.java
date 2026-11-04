@@ -26,7 +26,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -114,7 +114,7 @@ public class CalendarServiceImpl implements CalendarService {
 
         TmdbLookupResult<TmdbCardMetadata> lookup = tmdbCardMetadataResolver.resolve(coordinate, language);
         if (lookup instanceof TmdbLookupResult.Found<TmdbCardMetadata> found) {
-            return TmdbImageUrlBuilder.backdropUrl(found.value().backdropPath());
+            return TmdbImagePathBuilder.backdropPath(found.value().backdropPath());
         }
         return null;
     }

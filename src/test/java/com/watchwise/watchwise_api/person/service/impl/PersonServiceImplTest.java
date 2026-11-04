@@ -79,12 +79,12 @@ class PersonServiceImplTest {
         PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
 
         assertThat(result.person().name()).isEqualTo("Sigourney Weaver");
-        assertThat(result.person().profileUrl()).isEqualTo("https://image.tmdb.org/t/p/w185/sigourney.jpg");
+        assertThat(result.person().profileUrl()).isEqualTo("/sigourney.jpg");
         assertThat(result.person().isFollowing()).isTrue();
         assertThat(result.credits().content()).hasSize(2);
         assertThat(result.credits().content()).filteredOn(credit -> credit.tmdbId().equals("1")).singleElement()
                 .extracting("tmdbId", "title", "posterUrl", "releaseDate", "characters", "jobs", "participation")
-                .containsExactly("1", "Alien", "https://image.tmdb.org/t/p/w500/alien.jpg", "1979-05-25",
+                .containsExactly("1", "Alien", "/alien.jpg", "1979-05-25",
                         List.of("Ripley", "Ellen Ripley"), List.of("Director", "Producer"), PersonParticipation.ALL);
     }
 
@@ -203,7 +203,7 @@ class PersonServiceImplTest {
 
         assertThat(result).extracting(PersonCreditDTO::title, PersonCreditDTO::posterUrl,
                         PersonCreditDTO::releaseDate, PersonCreditDTO::participation)
-                .containsExactly("Recovered title", "https://image.tmdb.org/t/p/w500/recovered.jpg",
+                .containsExactly("Recovered title", "/recovered.jpg",
                         "2001-02-03", PersonParticipation.ALL);
     }
 

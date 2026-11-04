@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.person.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
@@ -66,7 +66,7 @@ public class PersonCreditViewAssembler {
                 state.lastWatchedDate(), state.lastWatchNumber(), state.watchedInTheater(), state.playsCount(),
                 state.inWatchlist(), state.dropped(), state.watchedEpisodeCount(), state.releasedEpisodeCount(),
                 state.currentRatingVersion(), state.reviewsCount(), state.reviewIds());
-        String posterUrl = TmdbImageUrlBuilder.posterUrl(credit.posterPath());
+        String posterUrl = TmdbImagePathBuilder.posterPath(credit.posterPath());
         ContentPreviewStatus previewStatus = isBlank(credit.title()) || posterUrl == null || credit.releaseDate() == null
                 ? ContentPreviewStatus.PARTIAL : ContentPreviewStatus.AVAILABLE;
         return new PersonCreditViewDTO(credit.tmdbId(), credit.type(), credit.title(), posterUrl, credit.releaseDate(),

@@ -56,14 +56,14 @@ class DailyChallengeResponseAssemblerTest {
                 challenge, result(0, DailyGameResultStatus.COMPLETED), legacyHints, true, true);
 
         assertThat(terminal.answer().imageUrl()).isEqualTo(switch (gameType) {
-            case MOVIE_BY_INFO, SERIES_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
+            case MOVIE_BY_INFO, SERIES_BY_INFO -> "/secret.jpg";
             case ACTOR_BY_MOVIE_FILMOGRAPHY, ACTOR_BY_SERIES_FILMOGRAPHY
-                    -> "https://image.tmdb.org/t/p/w185/secret.jpg";
+                    -> "/secret.jpg";
             default -> throw new IllegalStateException("Unexpected game type: " + gameType);
         });
         if (gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
                 || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY) {
-            assertThat(terminal.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w185/secret.jpg");
+            assertThat(terminal.imageUrl()).isEqualTo("/secret.jpg");
         }
     }
 
@@ -123,17 +123,10 @@ class DailyChallengeResponseAssemblerTest {
                 challenge, result(1, DailyGameResultStatus.COMPLETED));
 
         assertThat(open.visibleImageUrls()).containsExactly(
-                "https://image.tmdb.org/t/p/w300/third.jpg",
-                "https://image.tmdb.org/t/p/w300/second.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg");
+                "/third.jpg", "/second.jpg", "/first.jpg");
         assertThat(open.imageUrls()).isNull();
         assertThat(completed.imageUrls()).containsExactly(
-                "https://image.tmdb.org/t/p/w300/third.jpg",
-                "https://image.tmdb.org/t/p/w300/second.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg",
-                "https://image.tmdb.org/t/p/w300/fourth.jpg",
-                "https://image.tmdb.org/t/p/w300/fifth.jpg",
-                "https://image.tmdb.org/t/p/w300/sixth.jpg");
+                "/third.jpg", "/second.jpg", "/first.jpg", "/fourth.jpg", "/fifth.jpg", "/sixth.jpg");
     }
 
     @Test
@@ -173,7 +166,7 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(open.answer()).isNull();
         assertThat(terminal.answer()).satisfies(answer -> {
             assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
-            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
+            assertThat(answer.seriesPosterUrl()).isEqualTo("/poster.jpg");
             assertThat(answer.seriesYear()).isEqualTo(2008);
             assertThat(answer.title()).isEqualTo("Pilot");
         });
@@ -204,20 +197,20 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[imageUrl] Should Preserve The Absolute Url - When The Challenge Stores A Complete Tmdb Url")
-    void shouldPreserveTheAbsoluteUrlWhenTheChallengeStoresACompleteTmdbUrl() {
+    @DisplayName("[imageUrl] Should Return A TMDB Path - When The Challenge Stores A Complete Tmdb Url")
+    void shouldReturnATmdbPathWhenTheChallengeStoresACompleteTmdbUrl() {
         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
                 challenge("https://image.tmdb.org/t/p/w500/fight-club.jpg"), result());
 
-        assertThat(response.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/fight-club.jpg");
+        assertThat(response.imageUrl()).isEqualTo("/fight-club.jpg");
     }
 
     @Test
-    @DisplayName("[imageUrl] Should Build The Poster Url - When The Challenge Stores A Relative Tmdb Path")
-    void shouldBuildThePosterUrlWhenTheChallengeStoresARelativeTmdbPath() {
+    @DisplayName("[imageUrl] Should Preserve The TMDB Path - When The Challenge Stores A Relative Tmdb Path")
+    void shouldPreserveTheTmdbPathWhenTheChallengeStoresARelativeTmdbPath() {
         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(challenge("/fight-club.jpg"), result());
 
-        assertThat(response.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/fight-club.jpg");
+        assertThat(response.imageUrl()).isEqualTo("/fight-club.jpg");
     }
 
     @Test

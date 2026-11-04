@@ -100,7 +100,7 @@ class SearchServiceImplTest {
 
         assertThat(result.contents()).containsExactly(
                 new SearchContentDTO("348", MovieOrSeriesType.MOVIE, "Alien",
-                        "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
+                        "/alien.jpg", 1979));
         assertThat(result.people()).isEmpty();
         assertThat(result.lists()).isEmpty();
         assertThat(result.users()).isEmpty();
@@ -135,7 +135,7 @@ class SearchServiceImplTest {
 
         assertThat(result.contents()).containsExactly(
                 new SearchContentDTO("1396", MovieOrSeriesType.SERIES, "Breaking Bad",
-                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", null));
+                        "/breaking-bad.jpg", null));
         assertThat(result.people()).isEmpty();
     }
 
@@ -252,14 +252,14 @@ class SearchServiceImplTest {
 
         assertThat(result.contents()).containsExactly(
                 new SearchContentDTO("1", MovieOrSeriesType.SERIES, "Alien Nation",
-                        "https://image.tmdb.org/t/p/w500/tv.jpg", 1989),
+                        "/tv.jpg", 1989),
                 new SearchContentDTO("3", MovieOrSeriesType.MOVIE, "Alien",
-                        "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
+                        "/alien.jpg", 1979));
         assertThat(result.people()).containsExactly(
                 new SearchPersonDTO("2", "Sigourney Weaver",
-                        "https://image.tmdb.org/t/p/w185/sigourney.jpg"),
+                        "/sigourney.jpg"),
                 new SearchPersonDTO("5", "Ridley Scott",
-                        "https://image.tmdb.org/t/p/w185/ridley.jpg"));
+                        "/ridley.jpg"));
     }
 
     @Test
@@ -346,7 +346,7 @@ class SearchServiceImplTest {
 
         assertThat(result.contents()).containsExactly(new SearchContentDTO(
                 "348", MovieOrSeriesType.MOVIE, "Alien",
-                "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
+                "/alien.jpg", 1979));
         assertThat(result.users()).containsExactly(new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true));
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId, new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true), "Alien favorites", List.of(), 0L));

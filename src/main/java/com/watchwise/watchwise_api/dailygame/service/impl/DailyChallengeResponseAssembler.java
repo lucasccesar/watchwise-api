@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
@@ -219,16 +219,16 @@ public class DailyChallengeResponseAssembler {
         List<String> visibleImageUrls = hiddenImageGame && !terminal
                 ? List.of()
                 : IntStream.range(0, visiblePositions)
-                        .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
+                        .mapToObj(index -> imagePath(imagePaths.get(Math.min(index, imagePaths.size() - 1))))
                         .toList();
         List<String> imageUrls = status == DailyGameViewStatus.COMPLETED
                 && challenge.getTargetKind() == DailyGameTargetKind.EPISODE
-                ? imagePaths.stream().map(path -> imageUrl(challenge, path)).toList()
+                ? imagePaths.stream().map(this::imagePath).toList()
                 : null;
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
                 status, hiddenImageGame && !terminal
-                        ? null : imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
+                        ? null : imagePath(imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? toAnswer(challenge) : null,
                 visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
                 result != null && result.getSharedAt() != null);
@@ -481,32 +481,14 @@ public class DailyChallengeResponseAssembler {
                 ? snapshotValue(snapshot, "seriesPosterPath") : null;
         Integer seriesYear = targetKind == DailyGameTargetKind.EPISODE
                 ? snapshotInteger(snapshot, "seriesYear") : null;
-        String answerImageUrl = imageUrl(challenge);
+        String answerImageUrl = imagePath(challenge.getImagePath());
         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
                 challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, answerImageUrl, seriesName,
-                posterUrl(seriesPosterPath), seriesYear);
+                imagePath(seriesPosterPath), seriesYear);
     }
 
-    private String imageUrl(DailyChallenge challenge) {
-        return imageUrl(challenge, challenge.getImagePath());
-    }
-
-    private String imageUrl(DailyChallenge challenge, String imagePath) {
-        if (isAbsoluteHttpUrl(imagePath)) {
-            return imagePath;
-        }
-        return switch (challenge.getTargetKind()) {
-            case MOVIE, SERIES -> TmdbImageUrlBuilder.posterUrl(imagePath);
-            case PERSON -> TmdbImageUrlBuilder.profileUrl(imagePath);
-            case EPISODE -> TmdbImageUrlBuilder.stillUrl(imagePath);
-        };
-    }
-
-    private String posterUrl(String imagePath) {
-        if (isAbsoluteHttpUrl(imagePath)) {
-            return imagePath;
-        }
-        return TmdbImageUrlBuilder.posterUrl(imagePath);
+    private String imagePath(String imagePath) {
+        return TmdbImagePathBuilder.imagePath(imagePath);
     }
 
     private String snapshotValue(Map<String, Object> snapshot, String key) {
@@ -549,11 +531,6 @@ public class DailyChallengeResponseAssembler {
             }
         }
         return List.of(challenge.getImagePath());
-    }
-
-    private boolean isAbsoluteHttpUrl(String value) {
-        return value != null && (value.regionMatches(true, 0, "http://", 0, 7)
-                || value.regionMatches(true, 0, "https://", 0, 8));
     }
 
     private record DailyGameView(

@@ -4,7 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
@@ -45,7 +45,7 @@ public class DailyGameCandidateValidator {
         TmdbMovieFullDetails movie = ensureFound(
                 tmdbClient.getMovieFullDetails(tmdbId, LANGUAGE), "movie");
         return new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, tmdbId, null, null, null, null,
-                movie.title(), TmdbImageUrlBuilder.posterUrl(movie.posterPath()), parseDate(movie.releaseDate()));
+                movie.title(), TmdbImagePathBuilder.posterPath(movie.posterPath()), parseDate(movie.releaseDate()));
     }
 
     private DailyGameCandidateIdentity validateSeries(DailyGameAttemptRequest request) {
@@ -53,7 +53,7 @@ public class DailyGameCandidateValidator {
         TmdbTvFullDetails series = ensureFound(
                 tmdbClient.getTvFullDetails(tmdbId, LANGUAGE), "series");
         return new DailyGameCandidateIdentity(DailyGameTargetKind.SERIES, tmdbId, null, null, null, null,
-                series.name(), TmdbImageUrlBuilder.posterUrl(series.posterPath()), parseDate(series.firstAirDate()));
+                series.name(), TmdbImagePathBuilder.posterPath(series.posterPath()), parseDate(series.firstAirDate()));
     }
 
     private DailyGameCandidateIdentity validatePerson(DailyGameAttemptRequest request) {
@@ -64,7 +64,7 @@ public class DailyGameCandidateValidator {
         String personTmdbId = positiveIdentifier(request.personTmdbId());
         TmdbPersonDetails person = ensureFound(tmdbClient.getPersonDetails(personTmdbId), "person");
         return new DailyGameCandidateIdentity(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null,
-                person.name(), TmdbImageUrlBuilder.profileUrl(person.profilePath()), parseDate(person.birthday()));
+                person.name(), TmdbImagePathBuilder.profilePath(person.profilePath()), parseDate(person.birthday()));
     }
 
     private DailyGameCandidateIdentity validateEpisode(DailyGameAttemptRequest request) {
@@ -77,7 +77,7 @@ public class DailyGameCandidateValidator {
         TmdbEpisodeFullDetails episode = ensureFound(
                 tmdbClient.getEpisodeFullDetails(seriesTmdbId, seasonNumber, episodeNumber, LANGUAGE), "episode");
         return new DailyGameCandidateIdentity(DailyGameTargetKind.EPISODE, null, null, seriesTmdbId,
-                seasonNumber, episodeNumber, episode.name(), TmdbImageUrlBuilder.stillUrl(episode.stillPath()),
+                seasonNumber, episodeNumber, episode.name(), TmdbImagePathBuilder.stillPath(episode.stillPath()),
                 parseDate(episode.airDate()));
     }
 

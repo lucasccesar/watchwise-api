@@ -5,7 +5,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -40,7 +40,7 @@ public class TmdbSeriesHierarchyServiceImpl implements TmdbSeriesHierarchyServic
                 .filter(season -> season != null && season.seasonNumber() != null && season.seasonNumber() >= 0)
                 .filter(season -> includeSpecials || season.seasonNumber() != 0)
                 .map(season -> new ContentSeasonSelectionDTO(id, season.seasonNumber(), season.name(),
-                        season.episodeCount(), TmdbImageUrlBuilder.posterUrl(season.posterPath()), parseDate(season.airDate())))
+                        season.episodeCount(), TmdbImagePathBuilder.posterPath(season.posterPath()), parseDate(season.airDate())))
                 .toList();
     }
 
@@ -67,7 +67,7 @@ public class TmdbSeriesHierarchyServiceImpl implements TmdbSeriesHierarchyServic
 
     private ContentEpisodeSelectionDTO toEpisode(String id, int seasonNumber, TmdbEpisodeSummary episode) {
         return new ContentEpisodeSelectionDTO(id, seasonNumber, episode.episodeNumber(), episode.name(),
-                TmdbImageUrlBuilder.stillUrl(episode.stillPath()), parseDate(episode.airDate()));
+                TmdbImagePathBuilder.stillPath(episode.stillPath()), parseDate(episode.airDate()));
     }
 
     private <T> T requireFound(TmdbLookupResult<T> lookup, String subject) {

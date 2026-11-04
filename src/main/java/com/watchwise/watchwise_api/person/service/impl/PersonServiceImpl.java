@@ -3,7 +3,7 @@ package com.watchwise.watchwise_api.person.service.impl;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregate;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
@@ -73,7 +73,7 @@ public class PersonServiceImpl implements PersonService {
         PageRequest request = pageRequestFactory.build(pageNumber, pageSize);
         PageResponseDTO<PersonCreditDTO> page = page(filtered, request);
         PersonDetailsDTO person = new PersonDetailsDTO(aggregate.id(), aggregate.name(), aggregate.biography(), aggregate.birthday(),
-                aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(), TmdbImageUrlBuilder.profileUrl(aggregate.profilePath()),
+                aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(), TmdbImagePathBuilder.profilePath(aggregate.profilePath()),
                 aggregate.knownForDepartment(), safeList(aggregate.alsoKnownAs()), followedPersonService.isFollowing(viewerId, personTmdbId));
         return new PersonResponseDTO(person, progress, page);
     }
@@ -84,7 +84,7 @@ public class PersonServiceImpl implements PersonService {
     }
 
     private PersonCreditDTO toDto(PersonFilmographyCredit credit, boolean watched, boolean inList) {
-        return new PersonCreditDTO(credit.tmdbId(), credit.type(), credit.title(), TmdbImageUrlBuilder.posterUrl(credit.posterPath()),
+        return new PersonCreditDTO(credit.tmdbId(), credit.type(), credit.title(), TmdbImagePathBuilder.posterPath(credit.posterPath()),
                 credit.releaseDate() == null ? null : credit.releaseDate().toString(), credit.characters(), credit.jobs(),
                 credit.participation(), watched, inList);
     }

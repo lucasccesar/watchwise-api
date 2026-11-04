@@ -173,7 +173,7 @@ public class SearchViewServiceImpl implements SearchViewService {
         List<SearchPersonViewDTO> people = window.results().stream()
                 .map(person -> new SearchPersonViewDTO(
                         person.id(), person.name(),
-                        com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder.profileUrl(person.profilePath()),
+                        com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder.profilePath(person.profilePath()),
                         person.knownForDepartment()))
                 .toList();
         return new SearchViewDTO(

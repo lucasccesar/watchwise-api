@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.person.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.person.dto.PersonPreviewDTO;
@@ -78,7 +78,7 @@ public final class TmdbPersonPreviewResolver implements PersonPreviewResolver {
             return unavailable(personTmdbId);
         }
 
-        String profileUrl = TmdbImageUrlBuilder.profileUrl(details.profilePath());
+        String profileUrl = TmdbImagePathBuilder.profilePath(details.profilePath());
         ContentPreviewStatus status = details.name() != null && profileUrl != null
                 ? ContentPreviewStatus.AVAILABLE
                 : details.name() != null || profileUrl != null

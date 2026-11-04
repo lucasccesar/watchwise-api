@@ -7,7 +7,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -283,7 +283,7 @@ public class UserListServiceImpl implements UserListService {
         return tmdbCardMetadataResolver.resolve(coordinate, language)
                 .toOptional()
                 .map(TmdbCardMetadata::backdropPath)
-                .map(TmdbImageUrlBuilder::backdropUrl)
+                .map(TmdbImagePathBuilder::backdropPath)
                 .orElse(null);
     }
 

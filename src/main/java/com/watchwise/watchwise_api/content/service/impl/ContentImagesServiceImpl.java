@@ -6,7 +6,7 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbContentImage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbContentImages;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.content.dto.ContentImageDTO;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
@@ -66,8 +66,8 @@ public class ContentImagesServiceImpl implements ContentImagesService {
 
     private ContentImageDTO toDto(TmdbContentImage image, boolean poster) {
         String url = poster
-                ? TmdbImageUrlBuilder.posterUrl(image.filePath())
-                : TmdbImageUrlBuilder.backdropUrl(image.filePath());
+                ? TmdbImagePathBuilder.posterPath(image.filePath())
+                : TmdbImagePathBuilder.backdropPath(image.filePath());
         return new ContentImageDTO(url, image.width(), image.height(), image.aspectRatio(), image.language(),
                 image.voteAverage(), image.voteCount());
     }

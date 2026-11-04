@@ -110,7 +110,7 @@ class SearchViewServiceImplTest {
                 .extracting(SearchPersonViewDTO::knownForDepartment)
                 .isEqualTo("Acting");
         assertThat(people.people()).singleElement().extracting(SearchPersonViewDTO::photoUrl)
-                .isEqualTo("https://image.tmdb.org/t/p/w185/person.jpg");
+                .isEqualTo("/person.jpg");
     }
 
     @Test

@@ -162,7 +162,7 @@ class PersonViewServiceImplTest {
                 .getPersonView(viewerId, "287", PersonParticipation.ALL, null, null, null, null, 1, 24);
 
         assertThat(view.hero()).extracting("tmdbId", "backdropUrl")
-                .containsExactly("4", "https://image.tmdb.org/t/p/w1280/alpha4.jpg");
+                .containsExactly("4", "/alpha4.jpg");
     }
 
     private static TmdbPersonAggregateCredit credit(String id, String title, String date) {

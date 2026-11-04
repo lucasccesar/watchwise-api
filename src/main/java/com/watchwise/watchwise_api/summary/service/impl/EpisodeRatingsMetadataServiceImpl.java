@@ -4,7 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDisplayDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -81,8 +81,8 @@ public class EpisodeRatingsMetadataServiceImpl implements EpisodeRatingsMetadata
                     normalizedSeriesTmdbId,
                     details.name(),
                     releaseYearOf(details.firstAirDate()),
-                    TmdbImageUrlBuilder.posterUrl(details.posterPath()),
-                    TmdbImageUrlBuilder.backdropUrl(details.backdropPath()),
+                    TmdbImagePathBuilder.posterPath(details.posterPath()),
+                    TmdbImagePathBuilder.backdropPath(details.backdropPath()),
                     details.seasons().stream()
                             .filter(Objects::nonNull)
                             .map(TmdbSeasonSummary::seasonNumber)

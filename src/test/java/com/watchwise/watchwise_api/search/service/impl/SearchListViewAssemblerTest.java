@@ -38,7 +38,7 @@ class SearchListViewAssemblerTest {
         assertThat(result.displayScope()).isEqualTo(UserListDisplayScope.MOVIES);
         assertThat(result.previewCards()).singleElement().satisfies(card -> {
             assertThat(card.title()).isEqualTo("Night Film");
-            assertThat(card.posterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/night.jpg");
+            assertThat(card.posterUrl()).isEqualTo("/night.jpg");
             assertThat(card.previewStatus()).isEqualTo(ContentPreviewStatus.AVAILABLE);
         });
     }

@@ -74,7 +74,7 @@ class DailyGameSearchServiceImplTest {
 
         assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
                 DailyGameTargetKind.MOVIE, "550", null, null, null, null,
-                "Fight Club", "https://image.tmdb.org/t/p/w500/poster.jpg", LocalDate.of(1999, 10, 15)));
+                "Fight Club", "/poster.jpg", LocalDate.of(1999, 10, 15)));
         assertThat(result.getNumber()).isEqualTo(1);
         assertThat(result.getSize()).isEqualTo(1);
         assertThat(result.getTotalElements()).isEqualTo(5);
@@ -96,7 +96,7 @@ class DailyGameSearchServiceImplTest {
 
         assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
                 DailyGameTargetKind.SERIES, "94997", null, null, null, null,
-                "House of the Dragon", "https://image.tmdb.org/t/p/w500/dragon.jpg", LocalDate.of(2022, 8, 21)));
+                "House of the Dragon", "/dragon.jpg", LocalDate.of(2022, 8, 21)));
         verify(tmdbClient).searchTv("breaking", LANGUAGE, 1);
         verify(tmdbClient, never()).searchTv("breaking", LANGUAGE, 2);
         verify(tmdbClient, never()).searchMovies(anyString(), anyString(), anyInt());
@@ -116,7 +116,7 @@ class DailyGameSearchServiceImplTest {
 
         assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
                 DailyGameTargetKind.PERSON, null, "500", null, null, null,
-                "Actor", "https://image.tmdb.org/t/p/w185/actor.jpg", null));
+                "Actor", "/actor.jpg", null));
         verify(tmdbClient).searchPeople("fincher", LANGUAGE, 1);
         verify(tmdbClient, never()).searchPeople("fincher", LANGUAGE, 2);
         verify(tmdbClient, never()).searchMovies(anyString(), anyString(), anyInt());

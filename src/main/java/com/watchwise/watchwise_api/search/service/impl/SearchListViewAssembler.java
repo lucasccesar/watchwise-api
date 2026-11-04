@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.search.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.search.dto.SearchListPreviewCardDTO;
 import com.watchwise.watchwise_api.search.dto.SearchListViewDTO;
@@ -30,7 +30,7 @@ public class SearchListViewAssembler {
     private SearchListPreviewCardDTO toPreview(ContentCardDTO card) {
         String posterUrl = card.customPosterUrl() != null
                 ? card.customPosterUrl()
-                : TmdbImageUrlBuilder.posterUrl(card.posterPath());
+                : TmdbImagePathBuilder.posterPath(card.posterPath());
         return new SearchListPreviewCardDTO(
                 card.type(), card.tmdbId(), card.seriesTmdbId(), card.seasonNumber(), card.episodeNumber(),
                 card.title(), posterUrl, card.previewStatus());

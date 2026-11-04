@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.search.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
@@ -59,8 +59,8 @@ class SearchContentViewAssemblerTest {
         List<SearchContentViewDTO> cards = assembler.assemble(viewer, List.of(movieCandidate, seriesCandidate));
 
         assertThat(cards).extracting(SearchContentViewDTO::posterUrl)
-                .containsExactly(TmdbImageUrlBuilder.posterUrl("/movie.jpg"),
-                        TmdbImageUrlBuilder.posterUrl("/series.jpg"));
+                .containsExactly(TmdbImagePathBuilder.posterPath("/movie.jpg"),
+                        TmdbImagePathBuilder.posterPath("/series.jpg"));
         assertThat(cards).extracting(SearchContentViewDTO::voteAverage).containsExactly(8.1d, 7.4d);
         assertThat(cards).extracting(SearchContentViewDTO::type)
                 .containsExactly(MovieOrSeriesType.MOVIE, MovieOrSeriesType.SERIES);
@@ -93,7 +93,7 @@ class SearchContentViewAssemblerTest {
 
         assertThat(card.title()).isEqualTo("Night Shift");
         assertThat(card.type()).isEqualTo(MovieOrSeriesType.MOVIE);
-        assertThat(card.posterUrl()).isEqualTo(TmdbImageUrlBuilder.posterUrl("/movie.jpg"));
+        assertThat(card.posterUrl()).isEqualTo(TmdbImagePathBuilder.posterPath("/movie.jpg"));
         assertThat(card.releaseYear()).isEqualTo(2024);
         assertThat(card.voteAverage()).isEqualTo(8.1d);
         assertThat(card.previewStatus()).isEqualTo(ContentPreviewStatus.PARTIAL);

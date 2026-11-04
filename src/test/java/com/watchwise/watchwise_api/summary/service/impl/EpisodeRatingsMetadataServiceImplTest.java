@@ -106,8 +106,8 @@ class EpisodeRatingsMetadataServiceImplTest {
 
         assertThat(metadata).isEqualTo(new EpisodeRatingsMetadata(
                 "1396", "Breaking Bad", 2008,
-                "https://image.tmdb.org/t/p/w500/poster.jpg",
-                "https://image.tmdb.org/t/p/w1280/backdrop.jpg", List.of(1, 3)));
+                "/poster.jpg",
+                "/backdrop.jpg", List.of(1, 3)));
         verify(tmdbClient).getTvDisplayDetails("1396", "pt-BR");
     }
 

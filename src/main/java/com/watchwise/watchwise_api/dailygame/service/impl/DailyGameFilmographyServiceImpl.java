@@ -308,9 +308,18 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
             return null;
         }
         return new Work(mediaType.toLowerCase(Locale.ROOT), workId, title, year,
-                strings(raw.get("genres")), string(raw.get("posterUrl")), episodeCount,
+                strings(raw.get("genres")), storedPosterUrl(string(raw.get("posterUrl"))), episodeCount,
                 totalEpisodes, period,
                 string(raw.get("character")));
+    }
+
+    private String storedPosterUrl(String value) {
+        if (!usable(value)) {
+            return null;
+        }
+        return value.startsWith("https://image.tmdb.org/t/p/")
+                ? value
+                : TmdbImageUrlBuilder.posterUrl(value);
     }
 
     private List<Work> filterMajorRoles(List<Work> works) {

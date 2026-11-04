@@ -47,7 +47,7 @@ class TmdbSeriesHierarchyServiceImplTest {
 
         assertThat(result).containsExactly(
                 new ContentSeasonSelectionDTO("1399", 0, "Specials", 1,
-                        "https://image.tmdb.org/t/p/w500/special.jpg", null),
+                        "/special.jpg", null),
                 new ContentSeasonSelectionDTO("1399", 1, "Season 1", 3, null,
                         java.time.LocalDate.of(2020, 1, 1)));
         verify(tmdbClient).getTvFullDetails("1399", "pt-BR");
@@ -65,7 +65,7 @@ class TmdbSeriesHierarchyServiceImplTest {
         List<ContentEpisodeSelectionDTO> all = service().listEpisodes("1399", 1, true, "en-US");
 
         assertThat(released).containsExactly(new ContentEpisodeSelectionDTO("1399", 1, 1, "Pilot",
-                "https://image.tmdb.org/t/p/w300/pilot.jpg", java.time.LocalDate.of(2020, 1, 1)));
+                "/pilot.jpg", java.time.LocalDate.of(2020, 1, 1)));
         assertThat(all).hasSize(2);
     }
 

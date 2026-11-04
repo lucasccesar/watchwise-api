@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.search.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
@@ -93,7 +93,7 @@ public class SearchContentViewAssembler {
                 candidate.coordinate().tmdbId(),
                 type,
                 title,
-                TmdbImageUrlBuilder.posterUrl(posterPath),
+                TmdbImagePathBuilder.posterPath(posterPath),
                 releaseYear,
                 genres,
                 runtimeMinutes,

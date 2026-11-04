@@ -6,7 +6,7 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
@@ -142,7 +142,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         null,
                         movie.title(),
-                        TmdbImageUrlBuilder.posterUrl(movie.posterPath()),
+                        TmdbImagePathBuilder.posterPath(movie.posterPath()),
                         parseDate(movie.releaseDate())));
     }
 
@@ -158,7 +158,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         null,
                         series.name(),
-                        TmdbImageUrlBuilder.posterUrl(series.posterPath()),
+                        TmdbImagePathBuilder.posterPath(series.posterPath()),
                         parseDate(series.firstAirDate())));
     }
 
@@ -174,7 +174,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         null,
                         person.name(),
-                        TmdbImageUrlBuilder.profileUrl(person.profilePath()),
+                        TmdbImagePathBuilder.profilePath(person.profilePath()),
                         null));
     }
 

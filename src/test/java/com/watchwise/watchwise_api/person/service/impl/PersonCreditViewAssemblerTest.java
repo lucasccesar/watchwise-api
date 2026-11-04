@@ -51,7 +51,7 @@ class PersonCreditViewAssemblerTest {
 
         assertThat(views).hasSize(2);
         assertThat(views.getFirst()).extracting("title", "posterUrl", "releaseDate", "stats", "viewerState", "isInAnyList")
-                .containsExactly("Aggregate movie", "https://image.tmdb.org/t/p/w500/poster.jpg", LocalDate.of(2020, 1, 2),
+                .containsExactly("Aggregate movie", "/poster.jpg", LocalDate.of(2020, 1, 2),
                         new ContentCardStatsDTO(8.5d, 12L, 3L, 4L),
                         new ContentCardViewerStateDTO(WatchStatus.WATCHED, 9, LocalDate.of(2026, 9, 20),
                                 1, false, 1, true, false, null, null), true);

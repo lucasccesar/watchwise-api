@@ -3,7 +3,7 @@ package com.watchwise.watchwise_api.trending.service.impl;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTrendingMovieResult;
@@ -183,7 +183,7 @@ public class TrendingServiceImpl implements TrendingService {
                 ? null
                 : card.stats().averageScore();
         return new TrendingCardDTO(
-                movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImageUrlBuilder.posterUrl(posterPath),
+                movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImagePathBuilder.posterPath(posterPath),
                 backdropPath, year, releaseDate, card == null ? null : card.genres(), movie.voteAverage(),
                 communityAverageScore, movie.popularity(), runtime, null,
                 card == null ? null : card.viewerState(),
@@ -206,7 +206,7 @@ public class TrendingServiceImpl implements TrendingService {
                 ? null
                 : card.stats().averageScore();
         return new TrendingCardDTO(
-                series.id(), MovieOrSeriesType.SERIES, title, TmdbImageUrlBuilder.posterUrl(posterPath),
+                series.id(), MovieOrSeriesType.SERIES, title, TmdbImagePathBuilder.posterPath(posterPath),
                 null, year, releaseDate, card == null ? null : card.genres(), series.voteAverage(),
                 communityAverageScore,
                 series.popularity(), runtime, numberOfSeasons, card == null ? null : card.viewerState(),

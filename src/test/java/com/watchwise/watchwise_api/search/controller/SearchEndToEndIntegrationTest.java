@@ -164,7 +164,7 @@ class SearchEndToEndIntegrationTest {
                 .andExpect(jsonPath("$.contents[0].type").value("MOVIE"))
                 .andExpect(jsonPath("$.contents[0].title").value("Night Movie"))
                 .andExpect(jsonPath("$.contents[0].posterUrl").value(
-                        "https://image.tmdb.org/t/p/w500/movie.jpg"))
+                        "/movie.jpg"))
                 .andExpect(jsonPath("$.contents[0].releaseYear").value(2024))
                 .andExpect(jsonPath("$.contents[0].voteAverage").value(8.2))
                 .andExpect(jsonPath("$.contents[0].previewStatus").value("PARTIAL"))

@@ -912,7 +912,7 @@ class DailyGameServiceImplTest {
 
         assertThat(response.attempts()).singleElement().satisfies(attempt -> {
             assertThat(attempt.candidate().title()).isEqualTo("Pulp Fiction");
-            assertThat(attempt.candidate().imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/pulp.jpg");
+            assertThat(attempt.candidate().imageUrl()).isEqualTo("/pulp.jpg");
             assertThat(attempt.candidate().date()).isEqualTo(LocalDate.of(1994, 9, 10));
         });
     }

@@ -3,7 +3,7 @@ package com.watchwise.watchwise_api.person.service.impl;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregate;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
@@ -69,7 +69,7 @@ public class PersonViewServiceImpl implements PersonViewService {
         PageResponseDTO<PersonCreditViewDTO> response = page(filtered, request);
         PersonDetailsDTO person = new PersonDetailsDTO(aggregate.id(), aggregate.name(), aggregate.biography(),
                 aggregate.birthday(), aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(),
-                TmdbImageUrlBuilder.profileUrl(aggregate.profilePath()), aggregate.knownForDepartment(),
+                TmdbImagePathBuilder.profilePath(aggregate.profilePath()), aggregate.knownForDepartment(),
                 aggregate.alsoKnownAs() == null ? List.of() : aggregate.alsoKnownAs(),
                 followedPersonService.isFollowing(viewerId, personTmdbId));
         PersonProgressDTO progress = new PersonProgressDTO(assembled.size(),
@@ -127,7 +127,7 @@ public class PersonViewServiceImpl implements PersonViewService {
                 .findFirst()
                 .map(credit -> new PersonHeroDTO(credit.type(), credit.tmdbId(), credit.title(),
                         credit.releaseDate() == null ? null : credit.releaseDate().getYear(),
-                        TmdbImageUrlBuilder.backdropUrl(credit.backdropPath())))
+                        TmdbImagePathBuilder.backdropPath(credit.backdropPath())))
                 .orElse(null);
     }
 }

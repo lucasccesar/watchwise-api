@@ -38,7 +38,7 @@ class TmdbPersonPreviewResolverTest {
 
         assertThat(previews).containsExactly(
                 Map.entry("42", new PersonPreviewDTO(
-                        "42", "Ada", "https://image.tmdb.org/t/p/w185/ada.jpg", ContentPreviewStatus.AVAILABLE)),
+                        "42", "Ada", "/ada.jpg", ContentPreviewStatus.AVAILABLE)),
                 Map.entry("77", new PersonPreviewDTO("77", "Grace", null, ContentPreviewStatus.PARTIAL)),
                 Map.entry("99", new PersonPreviewDTO("99", null, null, ContentPreviewStatus.UNAVAILABLE)),
                 Map.entry("100", new PersonPreviewDTO("100", null, null, ContentPreviewStatus.UNAVAILABLE)));
