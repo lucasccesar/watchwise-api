@@ -8,6 +8,7 @@ import java.time.LocalDate;
 public record DiaryViewGroupedItemDTO(
         String kind,
         ContentRefDTO content,
+        String backdropPath,
         ContentType groupType,
         int seasonCount,
         int episodeCount,

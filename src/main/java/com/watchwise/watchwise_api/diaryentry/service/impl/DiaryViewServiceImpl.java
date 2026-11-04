@@ -4,10 +4,16 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
@@ -46,6 +52,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     private final DiaryViewRepository diaryViewRepository;
     private final ContentRepository contentRepository;
     private final ContentMapper contentMapper;
+    private final ContentCardAssembler contentCardAssembler;
     private final ContentRatingRepository contentRatingRepository;
     private final ContentReviewRepository contentReviewRepository;
     private final PageRequestFactory pageRequestFactory;
@@ -99,6 +106,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                         .filter(row -> row.groupSize() > 1).map(DiaryViewRepository.GroupedDiaryViewKey::seriesContentId)
                         .filter(Objects::nonNull).distinct().toList()).stream()
                 .collect(Collectors.toMap(Content::getId, contentMapper::contentToContentRefDto));
+        Map<String, String> backdropPaths = resolveGroupedBackdrops(rows, owner);
         return rows.map(row -> {
             var key = row.item();
             if (row.groupSize() == 1) {
@@ -110,9 +118,35 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                 series = new ContentRefDTO(null, row.seriesTmdbId(), ContentType.SERIES,
                         null, null, null, null, null, null, null);
             }
-            return new DiaryViewGroupedItemDTO("GROUPED", series, row.groupType(), row.seasonCount(),
+            return new DiaryViewGroupedItemDTO("GROUPED", series, backdropPaths.get(row.seriesTmdbId()),
+                    row.groupType(), row.seasonCount(),
                     row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
         });
+    }
+
+    private Map<String, String> resolveGroupedBackdrops(
+            Page<DiaryViewRepository.GroupedDiaryViewKey> rows, User owner) {
+        List<String> seriesTmdbIds = rows.stream()
+                .filter(row -> row.groupSize() > 1)
+                .map(DiaryViewRepository.GroupedDiaryViewKey::seriesTmdbId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+        List<ContentCardSpec> specs = seriesTmdbIds.stream()
+                .map(seriesTmdbId -> new ContentCardSpec(
+                        new ContentCoordinate(ContentType.SERIES, seriesTmdbId, null, null, null),
+                        null, null, null, null))
+                .toList();
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs,
+                new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), null, null),
+                ContentCardFieldSet.BASIC_METADATA);
+        return cards.entrySet().stream().collect(Collectors.toMap(
+                entry -> entry.getKey().tmdbId(),
+                entry -> entry.getValue().backdropPath()));
     }
 
     private Page<DiaryViewItemDTO> enrich(UUID ownerId, Page<DiaryViewRepository.DiaryViewKey> keys) {

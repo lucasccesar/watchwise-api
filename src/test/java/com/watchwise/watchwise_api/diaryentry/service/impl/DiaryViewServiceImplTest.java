@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.diaryentry.service.impl;
 
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -40,6 +42,7 @@ class DiaryViewServiceImplTest {
     @Mock DiaryViewRepository diaryViewRepository;
     @Mock ContentRepository contentRepository;
     @Mock ContentMapper contentMapper;
+    @Mock ContentCardAssembler contentCardAssembler;
     @Mock ContentRatingRepository contentRatingRepository;
     @Mock ContentReviewRepository contentReviewRepository;
     @Mock PageRequestFactory pageRequestFactory;
@@ -71,6 +74,8 @@ class DiaryViewServiceImplTest {
                 date, null, "1396", 1, 2, 90L);
         when(diaryViewRepository.findGroupedPage(eq(owner), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(grouped)));
+        when(contentCardAssembler.assemble(anyCollection(), any(), any(ContentCardFieldSet.class)))
+                .thenReturn(java.util.Map.of());
         var result = service.getView(owner, owner, new DiaryViewFilter(null, null, null, null, null, null),
                 null, null, true);
         assertThat(result.getContent()).singleElement().isInstanceOfSatisfying(DiaryViewGroupedItemDTO.class, item -> {
