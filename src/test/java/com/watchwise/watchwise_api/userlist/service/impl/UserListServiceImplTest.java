@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
@@ -16,6 +17,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -106,6 +108,9 @@ class UserListServiceImplTest {
     private UserRepository userRepository;
 
     @Mock
+    private TmdbCardMetadataResolver tmdbCardMetadataResolver;
+
+    @Mock
     private FollowerRepository followerRepository;
 
     @Mock
@@ -185,6 +190,8 @@ class UserListServiceImplTest {
 
         lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
         lenient().when(userRepository.findByIdForListCreation(marinaId)).thenReturn(Optional.of(marina));
+        lenient().when(tmdbCardMetadataResolver.resolve(any(), any()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
         lenient().when(userListRepository.findByIdForUpdate(any(UUID.class)))
                 .thenAnswer(invocation -> userListRepository.findById(invocation.getArgument(0)));
 

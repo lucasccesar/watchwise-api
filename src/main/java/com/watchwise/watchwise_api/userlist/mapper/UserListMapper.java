@@ -24,6 +24,7 @@ public interface UserListMapper {
     @Mapping(target = "itemsTotalElements", source = "itemsTotalElements")
     @Mapping(target = "itemsTotalPages", source = "itemsTotalPages")
     @Mapping(target = "itemsHasNext", source = "itemsHasNext")
+    @Mapping(target = "backdropPath", ignore = true)
     UserListDetailedResponseDTO userListToDetailedResponseDto(
             UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage, boolean likedByMe,
             long itemsCount, long commentsCount, long totalRuntimeMinutes, UserListItemScope itemScope,

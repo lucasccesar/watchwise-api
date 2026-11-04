@@ -6,12 +6,16 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.UserListStructureLock;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
@@ -91,6 +95,7 @@ public class UserListServiceImpl implements UserListService {
     private final SeriesProgressReader seriesProgressReader;
     private final UserContentPosterService userContentPosterService;
     private final UserBlockAccessService userBlockAccessService;
+    private final TmdbCardMetadataResolver tmdbCardMetadataResolver;
     private final ImportLedger importLedger;
     private final EntityManager entityManager;
 
@@ -245,10 +250,56 @@ public class UserListServiceImpl implements UserListService {
         UserListItemPage page = userListItemPageReader.read(new UserListItemPageRequest(
                 viewerId, listId, type, genre, sortBy, sortDirection, null, pageNumber, pageSize,
                 UserListItemPageMode.RAW));
-        return userListMapper.userListToDetailedResponseDto(
+        UserListDetailedResponseDTO response = userListMapper.userListToDetailedResponseDto(
                 page.userList(), page.items(), page.watchedPercentage(), Boolean.TRUE.equals(page.likedByMe()),
                 page.itemsCount(), page.commentsCount(), page.totalRuntimeMinutes(), page.itemScope(), page.page(),
                 page.size(), page.totalElements(), page.totalPages(), page.hasNext());
+        String backdropPath = resolveFirstItemBackdropPath(viewerId, page.items());
+        return new UserListDetailedResponseDTO(
+                response.id(), response.name(), response.description(), response.visibility(),
+                response.watchedPercentage(), response.createdAt(), response.updatedAt(), response.items(),
+                response.itemsPage(), response.itemsSize(), response.itemsTotalElements(), response.itemsTotalPages(),
+                response.itemsHasNext(), response.likesCount(), response.likedByMe(), response.itemsCount(),
+                response.commentsCount(), response.totalRuntimeMinutes(), response.rank(), response.itemScope(),
+                backdropPath);
+    }
+
+    private String resolveFirstItemBackdropPath(UUID viewerId, List<UserListItemResponseDTO> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        ContentRefDTO firstContent = items.get(0).content();
+        if (firstContent == null) {
+            return null;
+        }
+        ContentCoordinate coordinate = backdropCoordinate(firstContent);
+        if (coordinate == null) {
+            return null;
+        }
+        String language = userRepository.findById(viewerId)
+                .map(User::getPreferredLanguage)
+                .filter(value -> !value.isBlank())
+                .orElse("en-US");
+        return tmdbCardMetadataResolver.resolve(coordinate, language)
+                .toOptional()
+                .map(TmdbCardMetadata::backdropPath)
+                .map(TmdbImageUrlBuilder::backdropUrl)
+                .orElse(null);
+    }
+
+    private ContentCoordinate backdropCoordinate(ContentRefDTO content) {
+        return switch (content.type()) {
+            case MOVIE, SERIES -> hasText(content.tmdbId())
+                    ? new ContentCoordinate(content.type(), content.tmdbId(), null, null, null)
+                    : null;
+            case SEASON, EPISODE -> hasText(content.seriesTmdbId())
+                    ? new ContentCoordinate(ContentType.SERIES, content.seriesTmdbId(), null, null, null)
+                    : null;
+        };
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     @Override

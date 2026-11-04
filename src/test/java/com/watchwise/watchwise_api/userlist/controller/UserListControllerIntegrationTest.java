@@ -173,6 +173,8 @@ class UserListControllerIntegrationTest {
         lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                         null, null, null, null, null, null, List.of(), null, null)));
+        lenient().when(tmdbClient.getCardMetadata(any(), any()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {

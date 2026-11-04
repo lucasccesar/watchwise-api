@@ -26,6 +26,32 @@ public record UserListDetailedResponseDTO(
         long commentsCount,
         long totalRuntimeMinutes,
         Integer rank,
-        UserListItemScope itemScope
+        UserListItemScope itemScope,
+        String backdropPath
 ) {
+    public UserListDetailedResponseDTO(
+            UUID id,
+            String name,
+            String description,
+            UserListVisibility visibility,
+            Double watchedPercentage,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt,
+            List<UserListItemResponseDTO> items,
+            int itemsPage,
+            int itemsSize,
+            long itemsTotalElements,
+            int itemsTotalPages,
+            boolean itemsHasNext,
+            Integer likesCount,
+            Boolean likedByMe,
+            long itemsCount,
+            long commentsCount,
+            long totalRuntimeMinutes,
+            Integer rank,
+            UserListItemScope itemScope) {
+        this(id, name, description, visibility, watchedPercentage, createdAt, updatedAt, items,
+                itemsPage, itemsSize, itemsTotalElements, itemsTotalPages, itemsHasNext, likesCount,
+                likedByMe, itemsCount, commentsCount, totalRuntimeMinutes, rank, itemScope, null);
+    }
 }
