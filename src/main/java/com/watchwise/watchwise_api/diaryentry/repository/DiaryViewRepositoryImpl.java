@@ -123,8 +123,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                        p.anchor_diary_entry_id AS anchor_entry_id,
                        p.completed_on AS watched_date,
                        p.ordered_at,
-                       anchor.created_at AS group_sort_at,
-                       anchor.id AS group_sort_id,
+                       COALESCE(completion_tail.created_at, anchor.created_at) AS group_sort_at,
+                       COALESCE(completion_tail.id, anchor.id) AS group_sort_id,
                        rating.score AS score,
                        EXISTS (SELECT 1
                                FROM content_reviews review
@@ -140,6 +140,21 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                   AND rating.content_id = p.content_id
                 JOIN diary_entries anchor ON anchor.id = p.anchor_diary_entry_id
                                            AND anchor.user_id = p.user_id
+                LEFT JOIN LATERAL (
+                    SELECT candidate.created_at, candidate.id
+                    FROM diary_entries candidate
+                    JOIN contents episode ON episode.id = candidate.content_id
+                    WHERE candidate.user_id = p.user_id
+                      AND candidate.watch_number = p.watch_number
+                      AND episode.type = 'EPISODE'
+                      AND episode.series_tmdb_id = COALESCE(c.series_tmdb_id, c.tmdb_id)
+                      AND COALESCE((candidate.watched_at AT TIME ZONE 'UTC')::date,
+                                   candidate.watched_date, candidate.created_at::date)
+                          = COALESCE(p.completed_on, anchor.created_at::date)
+                      AND (p.content_type <> 'SEASON' OR episode.season_number = c.season_number)
+                    ORDER BY candidate.created_at ASC, candidate.id ASC
+                    LIMIT 1
+                ) completion_tail ON TRUE
                 JOIN user_series_history_states state
                   ON state.user_id = p.user_id
                  AND state.series_tmdb_id = COALESCE(c.series_tmdb_id, c.tmdb_id)
