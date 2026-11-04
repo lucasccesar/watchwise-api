@@ -4,14 +4,18 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -58,6 +62,7 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
     private final CommentRepository commentRepository;
     private final UserRepository userRepository;
     private final ContentCardAssembler contentCardAssembler;
+    private final TmdbCardMetadataResolver tmdbCardMetadataResolver;
 
     @Override
     @Transactional(readOnly = true)
@@ -83,6 +88,9 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
                 .filter(java.util.Objects::nonNull)
                 .map(this::toSpec)
                 .forEach(spec -> specsByCoordinate.putIfAbsent(spec.coordinate(), spec));
+
+        ContentRefDTO firstContent = items.isEmpty() ? null : items.getFirst().content();
+        ContentCoordinate firstSeasonSeriesCoordinate = firstSeasonSeriesCoordinate(firstContent);
 
         List<UserListItem> nestedContentItems = nestedListIds.isEmpty()
                 ? List.of()
@@ -156,6 +164,8 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
         List<UserListDetailItemDTO> detailItems = items.stream()
                 .map(item -> toDetailItem(item, cardsByCoordinate, nestedDetails))
                 .toList();
+        String backdropPath = resolveFirstItemBackdropPath(
+                items, firstContent, firstSeasonSeriesCoordinate, cardsByCoordinate, viewer);
         return new UserListDetailViewResponseDTO(
                 page.userList().getId(),
                 preview(page.userList().getUser()),
@@ -173,7 +183,40 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
                 page.rank(),
                 page.itemScope(),
                 new PageResponseDTO<>(detailItems, page.page(), page.size(), page.totalElements(),
-                        page.totalPages(), page.hasNext()));
+                        page.totalPages(), page.hasNext()),
+                backdropPath);
+    }
+
+    private ContentCoordinate firstSeasonSeriesCoordinate(ContentRefDTO firstContent) {
+        if (firstContent == null || firstContent.type() != ContentType.SEASON
+                || firstContent.seriesTmdbId() == null || firstContent.seriesTmdbId().isBlank()) {
+            return null;
+        }
+        return new ContentCoordinate(ContentType.SERIES, firstContent.seriesTmdbId(), null, null, null);
+    }
+
+    private String resolveFirstItemBackdropPath(
+            List<UserListItemResponseDTO> items,
+            ContentRefDTO firstContent,
+            ContentCoordinate firstSeasonSeriesCoordinate,
+            Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate,
+            User viewer) {
+        if (items.isEmpty() || firstContent == null) {
+            return null;
+        }
+        if (firstSeasonSeriesCoordinate != null) {
+            String preferredLanguage = viewer == null ? null : viewer.getPreferredLanguage();
+            String language = preferredLanguage == null || preferredLanguage.isBlank()
+                    ? "en-US"
+                    : preferredLanguage;
+            return tmdbCardMetadataResolver.resolve(firstSeasonSeriesCoordinate, language)
+                    .toOptional()
+                    .map(TmdbCardMetadata::backdropPath)
+                    .map(TmdbImagePathBuilder::backdropPath)
+                    .orElse(null);
+        }
+        ContentCardDTO firstCard = cardsByCoordinate.get(coordinate(firstContent));
+        return firstCard == null ? null : firstCard.backdropPath();
     }
 
     private Map<UUID, UserList> loadVisibleNestedLists(Collection<UUID> nestedListIds, UUID viewerId) {
