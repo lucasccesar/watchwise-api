@@ -177,6 +177,16 @@ class DiaryViewRepositoryTest {
                 .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
                 .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"))
                 .andExpect(jsonPath("$.content[1].content.type").value("MOVIE"));
+        mockMvc.perform(get("/users/{userId}/diary/view", owner.id())
+                        .cookie(owner.accessToken()).param("grouped", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].kind").value("GROUPED"))
+                .andExpect(jsonPath("$.content[0].content.id").value(series.getId().toString()))
+                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.content[0].groupType").value("SERIES"))
+                .andExpect(jsonPath("$.content[0].episodeCount").value(1))
+                .andExpect(jsonPath("$.content[0].seasonCount").value(1));
     }
 
     @Test
@@ -354,6 +364,134 @@ class DiaryViewRepositoryTest {
         assertThat(currentPage.getContent()).extracting(DiaryViewRepository.DiaryViewKey::kind)
                 .containsExactlyInAnyOrder("PERSISTED_ENTRY", "DERIVED_COMPLETION");
         assertThat(currentPage.getTotalElements()).isEqualTo(2L);
+    }
+
+    @Test
+    void shouldGroupBeforePagingAndKeepMovieInterruptions() throws Exception {
+        var owner = registerUser();
+        User user = userRepository.findById(owner.id()).orElseThrow();
+        LocalDate date = LocalDate.of(2026, 11, 4);
+        for (int episodeNumber = 1; episodeNumber <= 4; episodeNumber++) {
+            Content episode = persistContent(ContentType.EPISODE, null, "910001", 1, episodeNumber);
+            episode.setRuntimeMinutes(40);
+            contentRepository.saveAndFlush(episode);
+            DiaryEntry watched = persistEntry(user, episode, date, EPISODE_RECORDED_AT.plusMinutes(episodeNumber * 2));
+            if (episodeNumber >= 3) {
+                watched.setComment("review");
+                diaryEntryRepository.saveAndFlush(watched);
+            }
+        }
+        Content movie = persistContent(ContentType.MOVIE, "910002", null, null, null);
+        persistEntry(user, movie, date, EPISODE_RECORDED_AT.plusMinutes(5));
+        var filter = new DiaryViewFilter(null, null, null, null, null, null);
+        var page = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(), filter,
+                org.springframework.data.domain.PageRequest.of(0, 2));
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(page.getContent()).extracting(DiaryViewRepository.GroupedDiaryViewKey::groupSize)
+                .containsExactly(2L, 1L);
+        assertThat(page.getContent().getFirst().episodeCount()).isEqualTo(2);
+        assertThat(page.getContent().getFirst().seasonCount()).isEqualTo(1);
+        assertThat(page.getContent().getFirst().totalRuntimeMinutes()).isEqualTo(80L);
+        var next = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(), filter,
+                org.springframework.data.domain.PageRequest.of(1, 2));
+        assertThat(next.getContent()).singleElement().satisfies(group -> {
+            assertThat(group.groupSize()).isEqualTo(2);
+            assertThat(group.episodeCount()).isEqualTo(2);
+        });
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(owner.id(), "910001"))
+                .historyRevision(0L).computedRevision(0L).scheduleVersion(0L)
+                .validUntil(Instant.parse("2099-01-01T00:00:00Z")).build());
+        mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
+                        .param("grouped", "true").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.content[0].kind").value("GROUPED"))
+                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("910001"))
+                .andExpect(jsonPath("$.content[0].groupType").value("EPISODE"))
+                .andExpect(jsonPath("$.content[0].totalRuntimeMinutes").value(80))
+                .andExpect(jsonPath("$.content[0].items").doesNotExist())
+                .andExpect(jsonPath("$.content[0].diaryEntryId").doesNotExist())
+                .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"));
+        mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
+                        .param("grouped", "true").param("hasReview", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].kind").value("PERSISTED_ENTRY"))
+                .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"));
+        mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(5));
+    }
+
+    @Test
+    void shouldBreakGroupsByPassAndEffectiveDayAndKeepUnknownRuntime() throws Exception {
+        var owner = registerUser();
+        User user = userRepository.findById(owner.id()).orElseThrow();
+        Content episode = persistContent(ContentType.EPISODE, null, "910003", 1, 1);
+        Content second = persistContent(ContentType.EPISODE, null, "910003", 2, 1);
+        episode.setRuntimeMinutes(45);
+        contentRepository.saveAndFlush(episode);
+        persistEntry(user, episode, null, EPISODE_RECORDED_AT, 1);
+        persistEntry(user, second, null, EPISODE_RECORDED_AT.plusMinutes(1), 1);
+        persistEntry(user, episode, null, EPISODE_RECORDED_AT.plusMinutes(2), 2);
+        persistEntry(user, second, null, EPISODE_RECORDED_AT.plusDays(1), 2);
+        var page = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(null, null, null, null, null, null),
+                org.springframework.data.domain.PageRequest.of(0, 20));
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        var group = page.getContent().getLast();
+        assertThat(group.groupSize()).isEqualTo(2);
+        assertThat(group.seasonCount()).isEqualTo(2);
+        assertThat(group.episodeCount()).isEqualTo(2);
+        assertThat(group.totalRuntimeMinutes()).isNull();
+        assertThat(group.groupDate()).isEqualTo(EPISODE_RECORDED_AT.toLocalDate());
+    }
+
+    @Test
+    void shouldRecoverOnlySameDayEpisodesForFilteredSeasonCompletions() throws Exception {
+        var owner = registerUser();
+        User user = userRepository.findById(owner.id()).orElseThrow();
+        String seriesId = "910004";
+        persistContent(ContentType.SERIES, seriesId, null, null, null);
+        LocalDate date = LocalDate.of(2026, 11, 4);
+        Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(owner.id(), seriesId))
+                .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
+        for (int seasonNumber = 1; seasonNumber <= 2; seasonNumber++) {
+            Content season = persistContent(ContentType.SEASON, null, seriesId, seasonNumber, null);
+            DiaryEntry anchor = null;
+            for (int episodeNumber = 1; episodeNumber <= 2; episodeNumber++) {
+                Content episode = persistContent(ContentType.EPISODE, null, seriesId, seasonNumber, episodeNumber);
+                episode.setRuntimeMinutes(30);
+                contentRepository.saveAndFlush(episode);
+                anchor = persistEntry(user, episode, episodeNumber == 1 ? date.minusDays(1) : date,
+                        EPISODE_RECORDED_AT.plusMinutes(seasonNumber * 10 + episodeNumber));
+            }
+            completenessRepository.saveAndFlush(markerFor(seriesId,
+                    CalendarScheduleCompleteness.GroupType.SEASON, seasonNumber).toBuilder().scopeVersion(1L).build());
+            projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
+                    .userId(owner.id()).contentId(season.getId()).contentType(ContentType.SEASON)
+                    .watchNumber(1).anchorDiaryEntryId(anchor.getId()).completedOn(date)
+                    .orderedAt(Instant.parse("2026-11-04T12:00:00Z"))
+                    .historyRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
+        }
+        var filtered = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(ContentType.SEASON, null, null, null, null, null),
+                org.springframework.data.domain.PageRequest.of(0, 20));
+        assertThat(filtered.getContent()).singleElement().satisfies(group -> {
+            assertThat(group.groupType()).isEqualTo(ContentType.SEASON);
+            assertThat(group.groupSize()).isEqualTo(2);
+            assertThat(group.episodeCount()).isEqualTo(2);
+            assertThat(group.seasonCount()).isEqualTo(2);
+            assertThat(group.totalRuntimeMinutes()).isEqualTo(60L);
+        });
+        var unfiltered = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(null, null, null, null, null, null),
+                org.springframework.data.domain.PageRequest.of(0, 20));
+        assertThat(unfiltered.getContent().getFirst().episodeCount()).isEqualTo(1);
+        assertThat(unfiltered.getContent().getFirst().groupType()).isEqualTo(ContentType.SEASON);
     }
 
     private RegisteredUser registerUser() throws Exception {

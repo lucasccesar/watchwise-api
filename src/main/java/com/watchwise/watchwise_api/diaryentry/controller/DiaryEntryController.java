@@ -13,7 +13,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
-import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewResponseItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
@@ -90,7 +90,7 @@ public class DiaryEntryController {
     }
 
     @GetMapping("/users/{userId}/diary/view")
-    public ResponseEntity<PageResponseDTO<DiaryViewItemDTO>> getDiaryView(
+    public ResponseEntity<PageResponseDTO<DiaryViewResponseItemDTO>> getDiaryView(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -99,11 +99,12 @@ public class DiaryEntryController {
             @RequestParam(required = false) LocalDate dateEnd,
             @RequestParam(required = false) Integer scoreMin,
             @RequestParam(required = false) Integer scoreMax,
-            @RequestParam(required = false) Boolean hasReview) {
-        Page<DiaryViewItemDTO> view = diaryViewService.getView(
+            @RequestParam(required = false) Boolean hasReview,
+            @RequestParam(defaultValue = "false") boolean grouped) {
+        Page<DiaryViewResponseItemDTO> view = diaryViewService.getView(
                 getCurrentUserId(), userId,
                 new DiaryViewFilter(type, dateStart, dateEnd, scoreMin, scoreMax, hasReview),
-                page, size);
+                page, size, grouped);
         return ResponseEntity.ok(PageResponseDTO.of(view));
     }
 

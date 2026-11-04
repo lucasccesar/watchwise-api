@@ -41,10 +41,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
         MapSqlParameterSource parameters = parameters(ownerId, region, language, now, filter);
         String source = sourceSql();
         String where = filterSql(filter);
-        String order = " ORDER BY group_sort_at DESC NULLS LAST, group_sort_id DESC NULLS LAST, "
-                + "CASE WHEN kind = 'PERSISTED_ENTRY' THEN 0 ELSE 1 END, "
-                + "CASE content_type WHEN 'EPISODE' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'SERIES' THEN 2 ELSE 3 END, "
-                + "ordered_at DESC, target_id DESC";
+        String order = " ORDER BY " + DiaryViewGroupingSql.order();
         String sql = "SELECT * FROM (" + source + ") timeline WHERE 1 = 1 " + where + order
                 + " LIMIT :limit OFFSET :offset";
         parameters.addValue("limit", pageable.getPageSize());
@@ -54,6 +51,24 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 "SELECT COUNT(*) FROM (" + source + ") timeline WHERE 1 = 1 " + where,
                 parameters,
                 Long.class);
+        return new PageImpl<>(rows, pageable, total);
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Page<GroupedDiaryViewKey> findGroupedPage(UUID ownerId, String region, String language,
+            Instant now, DiaryViewFilter filter, Pageable pageable) {
+        MapSqlParameterSource parameters = parameters(ownerId, region, language, now, filter)
+                .addValue("limit", pageable.getPageSize()).addValue("offset", pageable.getOffset());
+        String cte = DiaryViewGroupingSql.cte(sourceSql(), filterSql(filter));
+        List<GroupedDiaryViewKey> rows = jdbc.query(cte +
+                " SELECT * FROM result ORDER BY position LIMIT :limit OFFSET :offset", parameters,
+                (rs, index) -> new GroupedDiaryViewKey(mapRow(rs, index), rs.getLong("group_size"),
+                        ContentType.valueOf(rs.getString("group_type")),
+                        rs.getObject("group_date", LocalDate.class), uuid(rs, "series_content_id"),
+                        rs.getString("series_key"), rs.getInt("season_count"), rs.getInt("episode_count"),
+                        rs.getObject("total_runtime", Long.class)));
+        long total = jdbc.queryForObject(cte + " SELECT COUNT(*) FROM result", parameters, Long.class);
         return new PageImpl<>(rows, pageable, total);
     }
 

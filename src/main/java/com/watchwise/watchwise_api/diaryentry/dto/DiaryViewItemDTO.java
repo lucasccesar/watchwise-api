@@ -19,7 +19,7 @@ public record DiaryViewItemDTO(
         Integer currentScore,
         Long currentRatingVersion,
         List<DiaryViewReviewPreviewDTO> reviewPreviews,
-        long reviewCount) {
+        long reviewCount) implements DiaryViewResponseItemDTO {
 
     public DiaryViewItemDTO {
         reviewPreviews = reviewPreviews == null ? List.of() : List.copyOf(reviewPreviews);

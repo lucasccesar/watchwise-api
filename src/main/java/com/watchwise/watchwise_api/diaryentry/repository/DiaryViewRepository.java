@@ -19,6 +19,13 @@ public interface DiaryViewRepository {
             DiaryViewFilter filter,
             Pageable pageable);
 
+    Page<GroupedDiaryViewKey> findGroupedPage(UUID ownerId, String region, String language,
+            Instant now, DiaryViewFilter filter, Pageable pageable);
+
+    record GroupedDiaryViewKey(DiaryViewKey item, long groupSize, ContentType groupType,
+            LocalDate groupDate, UUID seriesContentId, String seriesTmdbId,
+            int seasonCount, int episodeCount, Long totalRuntimeMinutes) { }
+
     record DiaryViewKey(
             String kind,
             UUID targetId,

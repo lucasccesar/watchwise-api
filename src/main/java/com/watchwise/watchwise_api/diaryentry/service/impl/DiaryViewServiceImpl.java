@@ -15,6 +15,8 @@ import com.watchwise.watchwise_api.contentreview.repository.ContentReviewReposit
 import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewResponseItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewGroupedItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewReviewPreviewDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryViewRepository;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -70,6 +72,53 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                 java.time.Instant.now(),
                 filter,
                 pageRequest);
+        return enrich(ownerId, keys);
+    }
+
+    @Override
+    public Page<DiaryViewResponseItemDTO> getView(UUID viewerId, UUID ownerId, DiaryViewFilter filter,
+            Integer pageNumber, Integer pageSize, boolean grouped) {
+        if (!grouped || (filter != null && Boolean.TRUE.equals(filter.hasReview()))) {
+            return getView(viewerId, ownerId, filter, pageNumber, pageSize).map(item -> item);
+        }
+        User owner = userRepository.findById(ownerId).orElseThrow(() -> new NotFoundException("User not found"));
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
+        userVisibilityService.assertCanView(viewerId, ownerId);
+        validate(filter);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        diaryCompletionService.refreshStaleScopes(ownerId, java.time.Instant.now());
+        var rows = diaryViewRepository.findGroupedPage(ownerId, owner.getPreferredRegion(),
+                owner.getPreferredLanguage(), java.time.Instant.now(), filter, pageRequest);
+        var singletons = rows.stream().filter(row -> row.groupSize() == 1)
+                .map(DiaryViewRepository.GroupedDiaryViewKey::item).toList();
+        var individualItems = enrich(ownerId, new org.springframework.data.domain.PageImpl<>(singletons))
+                .getContent().stream().collect(Collectors.toMap(
+                        item -> item.diaryEntryId() != null ? item.diaryEntryId().toString() : item.completionKey(),
+                        Function.identity()));
+        var seriesRefs = contentRepository.findAllById(rows.stream()
+                        .filter(row -> row.groupSize() > 1).map(DiaryViewRepository.GroupedDiaryViewKey::seriesContentId)
+                        .filter(Objects::nonNull).distinct().toList()).stream()
+                .collect(Collectors.toMap(Content::getId, contentMapper::contentToContentRefDto));
+        return rows.map(row -> {
+            var key = row.item();
+            if (row.groupSize() == 1) {
+                return individualItems.get("PERSISTED_ENTRY".equals(key.kind())
+                        ? key.targetId().toString() : completionKey(key));
+            }
+            ContentRefDTO series = row.seriesContentId() == null ? null : seriesRefs.get(row.seriesContentId());
+            if (series == null) {
+                series = new ContentRefDTO(null, row.seriesTmdbId(), ContentType.SERIES,
+                        null, null, null, null, null, null, null);
+            }
+            return new DiaryViewGroupedItemDTO("GROUPED", series, row.groupType(), row.seasonCount(),
+                    row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
+        });
+    }
+
+    private Page<DiaryViewItemDTO> enrich(UUID ownerId, Page<DiaryViewRepository.DiaryViewKey> keys) {
+        if (keys.isEmpty()) {
+            return new org.springframework.data.domain.PageImpl<>(List.of(), keys.getPageable(), keys.getTotalElements());
+        }
         Map<UUID, ContentRefDTO> contentById = contentRepository.findAllById(
                         keys.getContent().stream().map(DiaryViewRepository.DiaryViewKey::contentId).distinct().toList())
                 .stream()
