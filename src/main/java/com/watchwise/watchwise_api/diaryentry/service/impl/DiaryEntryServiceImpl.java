@@ -403,6 +403,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             }
 
             candidatesWithNextEpisode.addAll(presented.stream()
+                    .filter(candidate -> !seriesProgressAssembler.isAtFullProgress(
+                            candidate.watchedEpisodeCount(), candidate.totalEpisodeCount()))
                     .filter(candidate -> candidate.nextEpisode() != null)
                     .limit(effectiveLimit - candidatesWithNextEpisode.size())
                     .toList());
