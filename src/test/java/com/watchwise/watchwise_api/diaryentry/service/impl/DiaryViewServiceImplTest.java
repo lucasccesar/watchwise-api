@@ -71,7 +71,7 @@ class DiaryViewServiceImplTest {
         var key = new DiaryViewRepository.DiaryViewKey("PERSISTED_ENTRY", entry, UUID.randomUUID(),
                 ContentType.EPISODE, null, "1396", 1, 2, 1, entry, date, now, now, entry, null);
         var grouped = new DiaryViewRepository.GroupedDiaryViewKey(key, 2, ContentType.EPISODE,
-                date, null, "1396", 1, 2, 90L);
+                date, null, "1396", 1, List.of(1), 2, 90L);
         when(diaryViewRepository.findGroupedPage(eq(owner), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(grouped)));
         when(contentCardAssembler.assemble(anyCollection(), any(), any(ContentCardFieldSet.class)))
