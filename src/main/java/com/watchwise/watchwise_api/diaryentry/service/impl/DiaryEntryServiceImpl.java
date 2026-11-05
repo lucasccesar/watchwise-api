@@ -444,46 +444,34 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         userId, effectiveSort, effectiveDirection, Pageable.unpaged());
         List<SeriesProgressReadRepository.SeriesProgressCandidate> allRows = allCandidates.getContent();
         Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = refreshSnapshots(allRows);
-        List<SeriesProgressReadRepository.SeriesProgressCandidate> inProgressRows = allRows.stream()
-                .filter(row -> !isAtFullProgress(row, snapshots))
-                .toList();
-        long offset = pageRequest.getOffset();
-        int fromIndex = Math.toIntExact(Math.min(offset, inProgressRows.size()));
-        int toIndex = Math.toIntExact(Math.min(
-                (long) inProgressRows.size(), offset + pageRequest.getPageSize()));
-        List<SeriesProgressReadRepository.SeriesProgressCandidate> pageRows =
-                inProgressRows.subList(fromIndex, toIndex);
+
+        Page<SeriesProgressReadRepository.SeriesProgressCandidate> page =
+                seriesProgressReadRepository.findCandidatesByUserId(
+                        userId, effectiveSort, effectiveDirection, pageRequest);
         List<SeriesInProgressResponseDTO> content = assembleSeriesProgressRows(
-                target, userId, pageRows, snapshots);
-        int totalPages = inProgressRows.isEmpty()
-                ? 0
-                : (int) ((inProgressRows.size() + (long) pageRequest.getPageSize() - 1)
-                        / pageRequest.getPageSize());
-        boolean hasNext = offset + pageRequest.getPageSize() < inProgressRows.size();
-        SeriesInProgressAggregateDTO aggregate = calculateAggregate(
-                userId, allRows, inProgressRows, snapshots);
+                        target, userId, page.getContent(), snapshots).stream()
+                .map(this::omitFullyWatchedSeasonProgress)
+                .toList();
+        SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
 
         return new SeriesInProgressPageResponseDTO(
                 content,
-                pageRequest.getPageNumber() + 1,
-                pageRequest.getPageSize(),
-                inProgressRows.size(),
-                totalPages,
-                hasNext,
+                page.getNumber() + 1,
+                page.getSize(),
+                page.getTotalElements(),
+                page.getTotalPages(),
+                page.hasNext(),
                 aggregate);
     }
 
-    private boolean isAtFullProgress(
-            SeriesProgressReadRepository.SeriesProgressCandidate row,
-            Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots) {
-        SeriesProgressMetadataRefreshService.Snapshot snapshot = snapshots.get(row.getSeriesTmdbId());
-        SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null
-                ? null
-                : snapshot.series();
-        Integer totalEpisodeCount = series == null
-                ? row.getTotalReleasedEpisodeCount()
-                : series.regularReleasedEpisodeCount();
-        return seriesProgressAssembler.isAtFullProgress(row.getWatchedEpisodeCount(), totalEpisodeCount);
+    private SeriesInProgressResponseDTO omitFullyWatchedSeasonProgress(SeriesInProgressResponseDTO series) {
+        List<SeasonProgressDTO> inProgressSeasons = series.seasonProgress().stream()
+                .filter(season -> !seriesProgressAssembler.isAtFullProgress(
+                        season.watchedEpisodeCount(), season.totalEpisodeCount()))
+                .toList();
+        return inProgressSeasons.size() == series.seasonProgress().size()
+                ? series
+                : series.withSeasonProgress(inProgressSeasons);
     }
 
     private List<SeriesInProgressResponseDTO> assembleSeriesProgressRows(
@@ -583,8 +571,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private SeriesInProgressAggregateDTO calculateAggregate(
             UUID userId,
-            List<SeriesProgressReadRepository.SeriesProgressCandidate> allRows,
-            List<SeriesProgressReadRepository.SeriesProgressCandidate> inProgressRows,
+            List<SeriesProgressReadRepository.SeriesProgressCandidate> rows,
             Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots) {
         long releasedEpisodeCount = 0L;
         long knownRuntime = 0L;
@@ -592,7 +579,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         long fallbackWatchedEpisodeCount = 0L;
         long fallbackWatchedRuntimeMinutes = 0L;
 
-        for (SeriesProgressReadRepository.SeriesProgressCandidate row : inProgressRows) {
+        for (SeriesProgressReadRepository.SeriesProgressCandidate row : rows) {
             SeriesProgressMetadataRefreshService.Snapshot snapshot = snapshots.get(row.getSeriesTmdbId());
             SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null ? null : snapshot.series();
             Integer released = series != null ? series.regularReleasedEpisodeCount() : row.getTotalReleasedEpisodeCount();
@@ -612,17 +599,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         SeriesProgressReadRepository.SeriesProgressTotals totals =
                 seriesProgressReadRepository.findGlobalTotalsByUserId(userId);
-        boolean completedRowsFiltered = inProgressRows.size() < allRows.size();
-        long watchedEpisodeCount = !completedRowsFiltered && totals != null
-                && totals.getWatchedEpisodeCount() != null
-                ? totals.getWatchedEpisodeCount()
-                : fallbackWatchedEpisodeCount;
-        long watchedRuntimeMinutes = !completedRowsFiltered && totals != null
-                && totals.getWatchedRuntimeMinutes() != null
-                ? totals.getWatchedRuntimeMinutes()
-                : fallbackWatchedRuntimeMinutes;
-        if (!completedRowsFiltered && totals != null
-                && !Boolean.TRUE.equals(totals.getWatchedRuntimeComplete())) {
+        long watchedEpisodeCount = totals == null || totals.getWatchedEpisodeCount() == null
+                ? fallbackWatchedEpisodeCount
+                : totals.getWatchedEpisodeCount();
+        long watchedRuntimeMinutes = totals == null || totals.getWatchedRuntimeMinutes() == null
+                ? fallbackWatchedRuntimeMinutes
+                : totals.getWatchedRuntimeMinutes();
+        if (totals != null && !Boolean.TRUE.equals(totals.getWatchedRuntimeComplete())) {
             completeRuntime = false;
         }
         Long remainingRuntimeMinutes = completeRuntime
@@ -630,10 +613,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 : null;
 
         return new SeriesInProgressAggregateDTO(
-                inProgressRows.stream()
-                        .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
-                        .distinct()
-                        .count(),
+                rows.stream().map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId).distinct().count(),
                 watchedEpisodeCount,
                 releasedEpisodeCount,
                 Math.max(releasedEpisodeCount - watchedEpisodeCount, 0L),

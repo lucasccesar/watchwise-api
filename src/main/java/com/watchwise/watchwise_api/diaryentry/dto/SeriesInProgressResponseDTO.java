@@ -95,4 +95,14 @@ public record SeriesInProgressResponseDTO(
                 remainingEpisodeCount, remainingRuntimeMinutes, customPosterUrl,
                 seriesTitle, seriesPosterPath, lastWatchedEpisodeTitle, nextEpisode);
     }
+
+    public SeriesInProgressResponseDTO withSeasonProgress(List<SeasonProgressDTO> seasonProgress) {
+        return new SeriesInProgressResponseDTO(
+                seriesTmdbId, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate,
+                watchedEpisodeCount, totalEpisodeCount, watchedPercentage, seasonProgress,
+                lastWatchedSeasonNumber, lastWatchedEpisodeNumber, watchedRuntimeMinutes,
+                totalReleasedEpisodeCount, totalKnownRuntime, lastReleasedEpisodeDate,
+                remainingEpisodeCount, remainingRuntimeMinutes, customPosterUrl, seriesTitle,
+                seriesPosterPath, lastWatchedEpisodeTitle, nextEpisode);
+    }
 }

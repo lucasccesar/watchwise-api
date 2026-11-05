@@ -1130,8 +1130,8 @@ class DiaryEntryServiceImplTest {
     // ---------- getSeriesInProgress ----------
 
     @Test
-    @DisplayName("[getSeriesInProgress] Should Exclude Fully Watched Series Before Paging And Aggregation")
-    void shouldExcludeFullyWatchedSeriesBeforePagingAndAggregation() {
+    @DisplayName("[getSeriesInProgress] Should Build Detailed Envelope With Global Metrics And Directional Ordering")
+    void shouldBuildDetailedEnvelopeWithGlobalMetricsAndDirectionalOrderingForSeriesInProgress() {
         DiaryEntryRepository.SeasonProgress progressA = seasonProgress("a", 1, 2L, 40L);
         DiaryEntryRepository.SeasonProgress progressB = seasonProgress("b", 1, 1L, 20L);
         List<SeriesProgressReadRepository.SeriesProgressCandidate> candidates = List.of(
@@ -1178,10 +1178,8 @@ class DiaryEntryServiceImplTest {
                 .extracting(SeasonProgressDTO::seasonNumber)
                 .doesNotContain(0);
         assertThat(result.aggregate())
-                .isEqualTo(new SeriesInProgressAggregateDTO(2L, 5L, 9L, 4L, 80L));
-        assertThat(result.totalElements()).isEqualTo(2L);
-        assertThat(result.totalPages()).isEqualTo(1);
-        assertThat(result.hasNext()).isFalse();
+                .isEqualTo(new SeriesInProgressAggregateDTO(3L, 9L, 12L, 3L, null));
+        assertThat(result.totalElements()).isEqualTo(3L);
         assertThat(result.page()).isEqualTo(1);
         assertThat(result.size()).isEqualTo(2);
         verifyNoInteractions(tmdbClient);
@@ -1191,9 +1189,8 @@ class DiaryEntryServiceImplTest {
                 SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.ASC);
 
         assertThat(ascending.content()).extracting(SeriesInProgressResponseDTO::seriesTmdbId)
-                .containsExactly("b", "a");
-        assertThat(ascending.totalElements()).isEqualTo(2L);
-        verify(seriesProgressReadRepository).findCandidatesByUserId(
+                .containsExactly("off-page", "b");
+        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class));
     }
@@ -1458,8 +1455,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getSeriesInProgress] Should Return Progress For Each Released Positive Season And Ignore Specials")
-    void shouldReturnProgressForEachReleasedPositiveSeasonAndIgnoreSpecials() {
+    @DisplayName("[getSeriesInProgress] Should Return Incomplete Released Season Progress And Ignore Specials")
+    void shouldReturnIncompleteReleasedSeasonProgressAndIgnoreSpecials() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 4L, 2, 2, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
@@ -1479,9 +1476,7 @@ class DiaryEntryServiceImplTest {
                         SeasonProgressDTO::watchedEpisodeCount,
                         SeasonProgressDTO::totalEpisodeCount,
                         SeasonProgressDTO::watchedPercentage)
-                .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(1, 2L, 4, 50.0),
-                        org.assertj.core.groups.Tuple.tuple(2, 2L, 2, 100.0));
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 2L, 4, 50.0));
         assertThat(result.getContent().getFirst())
                 .extracting(SeriesInProgressResponseDTO::totalEpisodeCount,
                         SeriesInProgressResponseDTO::watchedPercentage)
@@ -1509,10 +1504,7 @@ class DiaryEntryServiceImplTest {
                         SeriesInProgressResponseDTO::totalEpisodeCount,
                         SeriesInProgressResponseDTO::watchedPercentage)
                 .containsExactly(2L, 2, 100.0);
-        assertThat(result.getContent().getFirst().seasonProgress().getFirst())
-                .extracting(SeasonProgressDTO::totalEpisodeCount,
-                        SeasonProgressDTO::watchedPercentage)
-                .containsExactly(2, 100.0);
+        assertThat(result.getContent().getFirst().seasonProgress()).isEmpty();
     }
 
     @Test
@@ -1565,7 +1557,7 @@ class DiaryEntryServiceImplTest {
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent().getFirst().watchedPercentage()).isEqualTo(100.0);
-        assertThat(result.getContent().getFirst().seasonProgress().getFirst().watchedPercentage()).isEqualTo(100.0);
+        assertThat(result.getContent().getFirst().seasonProgress()).isEmpty();
     }
 
     @Test
@@ -1638,10 +1630,9 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
-                lucasId, lucasId, null, 10);
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, null, 10);
 
-        assertThat(result.page()).isEqualTo(1);
+        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isZero());
     }
 
     @Test
@@ -1649,10 +1640,9 @@ class DiaryEntryServiceImplTest {
     void shouldUsePageNumberMinusOneWhenPageNumberIsPositiveForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
-                lucasId, lucasId, 3, 10);
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 3, 10);
 
-        assertThat(result.page()).isEqualTo(3);
+        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isEqualTo(2));
     }
 
     @Test
@@ -1671,10 +1661,10 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageSizeWhenPageSizeIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
-                lucasId, lucasId, 1, null);
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, null);
 
-        assertThat(result.size()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+        assertThat(captureRequestedProgressPage())
+                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE));
     }
 
     @Test
@@ -1682,10 +1672,10 @@ class DiaryEntryServiceImplTest {
     void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimitForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
-                lucasId, lucasId, 1, 1001);
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 1001);
 
-        assertThat(result.size()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
+        assertThat(captureRequestedProgressPage())
+                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE));
     }
 
     @Test
@@ -1713,6 +1703,15 @@ class DiaryEntryServiceImplTest {
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
+    }
+
+    private PageRequest captureRequestedProgressPage() {
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+                eq(lucasId), any(SeriesProgressReadRepository.SeriesProgressSort.class),
+                any(Sort.Direction.class), captor.capture());
+        assertThat(captor.getAllValues().getFirst().isUnpaged()).isTrue();
+        return (PageRequest) captor.getAllValues().get(1);
     }
 
     private Page<SeriesProgressReadRepository.SeriesProgressCandidate> candidatesPage(
