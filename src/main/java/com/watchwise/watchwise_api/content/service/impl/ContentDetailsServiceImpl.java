@@ -616,7 +616,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private EpisodeSummaryDTO toEpisodeSummaryDto(Integer seasonNumber, TmdbEpisodeSummary episode) {
         return new EpisodeSummaryDTO(
-                seasonNumber, episode.episodeNumber(), episode.name(),
+                seasonNumber, episode.episodeNumber(), episode.name(), episode.overview(),
                 parseDate(episode.airDate()), episode.runtime(), episode.stillPath(), episode.voteAverage());
     }
 

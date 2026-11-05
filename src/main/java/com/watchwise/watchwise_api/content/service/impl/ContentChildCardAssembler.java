@@ -136,6 +136,7 @@ public class ContentChildCardAssembler {
                         new ContentCoordinate(
                                 ContentType.SEASON, null, seriesTmdbId, summary.seasonNumber(), null),
                         summary.name(),
+                        null,
                         summary.posterPath(),
                         summary.airDate(),
                         null,
@@ -202,6 +203,7 @@ public class ContentChildCardAssembler {
                         null,
                         null,
                         null,
+                        null,
                         false)
                 : episodeSpec(rootCoordinate.seriesTmdbId(), rootCoordinate.seasonNumber(), summary);
     }
@@ -216,6 +218,7 @@ public class ContentChildCardAssembler {
                         seasonNumber,
                         summary.episodeNumber()),
                 summary.name(),
+                summary.overview(),
                 summary.stillPath(),
                 summary.airDate(),
                 summary.runtime(),
@@ -275,6 +278,7 @@ public class ContentChildCardAssembler {
                 coordinate.seasonNumber(),
                 coordinate.episodeNumber(),
                 spec.title(),
+                spec.overview(),
                 spec.posterPath(),
                 spec.releaseDate(),
                 spec.runtimeMinutes(),
@@ -339,6 +343,7 @@ public class ContentChildCardAssembler {
     private record CardSpec(
             ContentCoordinate coordinate,
             String title,
+            String overview,
             String posterPath,
             LocalDate releaseDate,
             Integer runtimeMinutes,

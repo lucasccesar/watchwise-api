@@ -13,9 +13,27 @@ public record ContentChildCardDTO(
         Integer seasonNumber,
         Integer episodeNumber,
         String title,
+        String overview,
         String posterPath,
         LocalDate releaseDate,
         Integer runtimeMinutes,
         ContentStatsResponseDTO stats,
         ContentViewerStateDTO viewerState) {
+
+    public ContentChildCardDTO(
+            UUID contentId,
+            ContentType type,
+            String tmdbId,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            Integer episodeNumber,
+            String title,
+            String posterPath,
+            LocalDate releaseDate,
+            Integer runtimeMinutes,
+            ContentStatsResponseDTO stats,
+            ContentViewerStateDTO viewerState) {
+        this(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, null,
+                posterPath, releaseDate, runtimeMinutes, stats, viewerState);
+    }
 }

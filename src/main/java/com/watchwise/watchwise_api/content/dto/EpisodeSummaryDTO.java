@@ -6,6 +6,7 @@ public record EpisodeSummaryDTO(
         Integer seasonNumber,
         Integer episodeNumber,
         String name,
+        String overview,
         LocalDate airDate,
         Integer runtime,
         String stillPath,
@@ -17,7 +18,18 @@ public record EpisodeSummaryDTO(
             String name,
             LocalDate airDate,
             Integer runtime,
+            String stillPath,
+            Double tmdbVoteAverage) {
+        this(seasonNumber, episodeNumber, name, null, airDate, runtime, stillPath, tmdbVoteAverage);
+    }
+
+    public EpisodeSummaryDTO(
+            Integer seasonNumber,
+            Integer episodeNumber,
+            String name,
+            LocalDate airDate,
+            Integer runtime,
             String stillPath) {
-        this(seasonNumber, episodeNumber, name, airDate, runtime, stillPath, null);
+        this(seasonNumber, episodeNumber, name, null, airDate, runtime, stillPath, null);
     }
 }
