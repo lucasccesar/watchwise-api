@@ -12,8 +12,9 @@ import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
+import com.watchwise.watchwise_api.content.service.impl.TmdbVoteAverageBatchResolver;
 import com.watchwise.watchwise_api.person.dto.PersonCreditViewDTO;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -22,13 +23,29 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
-@RequiredArgsConstructor
 public class PersonCreditViewAssembler {
 
     private static final int STATS_BATCH_SIZE = 100;
 
     private final PersonCreditViewerStateResolver viewerStateResolver;
     private final ContentStatsService contentStatsService;
+    private final TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver;
+
+    @Autowired
+    public PersonCreditViewAssembler(
+            PersonCreditViewerStateResolver viewerStateResolver,
+            ContentStatsService contentStatsService,
+            TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver) {
+        this.viewerStateResolver = viewerStateResolver;
+        this.contentStatsService = contentStatsService;
+        this.tmdbVoteAverageBatchResolver = tmdbVoteAverageBatchResolver;
+    }
+
+    public PersonCreditViewAssembler(
+            PersonCreditViewerStateResolver viewerStateResolver,
+            ContentStatsService contentStatsService) {
+        this(viewerStateResolver, contentStatsService, null);
+    }
 
     public List<PersonCreditViewDTO> assemble(UUID viewerId, List<PersonFilmographyCredit> credits) {
         ContentViewerStateService.Resolution resolution = viewerStateResolver.resolve(viewerId, credits);
@@ -38,11 +55,31 @@ public class PersonCreditViewAssembler {
         return credits.stream().map(credit -> toView(credit, resolution, statsByContentId)).toList();
     }
 
+    public List<PersonCreditViewDTO> enrichTmdbVoteAverages(
+            List<PersonCreditViewDTO> pageCredits, String language) {
+        if (pageCredits == null || pageCredits.isEmpty()) {
+            return List.of();
+        }
+        if (tmdbVoteAverageBatchResolver == null) {
+            return pageCredits;
+        }
+        List<ContentCoordinate> coordinates = pageCredits.stream()
+                .map(PersonCreditViewAssembler::coordinate)
+                .toList();
+        Map<ContentCoordinate, Double> averagesByCoordinate = tmdbVoteAverageBatchResolver.resolve(
+                coordinates, language);
+        return pageCredits.stream()
+                .map(credit -> credit.withTmdbVoteAverage(averagesByCoordinate.get(coordinate(credit))))
+                .toList();
+    }
+
     private Map<UUID, ContentStatsResponseDTO> loadStats(List<UUID> contentIds) {
         Map<UUID, ContentStatsResponseDTO> stats = new LinkedHashMap<>();
         for (int from = 0; from < contentIds.size(); from += STATS_BATCH_SIZE) {
             List<UUID> batch = contentIds.subList(from, Math.min(from + STATS_BATCH_SIZE, contentIds.size()));
-            List<ContentStatsResponseDTO> responses = contentStatsService.getStatsBatch(batch);
+            List<ContentStatsResponseDTO> responses = tmdbVoteAverageBatchResolver == null
+                    ? contentStatsService.getStatsBatch(batch)
+                    : contentStatsService.getCommunityStatsBatch(batch);
             if (responses != null) {
                 responses.stream().filter(response -> response != null && response.contentId() != null)
                         .forEach(response -> stats.put(response.contentId(), response));
@@ -75,6 +112,11 @@ public class PersonCreditViewAssembler {
     }
 
     private static ContentCoordinate coordinate(PersonFilmographyCredit credit) {
+        ContentType type = credit.type() == MovieOrSeriesType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
+        return new ContentCoordinate(type, credit.tmdbId(), null, null, null);
+    }
+
+    private static ContentCoordinate coordinate(PersonCreditViewDTO credit) {
         ContentType type = credit.type() == MovieOrSeriesType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
         return new ContentCoordinate(type, credit.tmdbId(), null, null, null);
     }

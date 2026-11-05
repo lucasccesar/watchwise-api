@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.common.tmdb;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.watchwise.watchwise_api.common.cache.BudgetedCacheFactory;
+import com.watchwise.watchwise_api.common.concurrent.ShutdownAwareRunnable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -213,7 +214,30 @@ public class TmdbCacheConfig {
                 0L,
                 TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(CONTENT_CARD_METADATA_RESOLUTION_QUEUE_CAPACITY),
-                new ThreadPoolExecutor.CallerRunsPolicy());
+                new ThreadPoolExecutor.CallerRunsPolicy() {
+                    @Override
+                    public void rejectedExecution(Runnable task, ThreadPoolExecutor executor) {
+                        if (executor.isShutdown()) {
+                            if (task instanceof ShutdownAwareRunnable shutdownAwareTask) {
+                                rejectIfNotStarted(shutdownAwareTask);
+                            }
+                            return;
+                        }
+                        try {
+                            super.rejectedExecution(task, executor);
+                        } finally {
+                            if (executor.isShutdown() && task instanceof ShutdownAwareRunnable shutdownAwareTask) {
+                                rejectIfNotStarted(shutdownAwareTask);
+                            }
+                        }
+                    }
+
+                    private void rejectIfNotStarted(ShutdownAwareRunnable task) {
+                        if (!task.hasStarted()) {
+                            task.onShutdownRejection();
+                        }
+                    }
+                });
     }
 
     @Bean(destroyMethod = "shutdown")

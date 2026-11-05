@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
+import com.watchwise.watchwise_api.common.concurrent.ShutdownAwareRunnable;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -33,6 +34,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -177,10 +180,11 @@ public class ContentCardAssembler {
         List<ContentCardSpec> metadataSpecs = List.copyOf(specsByCoordinate.values());
 
         List<CompletableFuture<CardMetadata>> futures = metadataSpecs.stream()
-                .map(spec -> CompletableFuture.supplyAsync(
-                        () -> metadata(spec, context, requestedFields,
-                                seriesBackdropCoordinates.contains(spec.coordinate())),
-                        metadataResolutionExecutor))
+                .map(spec -> metadataAsync(
+                        spec,
+                        context,
+                        requestedFields,
+                        seriesBackdropCoordinates.contains(spec.coordinate())))
                 .toList();
         for (int index = 0; index < metadataSpecs.size(); index++) {
             try {
@@ -193,6 +197,42 @@ public class ContentCardAssembler {
             }
         }
         return metadataByCoordinate;
+    }
+
+    private CompletableFuture<CardMetadata> metadataAsync(
+            ContentCardSpec spec,
+            ContentCardContext context,
+            Set<ContentCardFieldSet> requestedFields,
+            boolean forceTmdbLookup) {
+        CompletableFuture<CardMetadata> future = new CompletableFuture<>();
+        AtomicBoolean started = new AtomicBoolean();
+        ShutdownAwareRunnable task = new ShutdownAwareRunnable() {
+            @Override
+            public void run() {
+                started.set(true);
+                try {
+                    future.complete(metadata(spec, context, requestedFields, forceTmdbLookup));
+                } catch (Throwable exception) {
+                    future.completeExceptionally(exception);
+                }
+            }
+
+            @Override
+            public boolean hasStarted() {
+                return started.get();
+            }
+
+            @Override
+            public void onShutdownRejection() {
+                future.complete(missingMetadata(spec));
+            }
+        };
+        try {
+            metadataResolutionExecutor.execute(task);
+        } catch (RejectedExecutionException rejected) {
+            future.completeExceptionally(rejected);
+        }
+        return future;
     }
 
     private List<ContentCardSpec> distinctSpecs(Collection<ContentCardSpec> specs) {
@@ -217,6 +257,9 @@ public class ContentCardAssembler {
         Set<ContentCardFieldSet> normalized = fields.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(() -> EnumSet.noneOf(ContentCardFieldSet.class)));
+        if (normalized.contains(ContentCardFieldSet.STATS)) {
+            normalized.add(ContentCardFieldSet.TMDB_VOTE_AVERAGE);
+        }
         if (normalized.contains(ContentCardFieldSet.TMDB_VOTE_AVERAGE)) {
             normalized.add(ContentCardFieldSet.BASIC_METADATA);
         }
@@ -234,8 +277,11 @@ public class ContentCardAssembler {
         Map<UUID, ContentStatsResponseDTO> statsByContentId = new LinkedHashMap<>();
         for (int start = 0; start < distinctContentIds.size(); start += MAX_STATS_BATCH_SIZE) {
             int end = Math.min(start + MAX_STATS_BATCH_SIZE, distinctContentIds.size());
-            List<ContentStatsResponseDTO> stats = contentStatsService.getStatsBatch(
+            List<ContentStatsResponseDTO> stats = contentStatsService.getCommunityStatsBatch(
                     distinctContentIds.subList(start, end));
+            if (stats == null) {
+                stats = contentStatsService.getStatsBatch(distinctContentIds.subList(start, end));
+            }
             if (stats == null) {
                 continue;
             }
@@ -252,8 +298,14 @@ public class ContentCardAssembler {
             ContentCardContext context,
             Set<ContentCardFieldSet> requestedFields,
             boolean forceTmdbLookup) {
-        if (!requestedFields.contains(ContentCardFieldSet.BASIC_METADATA)
-                || (!forceTmdbLookup && hasAllKnownMetadata(spec))) {
+        boolean voteAverageRequested = requestedFields.contains(ContentCardFieldSet.TMDB_VOTE_AVERAGE);
+        if (!requestedFields.contains(ContentCardFieldSet.BASIC_METADATA)) {
+            return new CardMetadata(null, ContentPreviewStatus.AVAILABLE);
+        }
+        if (voteAverageRequested && spec.tmdbVoteAverageResolved() && !forceTmdbLookup) {
+            return missingMetadata(spec);
+        }
+        if (!forceTmdbLookup && !voteAverageRequested && hasAllKnownMetadata(spec)) {
             return new CardMetadata(null, ContentPreviewStatus.AVAILABLE);
         }
 
@@ -263,6 +315,10 @@ public class ContentCardAssembler {
             TmdbCardMetadata value = found.value();
             return new CardMetadata(value, metadataStatus(spec, value));
         }
+        return missingMetadata(spec);
+    }
+
+    private CardMetadata missingMetadata(ContentCardSpec spec) {
         return new CardMetadata(null, hasKnownMetadata(spec)
                 ? ContentPreviewStatus.PARTIAL
                 : ContentPreviewStatus.UNAVAILABLE);
@@ -325,7 +381,9 @@ public class ContentCardAssembler {
                 ? spec.genres()
                 : metadata == null ? null : metadata.genres();
         Double tmdbVoteAverage = requestedFields.contains(ContentCardFieldSet.TMDB_VOTE_AVERAGE)
-                ? metadata == null ? null : metadata.voteAverage()
+                ? spec.tmdbVoteAverageResolved()
+                        ? spec.tmdbVoteAverage()
+                        : metadata == null ? null : metadata.voteAverage()
                 : null;
         ContentCardStatsDTO stats = requestedFields.contains(ContentCardFieldSet.STATS)
                 ? toStats(data.contentId(), data.contentId() == null

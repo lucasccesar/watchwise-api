@@ -11,4 +11,8 @@ public interface ContentStatsService {
 
     List<ContentStatsResponseDTO> getStatsBatch(List<UUID> contentIds);
 
+    ContentStatsResponseDTO getCommunityStats(UUID contentId);
+
+    List<ContentStatsResponseDTO> getCommunityStatsBatch(List<UUID> contentIds);
+
 }

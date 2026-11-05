@@ -9,9 +9,25 @@ public record ContentPageStatsDTO(
         long ratingsCount,
         List<RatingDistributionDTO> ratingsDistribution,
         long playsCount,
-        long commentsCount) {
+        long commentsCount,
+        Double tmdbVoteAverage) {
 
     public ContentPageStatsDTO {
         ratingsDistribution = ratingsDistribution == null ? List.of() : List.copyOf(ratingsDistribution);
+    }
+
+    public ContentPageStatsDTO(
+            UUID contentId,
+            Double averageScore,
+            long ratingsCount,
+            List<RatingDistributionDTO> ratingsDistribution,
+            long playsCount,
+            long commentsCount) {
+        this(contentId, averageScore, ratingsCount, ratingsDistribution, playsCount, commentsCount, null);
+    }
+
+    public ContentPageStatsDTO withTmdbVoteAverage(Double value) {
+        return new ContentPageStatsDTO(contentId, averageScore, ratingsCount, ratingsDistribution,
+                playsCount, commentsCount, value);
     }
 }

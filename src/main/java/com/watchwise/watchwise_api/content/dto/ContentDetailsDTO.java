@@ -39,7 +39,8 @@ public record ContentDetailsDTO(
         @JsonProperty("twitter_id") String twitterId,
         String customPosterUrl,
         String parentTitle,
-        Integer parentReleaseYear) {
+        Integer parentReleaseYear,
+        Double tmdbVoteAverage) {
 
     public ContentDetailsDTO(
             UUID contentId,
@@ -74,7 +75,47 @@ public record ContentDetailsDTO(
         this(contentId, type, title, overview, posterPath, backdropPath, releaseDate, runtimeMinutes,
                 totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, countries, cast, guestStars,
                 creators, watchProviders, seasons, episodes, recentEpisodes, budget, revenue,
-                productionCompanies, crew, videos, imdbId, facebookId, instagramId, twitterId, null, null, null);
+                productionCompanies, crew, videos, imdbId, facebookId, instagramId, twitterId, null, null, null, null);
+    }
+
+    public ContentDetailsDTO(
+            UUID contentId,
+            ContentType type,
+            String title,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            LocalDate releaseDate,
+            Integer runtimeMinutes,
+            Integer totalRuntimeMinutes,
+            Integer numberOfSeasons,
+            Integer numberOfEpisodes,
+            List<String> genres,
+            List<String> countries,
+            List<CastMemberDTO> cast,
+            List<CastMemberDTO> guestStars,
+            List<CreatorDTO> creators,
+            List<WatchProviderDTO> watchProviders,
+            List<SeasonSummaryDTO> seasons,
+            List<EpisodeSummaryDTO> episodes,
+            List<EpisodeSummaryDTO> recentEpisodes,
+            Long budget,
+            Long revenue,
+            List<ProductionCompanyDTO> productionCompanies,
+            List<CrewMemberDTO> crew,
+            List<VideoDTO> videos,
+            String imdbId,
+            String facebookId,
+            String instagramId,
+            String twitterId,
+            String customPosterUrl,
+            String parentTitle,
+            Integer parentReleaseYear) {
+        this(contentId, type, title, overview, posterPath, backdropPath, releaseDate, runtimeMinutes,
+                totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, countries, cast, guestStars,
+                creators, watchProviders, seasons, episodes, recentEpisodes, budget, revenue,
+                productionCompanies, crew, videos, imdbId, facebookId, instagramId, twitterId,
+                customPosterUrl, parentTitle, parentReleaseYear, null);
     }
 
     public ContentDetailsDTO(
@@ -106,6 +147,6 @@ public record ContentDetailsDTO(
         this(contentId, type, title, overview, posterPath, backdropPath, releaseDate, runtimeMinutes,
                 totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, countries, cast, guestStars,
                 creators, watchProviders, seasons, episodes, recentEpisodes, budget, revenue,
-                productionCompanies, crew, videos, null, null, null, null, null, null, null);
+                productionCompanies, crew, videos, null, null, null, null, null, null, null, null);
     }
 }

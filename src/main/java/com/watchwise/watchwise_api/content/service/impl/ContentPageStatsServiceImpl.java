@@ -30,7 +30,10 @@ public class ContentPageStatsServiceImpl implements ContentPageStatsService {
 
     @Override
     public ContentPageStatsDTO getStats(UUID contentId) {
-        ContentStatsResponseDTO existingStats = contentStatsService.getStats(contentId);
+        ContentStatsResponseDTO existingStats = contentStatsService.getCommunityStats(contentId);
+        if (existingStats == null) {
+            existingStats = contentStatsService.getStats(contentId);
+        }
         boolean opinionContent = contentRepository.findById(contentId)
                 .map(content -> content.getType() == ContentType.SERIES || content.getType() == ContentType.SEASON)
                 .orElse(false);
@@ -66,6 +69,7 @@ public class ContentPageStatsServiceImpl implements ContentPageStatsService {
                 ratingsCount,
                 distribution,
                 existingStats.playsCount(),
-                existingStats.commentsCount());
+                existingStats.commentsCount(),
+                null);
     }
 }

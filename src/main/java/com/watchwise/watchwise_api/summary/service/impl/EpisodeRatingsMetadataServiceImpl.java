@@ -89,7 +89,8 @@ public class EpisodeRatingsMetadataServiceImpl implements EpisodeRatingsMetadata
                             .filter(number -> number != null && number > 0)
                             .distinct()
                             .sorted()
-                            .toList());
+                            .toList(),
+                    details.voteAverage());
         }
         if (lookup instanceof TmdbLookupResult.NotFound<TmdbTvDisplayDetails>) {
             throw new NotFoundException("Series not found in TMDB");

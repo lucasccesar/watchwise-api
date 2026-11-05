@@ -73,7 +73,7 @@ public class ContentPageServiceImpl implements ContentPageService {
         return new ContentPageDTO(
                 details,
                 metadata,
-                contentPageStatsService.getStats(contentId),
+                contentPageStatsService.getStats(contentId).withTmdbVoteAverage(details.tmdbVoteAverage()),
                 visibleReviewsCount(contentId, viewerId),
                 viewerState,
                 navigation,

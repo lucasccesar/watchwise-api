@@ -47,8 +47,11 @@ public class HomeNextEpisodeAssembler {
         java.util.UUID contentId = null;
         if (content != null) {
             contentId = content.getId();
-            ContentStatsResponseDTO stats = contentStatsService.getStats(contentId);
-            communityAverageScore = stats.averageScore();
+            ContentStatsResponseDTO stats = contentStatsService.getCommunityStats(contentId);
+            if (stats == null) {
+                stats = contentStatsService.getStats(contentId);
+            }
+            communityAverageScore = stats == null ? null : stats.averageScore();
         }
 
         return Optional.of(new SeriesInProgressPreviewDTO(

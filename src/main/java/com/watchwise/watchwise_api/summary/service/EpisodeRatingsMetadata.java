@@ -8,13 +8,19 @@ public record EpisodeRatingsMetadata(
         Integer releaseYear,
         String posterPath,
         String backdropPath,
-        List<Integer> regularSeasonNumbers) {
+        List<Integer> regularSeasonNumbers,
+        Double tmdbVoteAverage) {
     public EpisodeRatingsMetadata {
         regularSeasonNumbers = List.copyOf(regularSeasonNumbers);
     }
 
     public EpisodeRatingsMetadata(String seriesTmdbId, String title, Integer releaseYear,
+            String posterPath, String backdropPath, List<Integer> regularSeasonNumbers) {
+        this(seriesTmdbId, title, releaseYear, posterPath, backdropPath, regularSeasonNumbers, null);
+    }
+
+    public EpisodeRatingsMetadata(String seriesTmdbId, String title, Integer releaseYear,
             String posterPath, String backdropPath) {
-        this(seriesTmdbId, title, releaseYear, posterPath, backdropPath, List.of());
+        this(seriesTmdbId, title, releaseYear, posterPath, backdropPath, List.of(), null);
     }
 }

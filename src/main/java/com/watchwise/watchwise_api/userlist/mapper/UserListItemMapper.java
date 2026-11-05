@@ -19,6 +19,8 @@ public interface UserListItemMapper {
     @Mapping(target = "episodeAverageRating", ignore = true)
     @Mapping(target = "globalEpisodeAverageRating", ignore = true)
     @Mapping(target = "contentAverageRating", ignore = true)
+    @Mapping(target = "tmdbVoteAverage", ignore = true)
+    @Mapping(target = "withTmdbVoteAverage", ignore = true)
     UserListItemResponseDTO userListItemToResponseDto(UserListItem userListItem);
 
     UserListPreviewDTO userListToPreviewDto(UserList userList);

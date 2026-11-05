@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.summary.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeCalculator;
@@ -9,6 +10,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,14 +32,34 @@ public class EpisodeRatingsReleasedEpisodes {
         this.seasonFetchExecutor = seasonFetchExecutor;
     }
 
-    public Map<Integer, List<Integer>> load(String seriesTmdbId, List<Integer> regularSeasonNumbers, LocalDate today) {
-        Map<Integer, CompletableFuture<List<Integer>>> futures = new LinkedHashMap<>();
+    public Map<Integer, List<Integer>> load(
+            String seriesTmdbId, List<Integer> regularSeasonNumbers, LocalDate today) {
+        Map<Integer, List<Integer>> episodes = new LinkedHashMap<>();
+        loadReleasedEpisodes(seriesTmdbId, regularSeasonNumbers, today)
+                .forEach((seasonNumber, releasedEpisodes) -> episodes.put(seasonNumber,
+                        releasedEpisodes.stream().map(TmdbEpisodeSummary::episodeNumber).toList()));
+        return episodes;
+    }
+
+    public List<ReleasedEpisodeRating> loadVoteAverages(
+            String seriesTmdbId, List<Integer> regularSeasonNumbers, LocalDate today) {
+        List<ReleasedEpisodeRating> episodes = new ArrayList<>();
+        loadReleasedEpisodes(seriesTmdbId, regularSeasonNumbers, today)
+                .forEach((seasonNumber, releasedEpisodes) -> releasedEpisodes.forEach(episode ->
+                        episodes.add(new ReleasedEpisodeRating(
+                                seasonNumber, episode.episodeNumber(), episode.voteAverage()))));
+        return episodes;
+    }
+
+    private Map<Integer, List<TmdbEpisodeSummary>> loadReleasedEpisodes(
+            String seriesTmdbId, List<Integer> regularSeasonNumbers, LocalDate today) {
+        Map<Integer, CompletableFuture<List<TmdbEpisodeSummary>>> futures = new LinkedHashMap<>();
         for (Integer seasonNumber : regularSeasonNumbers) {
             futures.computeIfAbsent(seasonNumber, number -> CompletableFuture.supplyAsync(
                     () -> loadSeason(seriesTmdbId, number, today), seasonFetchExecutor));
         }
-        Map<Integer, List<Integer>> episodes = new LinkedHashMap<>();
-        for (Map.Entry<Integer, CompletableFuture<List<Integer>>> entry : futures.entrySet()) {
+        Map<Integer, List<TmdbEpisodeSummary>> episodes = new LinkedHashMap<>();
+        for (Map.Entry<Integer, CompletableFuture<List<TmdbEpisodeSummary>>> entry : futures.entrySet()) {
             try {
                 episodes.put(entry.getKey(), entry.getValue().join());
             } catch (CompletionException exception) {
@@ -50,7 +72,7 @@ public class EpisodeRatingsReleasedEpisodes {
         return episodes;
     }
 
-    private List<Integer> loadSeason(String seriesTmdbId, Integer seasonNumber, LocalDate today) {
+    private List<TmdbEpisodeSummary> loadSeason(String seriesTmdbId, Integer seasonNumber, LocalDate today) {
         TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
                 seriesTmdbId, seasonNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
@@ -58,8 +80,6 @@ public class EpisodeRatingsReleasedEpisodes {
                 || !seasonNumber.equals(found.value().seasonNumber())) {
             throw new TmdbUnavailableException("TMDB is currently unavailable");
         }
-        return runtimeCalculator.releasedEpisodes(found.value(), today).stream()
-                .map(episode -> episode.episodeNumber())
-                .toList();
+        return runtimeCalculator.releasedEpisodes(found.value(), today);
     }
 }

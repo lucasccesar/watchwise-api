@@ -10,5 +10,16 @@ public record TmdbSeasonSummary(
         String overview,
         @JsonProperty("air_date") String airDate,
         @JsonProperty("episode_count") Integer episodeCount,
-        @JsonProperty("poster_path") String posterPath) {
+        @JsonProperty("poster_path") String posterPath,
+        @JsonProperty("vote_average") Double voteAverage) {
+
+    public TmdbSeasonSummary(
+            Integer seasonNumber,
+            String name,
+            String overview,
+            String airDate,
+            Integer episodeCount,
+            String posterPath) {
+        this(seasonNumber, name, overview, airDate, episodeCount, posterPath, null);
+    }
 }

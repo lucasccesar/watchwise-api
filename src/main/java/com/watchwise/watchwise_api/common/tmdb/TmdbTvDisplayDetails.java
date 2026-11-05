@@ -12,8 +12,14 @@ public record TmdbTvDisplayDetails(
         @JsonProperty("first_air_date") String firstAirDate,
         @JsonProperty("poster_path") String posterPath,
         @JsonProperty("backdrop_path") String backdropPath,
-        List<TmdbSeasonSummary> seasons) {
+        List<TmdbSeasonSummary> seasons,
+        @JsonProperty("vote_average") Double voteAverage) {
+    public TmdbTvDisplayDetails(String id, String name, String firstAirDate, String posterPath,
+            String backdropPath, List<TmdbSeasonSummary> seasons) {
+        this(id, name, firstAirDate, posterPath, backdropPath, seasons, null);
+    }
+
     public TmdbTvDisplayDetails(String id, String name, String firstAirDate, String posterPath, String backdropPath) {
-        this(id, name, firstAirDate, posterPath, backdropPath, List.of());
+        this(id, name, firstAirDate, posterPath, backdropPath, List.of(), null);
     }
 }

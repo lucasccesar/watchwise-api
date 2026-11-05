@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.content.dto.ContentChildCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
@@ -33,7 +34,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ContentChildCardAssembler {
 
-    private static final int RECENT_EPISODES_LIMIT = 3;
+    private static final int RECENT_EPISODES_LIMIT = 4;
 
     private final ContentCardAssembler contentCardAssembler;
 
@@ -137,7 +138,9 @@ public class ContentChildCardAssembler {
                         summary.name(),
                         summary.posterPath(),
                         summary.airDate(),
-                        null))
+                        null,
+                        summary.tmdbVoteAverage(),
+                        true))
                 .toList();
     }
 
@@ -197,7 +200,9 @@ public class ContentChildCardAssembler {
                         null,
                         null,
                         null,
-                        null)
+                        null,
+                        null,
+                        false)
                 : episodeSpec(rootCoordinate.seriesTmdbId(), rootCoordinate.seasonNumber(), summary);
     }
 
@@ -213,7 +218,9 @@ public class ContentChildCardAssembler {
                 summary.name(),
                 summary.stillPath(),
                 summary.airDate(),
-                summary.runtime());
+                summary.runtime(),
+                summary.tmdbVoteAverage(),
+                true);
     }
 
     private Map<ContentCoordinate, ContentChildCardDTO> assembleCards(
@@ -229,11 +236,12 @@ public class ContentChildCardAssembler {
 
         List<ContentCardSpec> cardSpecs = distinctSpecs.stream()
                 .map(spec -> new ContentCardSpec(
-                        spec.coordinate(), spec.title(), spec.posterPath(), spec.releaseDate(), spec.runtimeMinutes()))
+                        spec.coordinate(), spec.title(), spec.posterPath(), spec.releaseDate(),
+                        spec.runtimeMinutes(), List.of(), spec.tmdbVoteAverage(), spec.tmdbVoteAverageResolved()))
                 .toList();
         ContentCardAssembler.AssemblyResult result = contentCardAssembler.assembleWithViewerStates(
                 cardSpecs,
-                new ContentCardContext(null, null, null, viewerId),
+                new ContentCardContext(TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, null, null, viewerId),
                 Set.of(ContentCardFieldSet.STATS, ContentCardFieldSet.VIEWER_STATE));
 
         Map<ContentCoordinate, ContentChildCardDTO> cards = new LinkedHashMap<>();
@@ -253,10 +261,12 @@ public class ContentChildCardAssembler {
         ContentCoordinate coordinate = spec.coordinate();
         ContentCardStatsDTO stats = card == null ? null : card.stats();
         ContentStatsResponseDTO statsResponse = stats == null
-                ? new ContentStatsResponseDTO(card == null ? null : card.contentId(), null, 0, 0, 0)
+                ? new ContentStatsResponseDTO(
+                        card == null ? null : card.contentId(), null, 0, 0, 0,
+                        card == null ? null : card.tmdbVoteAverage())
                 : new ContentStatsResponseDTO(
                         card.contentId(), stats.averageScore(), stats.playsCount(),
-                        stats.reviewsCount(), stats.commentsCount());
+                        stats.reviewsCount(), stats.commentsCount(), card.tmdbVoteAverage());
         return new ContentChildCardDTO(
                 card == null ? null : card.contentId(),
                 coordinate.type(),
@@ -331,7 +341,9 @@ public class ContentChildCardAssembler {
             String title,
             String posterPath,
             LocalDate releaseDate,
-            Integer runtimeMinutes) {
+            Integer runtimeMinutes,
+            Double tmdbVoteAverage,
+            boolean tmdbVoteAverageResolved) {
     }
 
     private record SectionSpecs(

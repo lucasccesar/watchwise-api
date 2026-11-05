@@ -680,9 +680,27 @@ public class SummaryServiceImpl implements SummaryService {
         }
 
         Set<EpisodeCoordinate> releasedCoordinates = new LinkedHashSet<>();
-        episodeRatingsReleasedEpisodes.load(seriesTmdbId, metadata.regularSeasonNumbers(), today)
-                .forEach((seasonNumber, episodeNumbers) -> episodeNumbers.forEach(episodeNumber ->
-                        releasedCoordinates.add(new EpisodeCoordinate(seasonNumber, episodeNumber))));
+        Map<EpisodeCoordinate, Double> tmdbVoteAverages = new HashMap<>();
+        List<ReleasedEpisodeRating> releasedEpisodeRatings = episodeRatingsReleasedEpisodes.loadVoteAverages(
+                seriesTmdbId, metadata.regularSeasonNumbers(), today);
+        if (releasedEpisodeRatings == null || releasedEpisodeRatings.isEmpty()) {
+            Map<Integer, List<Integer>> releasedEpisodes = episodeRatingsReleasedEpisodes.load(
+                    seriesTmdbId, metadata.regularSeasonNumbers(), today);
+            if (releasedEpisodes != null) {
+                releasedEpisodes.forEach((seasonNumber, episodeNumbers) -> {
+                    if (episodeNumbers != null) {
+                        episodeNumbers.forEach(episodeNumber ->
+                                releasedCoordinates.add(new EpisodeCoordinate(seasonNumber, episodeNumber)));
+                    }
+                });
+            }
+        } else {
+            for (ReleasedEpisodeRating episode : releasedEpisodeRatings) {
+                EpisodeCoordinate coordinate = new EpisodeCoordinate(episode.seasonNumber(), episode.episodeNumber());
+                releasedCoordinates.add(coordinate);
+                tmdbVoteAverages.put(coordinate, episode.tmdbVoteAverage());
+            }
+        }
 
         Map<EpisodeCoordinate, Integer> personalScores = new HashMap<>();
         for (DiaryEntryRepository.LatestUserEpisodeScore score : diaryEntryRepository
@@ -730,7 +748,8 @@ public class SummaryServiceImpl implements SummaryService {
                             coordinate.episodeNumber(),
                             personalScores.get(coordinate),
                             averageScore,
-                            rating == null ? 0L : rating.ratingCount());
+                            rating == null ? 0L : rating.ratingCount(),
+                            tmdbVoteAverages.get(coordinate));
                 })
                 .toList();
 
@@ -747,7 +766,8 @@ public class SummaryServiceImpl implements SummaryService {
                 metadata.posterPath(),
                 metadata.backdropPath(),
                 overallAverageScore,
-                overallRatingCount);
+                overallRatingCount,
+                metadata.tmdbVoteAverage());
     }
 
     @Override

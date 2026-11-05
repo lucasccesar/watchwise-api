@@ -10,7 +10,19 @@ public record ContentCardSpec(
         String posterPath,
         LocalDate releaseDate,
         Integer runtimeMinutes,
-        List<String> genres) {
+        List<String> genres,
+        Double tmdbVoteAverage,
+        boolean tmdbVoteAverageResolved) {
+
+    public ContentCardSpec(
+            ContentCoordinate coordinate,
+            String title,
+            String posterPath,
+            LocalDate releaseDate,
+            Integer runtimeMinutes,
+            List<String> genres) {
+        this(coordinate, title, posterPath, releaseDate, runtimeMinutes, genres, null, false);
+    }
 
     public ContentCardSpec(
             ContentCoordinate coordinate,
@@ -18,7 +30,7 @@ public record ContentCardSpec(
             String posterPath,
             LocalDate releaseDate,
             Integer runtimeMinutes) {
-        this(coordinate, title, posterPath, releaseDate, runtimeMinutes, null);
+        this(coordinate, title, posterPath, releaseDate, runtimeMinutes, null, null, false);
     }
 
     public ContentCardSpec {

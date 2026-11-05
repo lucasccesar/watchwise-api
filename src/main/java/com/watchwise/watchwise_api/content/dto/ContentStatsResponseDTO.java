@@ -7,6 +7,15 @@ public record ContentStatsResponseDTO(
         Double averageScore,
         long playsCount,
         long reviewsCount,
-        long commentsCount
+        long commentsCount,
+        Double tmdbVoteAverage
 ) {
+    public ContentStatsResponseDTO(
+            UUID contentId,
+            Double averageScore,
+            long playsCount,
+            long reviewsCount,
+            long commentsCount) {
+        this(contentId, averageScore, playsCount, reviewsCount, commentsCount, null);
+    }
 }

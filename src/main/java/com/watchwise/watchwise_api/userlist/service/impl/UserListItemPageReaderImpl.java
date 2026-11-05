@@ -5,11 +5,14 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.TmdbVoteAverageBatchResolver;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -29,7 +32,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemPageReader;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -46,7 +49,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class UserListItemPageReaderImpl implements UserListItemPageReader {
 
     private static final Set<String> ITEM_SORT_FIELDS = Set.of(
@@ -60,8 +62,51 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
     private final DiaryEntryRepository diaryEntryRepository;
     private final ContentRatingRepository contentRatingRepository;
     private final ContentRepository contentRepository;
+    private final TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver;
     private final PageRequestFactory pageRequestFactory;
     private final UserBlockAccessService userBlockAccessService;
+
+    @Autowired
+    public UserListItemPageReaderImpl(
+            UserListRepository userListRepository,
+            FollowerRepository followerRepository,
+            UserListItemService userListItemService,
+            LikeService likeService,
+            CommentRepository commentRepository,
+            DiaryEntryRepository diaryEntryRepository,
+            ContentRatingRepository contentRatingRepository,
+            ContentRepository contentRepository,
+            TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver,
+            PageRequestFactory pageRequestFactory,
+            UserBlockAccessService userBlockAccessService) {
+        this.userListRepository = userListRepository;
+        this.followerRepository = followerRepository;
+        this.userListItemService = userListItemService;
+        this.likeService = likeService;
+        this.commentRepository = commentRepository;
+        this.diaryEntryRepository = diaryEntryRepository;
+        this.contentRatingRepository = contentRatingRepository;
+        this.contentRepository = contentRepository;
+        this.tmdbVoteAverageBatchResolver = tmdbVoteAverageBatchResolver;
+        this.pageRequestFactory = pageRequestFactory;
+        this.userBlockAccessService = userBlockAccessService;
+    }
+
+    public UserListItemPageReaderImpl(
+            UserListRepository userListRepository,
+            FollowerRepository followerRepository,
+            UserListItemService userListItemService,
+            LikeService likeService,
+            CommentRepository commentRepository,
+            DiaryEntryRepository diaryEntryRepository,
+            ContentRatingRepository contentRatingRepository,
+            ContentRepository contentRepository,
+            PageRequestFactory pageRequestFactory,
+            UserBlockAccessService userBlockAccessService) {
+        this(userListRepository, followerRepository, userListItemService, likeService, commentRepository,
+                diaryEntryRepository, contentRatingRepository, contentRepository, null, pageRequestFactory,
+                userBlockAccessService);
+    }
 
     @Override
     public UserListItemPage read(UserListItemPageRequest request) {
@@ -105,12 +150,16 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
         int totalPages = filtered.isEmpty()
                 ? 0
                 : (int) Math.ceil((double) filtered.size() / pageRequest.getPageSize());
+        List<UserListItemResponseDTO> pageItems = filtered.subList(fromIndex, toIndex);
+        if (request.mode() != UserListItemPageMode.VISUAL) {
+            pageItems = enrichTmdbVoteAverages(pageItems);
+        }
         boolean likedByMe = likeService.getLikedListIds(request.viewerId(), List.of(request.listId()))
                 .contains(request.listId());
 
         return new UserListItemPage(
                 userList,
-                filtered.subList(fromIndex, toIndex),
+                pageItems,
                 itemsWithState.watchedPercentage(),
                 userList.getLikesCount(),
                 likedByMe,
@@ -125,6 +174,29 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
                 userListItemService.getTotalRuntimeMinutes(request.listId()),
                 userList.getRank(),
                 itemScope);
+    }
+
+    private List<UserListItemResponseDTO> enrichTmdbVoteAverages(List<UserListItemResponseDTO> pageItems) {
+        List<ContentCoordinate> coordinates = pageItems.stream()
+                .map(UserListItemResponseDTO::content)
+                .filter(Objects::nonNull)
+                .map(this::coordinate)
+                .toList();
+        Map<ContentCoordinate, Double> voteAverages = coordinates.isEmpty() || tmdbVoteAverageBatchResolver == null
+                ? Map.of()
+                : tmdbVoteAverageBatchResolver.resolve(
+                        coordinates, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+
+        return pageItems.stream()
+                .map(item -> item.withTmdbVoteAverage(item.content() == null
+                        ? null
+                        : voteAverages.get(coordinate(item.content()))))
+                .toList();
+    }
+
+    private ContentCoordinate coordinate(ContentRefDTO content) {
+        return new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber());
     }
 
     private List<UserListItemResponseDTO> filterAndSortItems(

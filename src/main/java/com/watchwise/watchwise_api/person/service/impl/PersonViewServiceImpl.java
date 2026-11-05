@@ -67,6 +67,9 @@ public class PersonViewServiceImpl implements PersonViewService {
 
         PageRequest request = pageRequestFactory.build(page, size == null ? MAX_PAGE_SIZE : size, MAX_PAGE_SIZE);
         PageResponseDTO<PersonCreditViewDTO> response = page(filtered, request);
+        response = new PageResponseDTO<>(
+                creditViewAssembler.enrichTmdbVoteAverages(response.content(), language),
+                response.page(), response.size(), response.totalElements(), response.totalPages(), response.hasNext());
         PersonDetailsDTO person = new PersonDetailsDTO(aggregate.id(), aggregate.name(), aggregate.biography(),
                 aggregate.birthday(), aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(),
                 TmdbImagePathBuilder.profilePath(aggregate.profilePath()), aggregate.knownForDepartment(),

@@ -91,7 +91,7 @@ import java.util.stream.Collectors;
 public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     static final int MAX_BATCH_IDS = 100;
-    private static final int RECENT_EPISODES_LIMIT = 3;
+    private static final int RECENT_EPISODES_LIMIT = 4;
     private static final int RECENT_SEASONS_LIMIT_WHEN_FROZEN = 2;
     private static final Set<String> ALLOWED_CREW_JOBS = Set.of(
             "Director", "Screenplay", "Executive Producer", "Production Manager",
@@ -237,7 +237,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.twitterId(),
                 customPosterUrl,
                 null,
-                null);
+                null,
+                details.voteAverage());
     }
 
     private ContentDetailsDTO buildSeriesDetails(
@@ -299,7 +300,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.twitterId(),
                 customPosterUrl,
                 null,
-                null);
+                null,
+                details.voteAverage());
     }
 
     private ContentDetailsDTO buildSeasonDetails(
@@ -345,7 +347,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 customPosterUrl,
                 resolveTvTitle(series, region),
-                releaseYearOf(series.firstAirDate()));
+                releaseYearOf(series.firstAirDate()),
+                season.voteAverage());
     }
 
     private ContentDetailsDTO buildEpisodeDetails(
@@ -394,7 +397,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 customPosterUrl,
                 resolveTvTitle(series, region),
-                releaseYearOf(series.firstAirDate()));
+                releaseYearOf(series.firstAirDate()),
+                episode.voteAverage());
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {
@@ -585,7 +589,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .map(season -> new SeasonSummaryDTO(
                         season.seasonNumber(), season.name(), season.posterPath(),
                         parseDate(season.airDate()), season.episodeCount(),
-                        airedEpisodeCount(fullDetailsBySeasonNumber.get(season.seasonNumber()), today)))
+                        airedEpisodeCount(fullDetailsBySeasonNumber.get(season.seasonNumber()), today),
+                        season.voteAverage()))
                 .toList();
     }
 
@@ -612,7 +617,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private EpisodeSummaryDTO toEpisodeSummaryDto(Integer seasonNumber, TmdbEpisodeSummary episode) {
         return new EpisodeSummaryDTO(
                 seasonNumber, episode.episodeNumber(), episode.name(),
-                parseDate(episode.airDate()), episode.runtime(), episode.stillPath());
+                parseDate(episode.airDate()), episode.runtime(), episode.stillPath(), episode.voteAverage());
     }
 
     private List<SeriesRuntimeResolution.LoadedSeason> fetchAllSeasonsInParallel(

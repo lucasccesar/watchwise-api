@@ -18,12 +18,13 @@ public record UserListItemResponseDTO(
         ContentStateDTO contentState,
         Double episodeAverageRating,
         Double globalEpisodeAverageRating,
-        Double contentAverageRating
+        Double contentAverageRating,
+        Double tmdbVoteAverage
 ) {
     public UserListItemResponseDTO withCustomPosterUrl(String customPosterUrl) {
         return new UserListItemResponseDTO(
                 id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
-                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating);
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating, tmdbVoteAverage);
     }
 
     public UserListItemResponseDTO withRatingAverages(
@@ -32,24 +33,38 @@ public record UserListItemResponseDTO(
             Double contentAverageRating) {
         return new UserListItemResponseDTO(
                 id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
-                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating);
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating, tmdbVoteAverage);
+    }
+
+    public UserListItemResponseDTO withTmdbVoteAverage(Double tmdbVoteAverage) {
+        return new UserListItemResponseDTO(
+                id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating, tmdbVoteAverage);
+    }
+
+    public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
+            String description, LocalDateTime createdAt, LocalDateTime updatedAt, String customPosterUrl,
+            ContentStateDTO contentState, Double episodeAverageRating, Double globalEpisodeAverageRating,
+            Double contentAverageRating) {
+        this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating, null);
     }
 
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt) {
-        this(id, content, childList, position, description, createdAt, updatedAt, null, null, null, null, null);
+        this(id, content, childList, position, description, createdAt, updatedAt, null, null, null, null, null, null);
     }
 
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt, String customPosterUrl) {
         this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt, String customPosterUrl,
             ContentStateDTO contentState) {
         this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
-                null, null, null);
+                null, null, null, null);
     }
 }

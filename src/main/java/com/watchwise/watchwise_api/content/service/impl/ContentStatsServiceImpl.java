@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
@@ -14,6 +15,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +33,7 @@ public class ContentStatsServiceImpl implements ContentStatsService {
     private final ContentRatingRepository ratingRepository;
     private final ContentReviewRepository reviewRepository;
     private final DiaryCompletionProjectionRepository projectionRepository;
+    private final TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver;
 
     @Override
     public ContentStatsResponseDTO getStats(UUID contentId) {
@@ -39,6 +42,35 @@ public class ContentStatsServiceImpl implements ContentStatsService {
 
     @Override
     public List<ContentStatsResponseDTO> getStatsBatch(List<UUID> contentIds) {
+        StatsBatchResult result = loadCommunityStats(contentIds);
+        List<Content> contents = result.contentById().values().stream().toList();
+        Map<ContentCoordinate, Double> tmdbRatings = tmdbVoteAverageBatchResolver == null
+                ? Map.of()
+                : tmdbVoteAverageBatchResolver.resolve(
+                        contents.stream().map(ContentCoordinate::from).toList(), null);
+        Map<UUID, Double> tmdbRatingByContentId = new LinkedHashMap<>();
+        for (Content content : contents) {
+            tmdbRatingByContentId.put(content.getId(), tmdbRatings.get(ContentCoordinate.from(content)));
+        }
+
+        return result.stats().stream()
+                .map(stats -> new ContentStatsResponseDTO(
+                        stats.contentId(), stats.averageScore(), stats.playsCount(), stats.reviewsCount(),
+                        stats.commentsCount(), tmdbRatingByContentId.get(stats.contentId())))
+                .toList();
+    }
+
+    @Override
+    public ContentStatsResponseDTO getCommunityStats(UUID contentId) {
+        return getCommunityStatsBatch(List.of(contentId)).get(0);
+    }
+
+    @Override
+    public List<ContentStatsResponseDTO> getCommunityStatsBatch(List<UUID> contentIds) {
+        return loadCommunityStats(contentIds).stats();
+    }
+
+    private StatsBatchResult loadCommunityStats(List<UUID> contentIds) {
         if (contentIds == null || contentIds.isEmpty()) {
             throw new BadRequestException("ids must not be empty");
         }
@@ -46,7 +78,9 @@ public class ContentStatsServiceImpl implements ContentStatsService {
             throw new BadRequestException("Cannot request stats for more than " + MAX_BATCH_IDS + " contents at once");
         }
 
-        Map<UUID, ContentType> typeById = contentRepository.findAllById(contentIds).stream()
+        Map<UUID, Content> contentById = contentRepository.findAllById(contentIds).stream()
+                .collect(Collectors.toMap(Content::getId, content -> content, (first, ignored) -> first));
+        Map<UUID, ContentType> typeById = contentById.values().stream()
                 .collect(Collectors.toMap(Content::getId, Content::getType));
         List<UUID> watchIds = contentIds.stream()
                 .filter(id -> typeById.get(id) == ContentType.MOVIE || typeById.get(id) == ContentType.EPISODE)
@@ -76,7 +110,7 @@ public class ContentStatsServiceImpl implements ContentStatsService {
         Map<UUID, Long> commentsCountByContentId = commentRepository.countByContentIdIn(contentIds).stream()
                 .collect(Collectors.toMap(CommentRepository.ContentCommentCount::getContentId, CommentRepository.ContentCommentCount::getCount));
 
-        return contentIds.stream()
+        List<ContentStatsResponseDTO> stats = contentIds.stream()
                 .map(contentId -> opinionIds.contains(contentId)
                         ? new ContentStatsResponseDTO(contentId,
                                 ratings.containsKey(contentId) ? ratings.get(contentId).getAverageScore() : null,
@@ -84,6 +118,7 @@ public class ContentStatsServiceImpl implements ContentStatsService {
                                 commentsCountByContentId.getOrDefault(contentId, 0L))
                         : toResponseDto(contentId, diaryStatsByContentId.get(contentId), commentsCountByContentId))
                 .toList();
+        return new StatsBatchResult(stats, contentById);
     }
 
     private ContentStatsResponseDTO toResponseDto(
@@ -94,5 +129,10 @@ public class ContentStatsServiceImpl implements ContentStatsService {
         long commentsCount = commentsCountByContentId.getOrDefault(contentId, 0L);
 
         return new ContentStatsResponseDTO(contentId, averageScore, playsCount, reviewsCount, commentsCount);
+    }
+
+    private record StatsBatchResult(
+            List<ContentStatsResponseDTO> stats,
+            Map<UUID, Content> contentById) {
     }
 }
