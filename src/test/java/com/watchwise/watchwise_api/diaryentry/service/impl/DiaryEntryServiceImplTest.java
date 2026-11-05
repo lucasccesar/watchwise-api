@@ -3294,6 +3294,70 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Include Episodes After A Stale Finale - When Resuming The First Series Pass")
+    void shouldIncludeEpisodesAfterAStaleFinaleWhenResumingTheFirstSeriesPass() {
+        LocalDate cutoff = LocalDate.now();
+        Map<Integer, Content> episodes = stubEightEpisodeSeries(cutoff.minusDays(1));
+        DiaryEntry existingFirstWatch = buildDiaryEntry(lucas, episodes.get(1), 1);
+        persistedWatchEvents.put(existingFirstWatch.getId(), existingFirstWatch);
+
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntriesInBulk(
+                lucasId, bulkSeriesRequest(cutoff), "stale-finale-first-pass");
+
+        assertThat(result.events()).hasSize(7);
+        assertThat(result.events())
+                .extracting(event -> event.entry().content().episodeNumber())
+                .containsExactly(2, 3, 4, 5, 6, 7, 8);
+        assertThat(result.events())
+                .extracting(event -> event.entry().watchNumber())
+                .containsOnly(1);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Exclude Episodes After The Cutoff - When A Persisted Finale Is Earlier")
+    void shouldExcludeEpisodesAfterTheCutoffWhenPersistedFinaleIsEarlier() {
+        LocalDate cutoff = LocalDate.now();
+        Map<Integer, Content> episodes = stubEightEpisodeSeries(cutoff.plusDays(1));
+        DiaryEntry existingFirstWatch = buildDiaryEntry(lucas, episodes.get(1), 1);
+        persistedWatchEvents.put(existingFirstWatch.getId(), existingFirstWatch);
+
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntriesInBulk(
+                lucasId, bulkSeriesRequest(cutoff), "stale-finale-cutoff");
+
+        assertThat(result.events()).hasSize(6);
+        assertThat(result.events())
+                .extracting(event -> event.entry().content().episodeNumber())
+                .containsExactly(2, 3, 4, 5, 6, 7);
+        assertThat(result.events())
+                .extracting(event -> event.entry().watchNumber())
+                .containsOnly(1);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Continue The Rewatch Pass After A Stale Finale - When Earlier Episodes Have A Second Watch")
+    void shouldContinueTheRewatchPassAfterAStaleFinaleWhenEarlierEpisodesHaveASecondWatch() {
+        LocalDate cutoff = LocalDate.now();
+        Map<Integer, Content> episodes = stubEightEpisodeSeries(cutoff.minusDays(1));
+        for (int episodeNumber = 1; episodeNumber <= 8; episodeNumber++) {
+            DiaryEntry firstWatch = buildDiaryEntry(lucas, episodes.get(episodeNumber), 1);
+            persistedWatchEvents.put(firstWatch.getId(), firstWatch);
+        }
+        DiaryEntry secondWatch = buildDiaryEntry(lucas, episodes.get(1), 2);
+        persistedWatchEvents.put(secondWatch.getId(), secondWatch);
+
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntriesInBulk(
+                lucasId, bulkSeriesRequest(cutoff), "stale-finale-rewatch");
+
+        assertThat(result.events()).hasSize(7);
+        assertThat(result.events())
+                .extracting(event -> event.entry().content().episodeNumber())
+                .containsExactly(2, 3, 4, 5, 6, 7, 8);
+        assertThat(result.events())
+                .extracting(event -> event.entry().watchNumber())
+                .containsOnly(2);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Successfully Process All Seasons - When Bulk-Logging A Complete SERIES")
     void shouldSuccessfullyProcessAllSeasonsWhenBulkLoggingACompleteSeries() {
         // Setup: Series with 2 seasons (S1: 2 episodes, S2: 2 episodes)
@@ -4433,6 +4497,62 @@ class DiaryEntryServiceImplTest {
                 content.getSeasonNumber(), content.getEpisodeNumber(), title, "/poster.jpg", null,
                 LocalDate.of(1999, 10, 15), 1999, content.getRuntimeMinutes(), null, null, null, null,
                 null, null, previewStatus);
+    }
+
+    private Map<Integer, Content> stubEightEpisodeSeries(LocalDate episodeEightAirDate) {
+        Map<Integer, Content> episodes = new HashMap<>();
+        for (int episodeNumber = 1; episodeNumber <= 8; episodeNumber++) {
+            Content episode = episodeNumber == 7
+                    ? buildFinaleEpisode("95350", 1, episodeNumber)
+                    : buildEpisode("95350", 1, episodeNumber);
+            episodes.put(episodeNumber, episode);
+        }
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("95350", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(
+                "95350", 1, ContentType.EPISODE)).thenReturn(Optional.of(episodes.get(7)));
+        LocalDate firstEpisodeAirDate = episodeEightAirDate.minusDays(49);
+        when(tmdbClient.getTvFullDetails("95350", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null,
+                        null, null, null, null,
+                        List.of(new TmdbSeasonSummary(1, null, null, firstEpisodeAirDate.toString(), 8, null)),
+                        null, null, null, null,
+                        1, 8,
+                        null, null, null, null, null, null, null)));
+        List<TmdbEpisodeSummary> episodeSummaries = new ArrayList<>();
+        for (int episodeNumber = 1; episodeNumber <= 8; episodeNumber++) {
+            LocalDate airDate = episodeNumber == 8
+                    ? episodeEightAirDate
+                    : firstEpisodeAirDate.plusDays(7L * (episodeNumber - 1));
+            episodeSummaries.add(new TmdbEpisodeSummary(
+                    episodeNumber, null, null, airDate.toString(), 45, null, null));
+        }
+        when(tmdbClient.getSeasonFullDetails("95350", 1, lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(
+                        new TmdbSeasonFullDetails(null, null, null, null, null, 1, episodeSummaries, null, null)));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class))).thenAnswer(invocation -> {
+            ContentRefCreationDTO reference = invocation.getArgument(0);
+            return new ContentRefDTO(UUID.randomUUID(), reference.tmdbId(), reference.type(),
+                    reference.seriesTmdbId(), reference.seasonNumber(), reference.episodeNumber(),
+                    reference.isSeasonFinale(), reference.isSeriesFinale(), LocalDateTime.now(), LocalDateTime.now());
+        });
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true))).thenAnswer(invocation -> {
+            ContentRefCreationDTO reference = invocation.getArgument(0);
+            Content episode = episodes.get(reference.episodeNumber());
+            return new ContentRefDTO(episode.getId(), episode.getTmdbId(), episode.getType(),
+                    episode.getSeriesTmdbId(), episode.getSeasonNumber(), episode.getEpisodeNumber(),
+                    episode.getIsSeasonFinale(), episode.getIsSeriesFinale(), episode.getCreatedAt(), episode.getUpdatedAt());
+        });
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        return episodes;
+    }
+
+    private DiaryEntryBulkCreationDTO bulkSeriesRequest(LocalDate watchedDate) {
+        return new DiaryEntryBulkCreationDTO(
+                new ContentRefCreationDTO("95350", ContentType.SERIES, null, null, null, null, null),
+                watchedDate, null, 1, null);
     }
 
     private Content buildContent(String tmdbId, ContentType type) {

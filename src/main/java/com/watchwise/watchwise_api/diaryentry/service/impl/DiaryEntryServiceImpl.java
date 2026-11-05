@@ -1834,17 +1834,21 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Optional<Content> existingFinale = contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
         boolean hasParseableEpisodeDates = hasParseableEpisodeAirDates(seasonDetails);
+        List<Integer> airedEpisodeNumbers = airedEpisodeNumbers(seasonDetails, cutoff);
         if (existingFinale.isPresent()) {
             Integer existingEpisodeNumber = existingFinale.get().getEpisodeNumber();
             LocalDate existingAirDate = episodeAirDate(seasonDetails, existingEpisodeNumber);
             if (existingEpisodeNumber != null
                     && (isEpisodeReleasedByCutoff(seasonDetails, existingEpisodeNumber, cutoff)
                     || (!hasParseableEpisodeDates && existingAirDate == null))) {
+                if (!airedEpisodeNumbers.isEmpty()) {
+                    int latestAiredEpisodeNumber = airedEpisodeNumbers.get(airedEpisodeNumbers.size() - 1);
+                    return Math.max(existingEpisodeNumber, latestAiredEpisodeNumber);
+                }
                 return existingEpisodeNumber;
             }
         }
 
-        List<Integer> airedEpisodeNumbers = airedEpisodeNumbers(seasonDetails, cutoff);
         if (!airedEpisodeNumbers.isEmpty()) {
             return airedEpisodeNumbers.get(airedEpisodeNumbers.size() - 1);
         }
