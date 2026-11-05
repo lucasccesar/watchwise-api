@@ -570,7 +570,7 @@ class ContentControllerIntegrationTest {
         userContentPosterRepository.save(UserContentPoster.builder()
                 .user(posterOwner)
                 .content(content)
-                .customPosterUrl("https://image.tmdb.org/t/p/w342/custom-poster.jpg")
+                .customPosterUrl("/custom-poster.jpg")
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build());
@@ -669,7 +669,7 @@ class ContentControllerIntegrationTest {
         userContentPosterRepository.save(UserContentPoster.builder()
                 .user(viewer)
                 .content(content)
-                .customPosterUrl("https://image.tmdb.org/t/p/w342/viewer-poster.jpg")
+                .customPosterUrl("/viewer-poster.jpg")
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build());
@@ -687,7 +687,7 @@ class ContentControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.details.contentId").value(content.getId().toString()))
                 .andExpect(jsonPath("$.details.customPosterUrl")
-                        .value("https://image.tmdb.org/t/p/w342/viewer-poster.jpg"))
+                        .value("/viewer-poster.jpg"))
                 .andExpect(jsonPath("$.stats.contentId").value(content.getId().toString()))
                 .andExpect(jsonPath("$.visibleReviewsCount").value(0))
                 .andExpect(jsonPath("$.sections.seasons").isEmpty())

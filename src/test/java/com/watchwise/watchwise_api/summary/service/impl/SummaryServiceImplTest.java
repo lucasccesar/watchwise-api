@@ -455,9 +455,9 @@ class SummaryServiceImplTest {
         when(diaryEntryRepository.findRecentHomeEntries(eq(lucasId), any(), any()))
                 .thenReturn(List.of(episodeEntry, movieEntry));
         ContentCardDTO movieCard = cardFor(
-                movieContent, "Fight Club", "https://image.tmdb.org/t/p/w342/lucas-movie.png", 7.5);
+                movieContent, "Fight Club", "/lucas-movie.png", 7.5);
         ContentCardDTO episodeCard = cardFor(
-                episodeContent, "Pilot", "https://image.tmdb.org/t/p/w342/lucas-episode.png", 8.4);
+                episodeContent, "Pilot", "/lucas-episode.png", 8.4);
         ContentRefDTO socialContent = new ContentRefDTO(movieContent.getId(), movieContent.getTmdbId(),
                 movieContent.getType(), movieContent.getSeriesTmdbId(), movieContent.getSeasonNumber(),
                 movieContent.getEpisodeNumber(), false, false, now, now);
@@ -474,8 +474,8 @@ class SummaryServiceImplTest {
 
         assertThat(result.recentlyWatched()).extracting(HomeRecentlyWatchedDTO::customPosterUrl)
                 .containsExactly(
-                        "https://image.tmdb.org/t/p/w342/lucas-episode.png",
-                        "https://image.tmdb.org/t/p/w342/lucas-movie.png");
+                        "/lucas-episode.png",
+                        "/lucas-movie.png");
 
         JsonNode json = serialize(result);
         JsonNode recentlyWatchedCard = json.get("recentlyWatched").get(0).get("card");
@@ -540,20 +540,20 @@ class SummaryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
                 .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
         when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
-                recent.getContent().getId(), "https://image.tmdb.org/t/p/w342/recent.png",
-                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
-                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png",
-                first.getContent().getId(), "https://image.tmdb.org/t/p/w342/first.png",
-                last.getContent().getId(), "https://image.tmdb.org/t/p/w342/last.png"));
+                recent.getContent().getId(), "/recent.png",
+                top.getContent().getId(), "/top.png",
+                bottom.getContent().getId(), "/bottom.png",
+                first.getContent().getId(), "/first.png",
+                last.getContent().getId(), "/last.png"));
 
         MonthInReviewResponseDTO result = summaryService.getMonthInReview(
                 lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
 
-        assertThat(result.recentWatched().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/recent.png");
-        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
-        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
-        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/first.png");
-        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/last.png");
+        assertThat(result.recentWatched().getFirst().customPosterUrl()).isEqualTo("/recent.png");
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("/bottom.png");
+        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("/first.png");
+        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("/last.png");
         verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
     }
 
@@ -576,17 +576,17 @@ class SummaryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
                 .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
         when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
-                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
-                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png",
-                first.getContent().getId(), "https://image.tmdb.org/t/p/w342/first.png",
-                last.getContent().getId(), "https://image.tmdb.org/t/p/w342/last.png"));
+                top.getContent().getId(), "/top.png",
+                bottom.getContent().getId(), "/bottom.png",
+                first.getContent().getId(), "/first.png",
+                last.getContent().getId(), "/last.png"));
 
         YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 2026);
 
-        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
-        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
-        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/first.png");
-        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/last.png");
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("/bottom.png");
+        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("/first.png");
+        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("/last.png");
         verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
     }
 
@@ -772,13 +772,13 @@ class SummaryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
                 .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
         when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
-                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
-                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png"));
+                top.getContent().getId(), "/top.png",
+                bottom.getContent().getId(), "/bottom.png"));
 
         AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
 
-        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
-        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("/bottom.png");
         verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
     }
 
@@ -1257,7 +1257,7 @@ class SummaryServiceImplTest {
         };
         ContentCardDTO card = new ContentCardDTO(
                 movie.getId(), ContentType.MOVIE, "550", null, null, null,
-                "Fight Club", "/fight-club.jpg", "https://image.tmdb.org/t/p/w342/custom.jpg",
+                "Fight Club", "/fight-club.jpg", "/custom.jpg",
                 LocalDate.of(1999, 10, 15), 1999, 139, null, null, null, List.of("Drama"),
                 null, null, ContentPreviewStatus.AVAILABLE);
         DiaryEntryResponseDTO topResponse = buildDiaryEntryResponseDto(topRatedEntry);
@@ -1410,7 +1410,7 @@ class SummaryServiceImplTest {
                         latestPublicEpisodeRatingAggregate("1399", 1, 6, 90L, 9L),
                         latestPublicEpisodeRatingAggregate("1399", 0, 1, 99L, 9L)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399")))
-                .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+                .thenReturn(Map.of("1399", "/lucas-series-poster.jpg"));
 
         EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(marinaId, lucasId, " 1399 ");
 
@@ -1426,7 +1426,7 @@ class SummaryServiceImplTest {
         assertThat(result.releaseYear()).isEqualTo(2008);
         assertThat(result.posterPath()).isEqualTo("/poster.jpg");
         assertThat(result.backdropPath()).isEqualTo("/backdrop.jpg");
-        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("/lucas-series-poster.jpg");
         verify(diaryEntryRepository).findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399");
         verify(diaryEntryRepository).findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399");
         verify(diaryEntryRepository, never()).findEpisodeEntriesBySeriesForUser(lucasId, "1399");
@@ -1641,7 +1641,7 @@ class SummaryServiceImplTest {
                         "1399", seriesProgressSnapshot("1399", 10),
                         "94605", seriesProgressSnapshot("94605", 4)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399", "94605")))
-                .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+                .thenReturn(Map.of("1399", "/lucas-series-poster.jpg"));
         when(userRepository.findById(marinaId)).thenReturn(Optional.of(buildUser(marinaId, true)));
 
         EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(marinaId, lucasId, null, null);
@@ -1651,7 +1651,7 @@ class SummaryServiceImplTest {
                         EpisodeRatingsMapItemDTO::customPosterUrl)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(
-                                "1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"),
+                                "1399", "/lucas-series-poster.jpg"),
                         org.assertj.core.groups.Tuple.tuple("94605", null));
         verify(userContentPosterService).findSeriesPosters(lucasId, List.of("1399", "94605"));
     }

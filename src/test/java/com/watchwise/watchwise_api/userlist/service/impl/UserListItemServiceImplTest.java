@@ -274,7 +274,7 @@ class UserListItemServiceImplTest {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
         UserListItemResponseDTO mapped = new UserListItemResponseDTO(
                 item.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
-        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-diary.png";
+        String canonicalPoster = "/from-diary.png";
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
                 .thenReturn(List.of(item));
         when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
@@ -796,16 +796,16 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId,
-                new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "https://image.tmdb.org/t/p/w342/poster.png"));
+                new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "/poster.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/poster.png");
     }
 
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When CustomPosterUrl Is Provided With ChildListId")
     void shouldThrowBadRequestExceptionWhenCustomPosterUrlIsProvidedWithChildListId() {
         assertThatThrownBy(() -> userListItemService.addItem(lucasId, listId,
-                new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://image.tmdb.org/t/p/w342/poster.png")))
+                new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "/poster.png")))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("customPosterUrl is only allowed on content items");
 
@@ -1431,9 +1431,9 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/new.png"));
+                new UserListItemPatchDTO(null, null, "/new.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/new.png");
         verify(userListItemRepository, never()).save(any());
     }
 
@@ -1443,8 +1443,8 @@ class UserListItemServiceImplTest {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
         UserListItemResponseDTO mapped = new UserListItemResponseDTO(
                 item.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
-        String requestedPoster = "https://image.tmdb.org/t/p/w342/requested.png";
-        String canonicalPoster = "https://image.tmdb.org/t/p/w342/canonical.png";
+        String requestedPoster = "/requested.png";
+        String canonicalPoster = "/canonical.png";
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
         when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
@@ -1466,9 +1466,9 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/same.png"));
+                new UserListItemPatchDTO(null, null, "/same.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/same.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/same.png");
         verify(userListItemRepository, never()).save(any());
         verify(userListItemRepository, never()).flush();
     }
@@ -1482,7 +1482,7 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         assertThatThrownBy(() -> userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/x.png")))
+                new UserListItemPatchDTO(null, null, "/x.png")))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("customPosterUrl is only allowed on content items");
 

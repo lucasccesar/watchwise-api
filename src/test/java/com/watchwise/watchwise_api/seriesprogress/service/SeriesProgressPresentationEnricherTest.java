@@ -51,7 +51,7 @@ class SeriesProgressPresentationEnricherTest {
                 List.of(row),
                 Map.of("1399", List.of(new SeasonProgressDTO(1, 2L, 3, 66.6))),
                 Set.of(),
-                Map.of("1399", "https://image.tmdb.org/t/p/w342/custom.jpg"));
+                Map.of("1399", "/custom.jpg"));
 
         SeriesProgressPresentationEnricher.Enrichment enrichment = result.get("1399");
         assertThat(enrichment.seriesTitle()).isEqualTo("Breaking Bad");

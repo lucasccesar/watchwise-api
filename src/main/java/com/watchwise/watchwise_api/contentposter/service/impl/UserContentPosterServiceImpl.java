@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.contentposter.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.common.validation.TmdbPosterUrlPolicy;
+import com.watchwise.watchwise_api.common.validation.TmdbPosterPathPolicy;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.dto.UserContentPosterResponseDTO;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
@@ -26,13 +26,13 @@ public class UserContentPosterServiceImpl implements UserContentPosterService {
 
     @Override
     @Transactional
-    public UserContentPosterResponseDTO upsert(UUID userId, UUID contentId, String customPosterUrl) {
-        validatePosterUrl(customPosterUrl);
+    public UserContentPosterResponseDTO upsert(UUID userId, UUID contentId, String customPosterPath) {
+        validatePosterPath(customPosterPath);
 
         contentRepository.findById(contentId)
                 .orElseThrow(() -> new NotFoundException("Content not found"));
 
-        userContentPosterRepository.upsert(UUID.randomUUID(), userId, contentId, customPosterUrl);
+        userContentPosterRepository.upsert(UUID.randomUUID(), userId, contentId, customPosterPath);
 
         return userContentPosterRepository.findByUserIdAndContentId(userId, contentId)
                 .map(poster -> new UserContentPosterResponseDTO(
@@ -55,6 +55,7 @@ public class UserContentPosterServiceImpl implements UserContentPosterService {
         }
 
         return userContentPosterRepository.findByUserIdAndContentIdIn(userId, contentIds).stream()
+                .filter(projection -> TmdbPosterPathPolicy.isValid(projection.getCustomPosterUrl()))
                 .collect(Collectors.toMap(
                         UserContentPosterRepository.ContentPosterProjection::getContentId,
                         UserContentPosterRepository.ContentPosterProjection::getCustomPosterUrl));
@@ -77,6 +78,7 @@ public class UserContentPosterServiceImpl implements UserContentPosterService {
                 .toList();
 
         return userContentPosterRepository.findByUserIdInAndContentIdIn(userIds, contentIds).stream()
+                .filter(projection -> TmdbPosterPathPolicy.isValid(projection.getCustomPosterUrl()))
                 .map(projection -> Map.entry(
                         new UserContentPosterKey(projection.getUserId(), projection.getContentId()),
                         projection.getCustomPosterUrl()))
@@ -91,14 +93,16 @@ public class UserContentPosterServiceImpl implements UserContentPosterService {
         }
 
         return userContentPosterRepository.findByUserIdAndSeriesTmdbIdIn(userId, seriesTmdbIds).stream()
+                .filter(projection -> TmdbPosterPathPolicy.isValid(projection.getCustomPosterUrl()))
                 .collect(Collectors.toMap(
                         UserContentPosterRepository.SeriesPosterProjection::getSeriesTmdbId,
                         UserContentPosterRepository.SeriesPosterProjection::getCustomPosterUrl));
     }
 
-    private void validatePosterUrl(String customPosterUrl) {
-        if (!TmdbPosterUrlPolicy.isValid(customPosterUrl)) {
-            throw new BadRequestException("customPosterUrl must be a TMDB w342 poster URL");
+    private void validatePosterPath(String customPosterPath) {
+        if (!TmdbPosterPathPolicy.isValid(customPosterPath)) {
+            throw new BadRequestException(
+                    "customPosterUrl must be a TMDB poster file path beginning with a single slash");
         }
     }
 }

@@ -11,7 +11,7 @@ public interface UserContentPosterService {
     record UserContentPosterKey(UUID userId, UUID contentId) {
     }
 
-    UserContentPosterResponseDTO upsert(UUID userId, UUID contentId, String customPosterUrl);
+    UserContentPosterResponseDTO upsert(UUID userId, UUID contentId, String customPosterPath);
 
     void delete(UUID userId, UUID contentId);
 

@@ -10,13 +10,13 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 @Documented
-@Constraint(validatedBy = TmdbPosterUrlValidator.class)
+@Constraint(validatedBy = TmdbPosterPathValidator.class)
 @Target({ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER, ElementType.ANNOTATION_TYPE,
         ElementType.RECORD_COMPONENT})
 @Retention(RetentionPolicy.RUNTIME)
-public @interface TmdbPosterUrl {
+public @interface TmdbPosterPath {
 
-    String message() default "must be a TMDB w342 poster URL";
+    String message() default "must be a TMDB poster file path beginning with a single slash";
 
     Class<?>[] groups() default {};
 

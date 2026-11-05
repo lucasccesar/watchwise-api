@@ -993,7 +993,7 @@ class FeedServiceImplTest {
                 UUID.randomUUID(), ContentType.MOVIE, null, 1, now, now);
         UserContentPosterService.UserContentPosterKey posterKey =
                 new UserContentPosterService.UserContentPosterKey(followedId, newestEntry.getContent().getId());
-        String customPosterUrl = "https://image.tmdb.org/t/p/w342/current.png";
+        String customPosterUrl = "/current.png";
 
         when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of(newestEntry, olderEntry));

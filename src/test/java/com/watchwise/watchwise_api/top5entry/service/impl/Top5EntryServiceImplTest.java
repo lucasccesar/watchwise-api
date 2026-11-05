@@ -199,7 +199,7 @@ class Top5EntryServiceImplTest {
     void shouldReturnCanonicalPosterWhenPosterWasSetThroughDiary() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         Top5EntryResponseDTO mapped = buildResponseDto(entry);
-        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-diary.png";
+        String canonicalPoster = "/from-diary.png";
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of(entry));
@@ -357,9 +357,9 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(lucasId, ContentType.MOVIE,
-                new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "https://image.tmdb.org/t/p/w342/poster.png"));
+                new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "/poster.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/poster.png");
     }
 
     @Test
@@ -760,9 +760,9 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         top5EntryService.updateEntry(lucasId, ContentType.MOVIE, entry.getId(),
-                new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/new.png"));
+                new Top5EntryPatchDTO("/new.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/new.png");
         verify(top5EntryRepository, never()).save(any());
         verify(top5EntryRepository, never()).flush();
     }
@@ -784,7 +784,7 @@ class Top5EntryServiceImplTest {
     @DisplayName("[updateEntry] Should Throw BadRequestException - When Type Is Season")
     void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnUpdate() {
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.SEASON, UUID.randomUUID(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
+                lucasId, ContentType.SEASON, UUID.randomUUID(), new Top5EntryPatchDTO("/x.png")))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(top5EntryRepository);
@@ -797,7 +797,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(missingId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.MOVIE, missingId, new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
+                lucasId, ContentType.MOVIE, missingId, new Top5EntryPatchDTO("/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }
@@ -818,7 +818,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(marinasEntry.getId())).thenReturn(Optional.of(marinasEntry));
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.MOVIE, marinasEntry.getId(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
+                lucasId, ContentType.MOVIE, marinasEntry.getId(), new Top5EntryPatchDTO("/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }
@@ -830,7 +830,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(movieEntry.getId())).thenReturn(Optional.of(movieEntry));
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.SERIES, movieEntry.getId(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
+                lucasId, ContentType.SERIES, movieEntry.getId(), new Top5EntryPatchDTO("/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }

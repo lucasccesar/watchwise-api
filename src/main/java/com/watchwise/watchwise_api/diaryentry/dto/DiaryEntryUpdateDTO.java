@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.dto;
 
-import com.watchwise.watchwise_api.common.validation.TmdbPosterUrl;
+import com.watchwise.watchwise_api.common.validation.TmdbPosterPath;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
@@ -14,7 +14,7 @@ public record DiaryEntryUpdateDTO(
         @Min(1) @Max(10) Integer score,
         LocalDate watchedDate,
         Boolean watchedInTheater,
-        @Size(max = 2048) @TmdbPosterUrl String customPosterUrl,
+        @Size(max = 2048) @TmdbPosterPath String customPosterUrl,
         @Size(max = 20) List<UUID> watchedWith
 ) {
     public DiaryEntryUpdateDTO(String comment, Integer score, LocalDate watchedDate, Boolean watchedInTheater,

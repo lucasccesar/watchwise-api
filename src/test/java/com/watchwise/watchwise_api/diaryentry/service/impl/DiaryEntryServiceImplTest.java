@@ -711,7 +711,7 @@ class DiaryEntryServiceImplTest {
     void shouldReturnCanonicalPosterWhenPosterWasSetThroughAnotherFeature() {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         DiaryEntryResponseDTO mapped = buildResponseDto(entry);
-        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-list.png";
+        String canonicalPoster = "/from-list.png";
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(entry)));
@@ -1264,14 +1264,14 @@ class DiaryEntryServiceImplTest {
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
                 .thenReturn(Map.of(seriesTmdbId, snapshot(seriesTmdbId)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of(seriesTmdbId)))
-                .thenReturn(Map.of(seriesTmdbId, "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+                .thenReturn(Map.of(seriesTmdbId, "/lucas-series-poster.jpg"));
 
         SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
                 lucasId, lucasId, 1, 10,
                 SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
 
         assertThat(result.content().getFirst().customPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+                .isEqualTo("/lucas-series-poster.jpg");
         verify(userContentPosterService).findSeriesPosters(lucasId, List.of(seriesTmdbId));
     }
 
@@ -1299,14 +1299,14 @@ class DiaryEntryServiceImplTest {
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
                 .thenReturn(Map.of(seriesTmdbId, snapshot(seriesTmdbId)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of(seriesTmdbId)))
-                .thenReturn(Map.of(seriesTmdbId, "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+                .thenReturn(Map.of(seriesTmdbId, "/lucas-series-poster.jpg"));
 
         SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
                 marinaId, lucasId, 1, 10,
                 SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
 
         assertThat(result.content().getFirst().customPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+                .isEqualTo("/lucas-series-poster.jpg");
         verify(userContentPosterService).findSeriesPosters(lucasId, List.of(seriesTmdbId));
     }
 
@@ -2162,8 +2162,8 @@ class DiaryEntryServiceImplTest {
         DiaryEntry secondEntry = buildEntry(marina, fightClub);
         DiaryEntryResponseDTO firstMapped = buildResponseDtoWithContent(firstEntry);
         DiaryEntryResponseDTO secondMapped = buildResponseDtoWithContent(secondEntry);
-        String firstPoster = "https://image.tmdb.org/t/p/w342/lucas.png";
-        String secondPoster = "https://image.tmdb.org/t/p/w342/marina.png";
+        String firstPoster = "/lucas.png";
+        String secondPoster = "/marina.png";
         UserContentPosterService.UserContentPosterKey firstKey =
                 new UserContentPosterService.UserContentPosterKey(lucasId, fightClub.getId());
         UserContentPosterService.UserContentPosterKey secondKey =
@@ -2231,7 +2231,7 @@ class DiaryEntryServiceImplTest {
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
-                "Great movie", 9, watchedDate, true, false, "https://image.tmdb.org/t/p/w342/poster.png");
+                "Great movie", 9, watchedDate, true, false, "/poster.png");
 
         DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
 
@@ -2245,7 +2245,7 @@ class DiaryEntryServiceImplTest {
         assertThat(captured.getWatchedDate()).isEqualTo(watchedDate);
         assertThat(captured.getWatchNumber()).isEqualTo(2);
         assertThat(captured.getWatchedInTheater()).isFalse();
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/poster.png");
         assertThat(captured.getIgnore()).isFalse();
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
@@ -4327,9 +4327,9 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, null, null, "https://image.tmdb.org/t/p/w342/new.png"));
+                null, null, null, null, "/new.png"));
 
-        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "/new.png");
     }
 
     // ---------- deleteDiaryEntry ----------

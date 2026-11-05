@@ -79,9 +79,9 @@ class DiaryEntryMapperTest {
         assertThat(result.commentsCount()).isZero();
 
         DiaryEntryResponseDTO enriched = result.withCommentsCount(4)
-                .withCustomPosterUrl("https://image.tmdb.org/t/p/w342/custom.png");
+                .withCustomPosterUrl("/custom.png");
         assertThat(enriched.commentsCount()).isEqualTo(4);
-        assertThat(enriched.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/custom.png");
+        assertThat(enriched.customPosterUrl()).isEqualTo("/custom.png");
     }
 
     @Test

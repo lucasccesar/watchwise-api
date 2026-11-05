@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.contentposter.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
-import com.watchwise.watchwise_api.common.validation.TmdbPosterUrlPolicy;
+import com.watchwise.watchwise_api.common.validation.TmdbPosterPathPolicy;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -92,40 +92,40 @@ class UserContentPosterControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[PUT] Should Persist Poster - When Authenticated User Sends A Valid URL")
-    void shouldPersistPosterWhenAuthenticatedUserSendsValidUrl() throws Exception {
+    @DisplayName("[PUT] Should Persist Poster - When Authenticated User Sends A Valid TMDB Path")
+    void shouldPersistPosterWhenAuthenticatedUserSendsValidPath() throws Exception {
         RegisteredUser user = registerUser("posters-put");
-        String posterUrl = posterUrl("fight-club.png");
+        String posterPath = posterPath("fight-club.png");
 
-        mockMvc.perform(putRequest(user, content.getId(), posterUrl))
+        mockMvc.perform(putRequest(user, content.getId(), posterPath))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.contentId").value(content.getId().toString()))
-                .andExpect(jsonPath("$.customPosterUrl").value(posterUrl))
+                .andExpect(jsonPath("$.customPosterUrl").value(posterPath))
                 .andExpect(jsonPath("$.updatedAt").isNotEmpty());
 
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), content.getId()))
                 .get()
                 .extracting(UserContentPoster::getCustomPosterUrl)
-                .isEqualTo(posterUrl);
+                .isEqualTo(posterPath);
     }
 
     @Test
     @DisplayName("[PUT] Should Replace Poster - When Same User Sends A Second URL")
     void shouldReplacePosterWhenSameUserSendsSecondUrl() throws Exception {
         RegisteredUser user = registerUser("posters-replace");
-        String firstUrl = posterUrl("first.png");
-        String secondUrl = posterUrl("second.png");
+        String firstPath = posterPath("first.png");
+        String secondPath = posterPath("second.png");
 
-        mockMvc.perform(putRequest(user, content.getId(), firstUrl))
+        mockMvc.perform(putRequest(user, content.getId(), firstPath))
                 .andExpect(status().isOk());
-        mockMvc.perform(putRequest(user, content.getId(), secondUrl))
+        mockMvc.perform(putRequest(user, content.getId(), secondPath))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.customPosterUrl").value(secondUrl));
+                .andExpect(jsonPath("$.customPosterUrl").value(secondPath));
 
         assertThat(userContentPosterRepository.findAll())
                 .singleElement()
                 .extracting(UserContentPoster::getCustomPosterUrl)
-                .isEqualTo(secondUrl);
+                .isEqualTo(secondPath);
     }
 
     @Test
@@ -133,9 +133,9 @@ class UserContentPosterControllerIntegrationTest {
     void shouldKeepAnotherUsersPosterWhenDifferentUserDeletesSameContent() throws Exception {
         RegisteredUser owner = registerUser("posters-owner");
         RegisteredUser otherUser = registerUser("posters-other");
-        String posterUrl = posterUrl("owner.png");
+        String posterPath = posterPath("owner.png");
 
-        mockMvc.perform(putRequest(owner, content.getId(), posterUrl))
+        mockMvc.perform(putRequest(owner, content.getId(), posterPath))
                 .andExpect(status().isOk());
 
         mockMvc.perform(deleteRequest(otherUser, content.getId()))
@@ -152,24 +152,24 @@ class UserContentPosterControllerIntegrationTest {
     void shouldReturnNotFoundWhenContentReferenceDoesNotExist() throws Exception {
         RegisteredUser user = registerUser("posters-unknown-content");
 
-        mockMvc.perform(putRequest(user, UUID.randomUUID(), posterUrl("unknown.png")))
+        mockMvc.perform(putRequest(user, UUID.randomUUID(), posterPath("unknown.png")))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("[PUT] Should Reject Every Unsupported Poster URL Prefix")
-    void shouldRejectEveryUnsupportedPosterUrlPrefix() throws Exception {
+    @DisplayName("[PUT] Should Reject Absolute Poster URLs And Empty Paths")
+    void shouldRejectAbsolutePosterUrlsAndEmptyPaths() throws Exception {
         RegisteredUser user = registerUser("posters-invalid-prefix");
-        List<String> invalidUrls = List.of(
+        List<String> invalidValues = List.of(
                 "http://image.tmdb.org/t/p/w342/poster.png",
                 "https://example.com/poster.png",
                 "https://image.tmdb.org/t/p/w500/poster.png",
                 "https://image.tmdb.org/t/p/original/poster.png",
-                TmdbPosterUrlPolicy.PREFIX
+                TmdbPosterPathPolicy.PATH_PREFIX
         );
 
-        for (String invalidUrl : invalidUrls) {
-            mockMvc.perform(putRequest(user, content.getId(), invalidUrl))
+        for (String invalidValue : invalidValues) {
+            mockMvc.perform(putRequest(user, content.getId(), invalidValue))
                     .andExpect(status().isBadRequest());
         }
 
@@ -182,7 +182,7 @@ class UserContentPosterControllerIntegrationTest {
     void shouldRestoreTmdbFallbackWhenPosterIsDeletedRepeatedly() throws Exception {
         RegisteredUser user = registerUser("posters-clear");
 
-        mockMvc.perform(putRequest(user, content.getId(), posterUrl("clear-me.png")))
+        mockMvc.perform(putRequest(user, content.getId(), posterPath("clear-me.png")))
                 .andExpect(status().isOk());
         mockMvc.perform(deleteRequest(user, content.getId()))
                 .andExpect(status().isNoContent());
@@ -202,7 +202,7 @@ class UserContentPosterControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"customPosterUrl\":\"" + posterUrl("unauthenticated.png") + "\"}"))
+                        .content("{\"customPosterUrl\":\"" + posterPath("unauthenticated.png") + "\"}"))
                 .andExpect(status().isUnauthorized());
 
         mockMvc.perform(delete("/users/me/content-posters/{contentId}", content.getId())
@@ -218,12 +218,12 @@ class UserContentPosterControllerIntegrationTest {
         return new RegisteredUser(registered.id(), registered.accessToken(), registered.csrfToken());
     }
 
-    private MockHttpServletRequestBuilder putRequest(RegisteredUser user, UUID contentId, String posterUrl) {
+    private MockHttpServletRequestBuilder putRequest(RegisteredUser user, UUID contentId, String posterPath) {
         return put("/users/me/content-posters/{contentId}", contentId)
                 .cookie(user.accessToken(), user.csrfToken())
                 .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"customPosterUrl\":\"" + posterUrl + "\"}");
+                .content("{\"customPosterUrl\":\"" + posterPath + "\"}");
     }
 
     private MockHttpServletRequestBuilder deleteRequest(RegisteredUser user, UUID contentId) {
@@ -232,8 +232,8 @@ class UserContentPosterControllerIntegrationTest {
                 .header("X-XSRF-TOKEN", user.csrfToken().getValue());
     }
 
-    private String posterUrl(String suffix) {
-        return TmdbPosterUrlPolicy.PREFIX + suffix;
+    private String posterPath(String suffix) {
+        return TmdbPosterPathPolicy.PATH_PREFIX + suffix;
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {

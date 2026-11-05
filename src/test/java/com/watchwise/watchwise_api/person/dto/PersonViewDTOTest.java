@@ -27,7 +27,7 @@ class PersonViewDTOTest {
         ContentCardViewerStateDTO viewerState = new ContentCardViewerStateDTO(
                 WatchStatus.UNWATCHED, null, null, null, null, null, false, false, null, null);
         PersonCreditViewDTO credit = new PersonCreditViewDTO(
-                "550", MovieOrSeriesType.MOVIE, "Fight Club", "https://image.tmdb.org/t/p/w342/x.jpg",
+                "550", MovieOrSeriesType.MOVIE, "Fight Club", "/x.jpg",
                 LocalDate.of(1999, 10, 15), characters, jobs, PersonParticipation.CAST,
                 null, 42.0d, new ContentCardStatsDTO(8.2d, 12L, 4L, 3L), viewerState, false,
                 ContentPreviewStatus.AVAILABLE);

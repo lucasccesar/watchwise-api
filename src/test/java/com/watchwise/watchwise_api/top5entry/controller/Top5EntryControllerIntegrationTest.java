@@ -403,20 +403,20 @@ class Top5EntryControllerIntegrationTest {
     void shouldPersistCustomPosterUrlWhenProvidedOnInsert() throws Exception {
         RegisteredUser user = registerUser("inserttop5poster");
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null, "https://image.tmdb.org/t/p/w342/poster.png")))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null, "/poster.png")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("/poster.png"));
 
         Content content = contentRepository.findByTmdbIdAndType("550", ContentType.MOVIE).orElseThrow();
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), content.getId()))
                 .get()
                 .extracting(poster -> poster.getCustomPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+                .isEqualTo("/poster.png");
     }
 
     @Test
-    @DisplayName("[insertEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
-    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnInsert() throws Exception {
+    @DisplayName("[insertEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Receives An Absolute URL")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlIsAnAbsoluteUrlOnInsert() throws Exception {
         RegisteredUser user = registerUser("inserttop5unsupportedposter");
         User entity = userRepository.findById(user.id()).orElseThrow();
 
@@ -711,19 +711,19 @@ class Top5EntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
 
-        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("https://image.tmdb.org/t/p/w342/new.png")))
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("/new.png")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("/new.png"));
 
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), entry.getContent().getId()))
                 .get()
                 .extracting(poster -> poster.getCustomPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
+                .isEqualTo("/new.png");
     }
 
     @Test
-    @DisplayName("[updateEntry] Should Return BadRequest - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
-    void shouldReturnBadRequestWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnUpdate() throws Exception {
+    @DisplayName("[updateEntry] Should Return BadRequest - When CustomPosterUrl Receives An Absolute URL")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsAnAbsoluteUrlOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updatetop5invalidurl");
         User entity = userRepository.findById(user.id()).orElseThrow();
         Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
@@ -740,7 +740,7 @@ class Top5EntryControllerIntegrationTest {
     void shouldReturnNotFoundWhenEntryDoesNotExistOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updatetop5notfound");
 
-        mockMvc.perform(updateRequest(user, ContentType.MOVIE, UUID.randomUUID(), posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, UUID.randomUUID(), posterPatchBody("/x.png")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
     }
@@ -753,7 +753,7 @@ class Top5EntryControllerIntegrationTest {
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         Top5Entry entry = persistEntry(ownerEntity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
 
-        mockMvc.perform(updateRequest(intruder, ContentType.MOVIE, entry.getId(), posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
+        mockMvc.perform(updateRequest(intruder, ContentType.MOVIE, entry.getId(), posterPatchBody("/x.png")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
 
@@ -799,7 +799,7 @@ class Top5EntryControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
+                        .content(posterPatchBody("/x.png")))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -811,7 +811,7 @@ class Top5EntryControllerIntegrationTest {
         mockMvc.perform(patch("/users/me/top5/MOVIE/" + UUID.randomUUID())
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
+                        .content(posterPatchBody("/x.png")))
                 .andExpect(status().isForbidden());
     }
 }

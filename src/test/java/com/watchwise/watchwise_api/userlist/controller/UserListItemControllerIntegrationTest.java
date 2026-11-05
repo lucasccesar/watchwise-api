@@ -1455,15 +1455,15 @@ class UserListItemControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "My list", true);
 
-        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "https://image.tmdb.org/t/p/w342/poster.png")))
+        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "/poster.png")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("/poster.png"));
 
         Content content = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId()).get(0).getContent();
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), content.getId()))
                 .get()
                 .extracting(poster -> poster.getCustomPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+                .isEqualTo("/poster.png");
     }
 
     @Test
@@ -1474,7 +1474,7 @@ class UserListItemControllerIntegrationTest {
         UserList parent = persistList(entity, "Parent", true);
         UserList child = persistList(entity, "Child", true);
 
-        mockMvc.perform(addItemRequest(user, parent.getId(), childListItemBodyWithPoster(child.getId(), "https://image.tmdb.org/t/p/w342/x.png")))
+        mockMvc.perform(addItemRequest(user, parent.getId(), childListItemBodyWithPoster(child.getId(), "/x.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).isEmpty();
@@ -1488,14 +1488,14 @@ class UserListItemControllerIntegrationTest {
         UserList list = persistList(entity, "My list", true);
         UserListItem item = persistContentItem(list, persistContent("550"), 1);
 
-        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "https://image.tmdb.org/t/p/w342/new.png")))
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "/new.png")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("/new.png"));
 
         assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), item.getContent().getId()))
                 .get()
                 .extracting(poster -> poster.getCustomPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
+                .isEqualTo("/new.png");
     }
 
     @Test
@@ -1507,15 +1507,15 @@ class UserListItemControllerIntegrationTest {
         UserList child = persistList(entity, "Child", true);
         UserListItem item = persistChildListItem(parent, child, 1);
 
-        mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "https://image.tmdb.org/t/p/w342/x.png")))
+        mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "/x.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userContentPosterRepository.findAll()).isEmpty();
     }
 
     @Test
-    @DisplayName("[addItem] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
-    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrlOnAdd() throws Exception {
+    @DisplayName("[addItem] Should Return BadRequest - When CustomPosterUrl Is An Absolute URL")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsAnAbsoluteUrlOnAdd() throws Exception {
         RegisteredUser user = registerUser("additemposterinvalid");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "My list", true);
@@ -1528,8 +1528,8 @@ class UserListItemControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[updateItem] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
-    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrlOnUpdate() throws Exception {
+    @DisplayName("[updateItem] Should Return BadRequest - When CustomPosterUrl Is An Absolute URL")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsAnAbsoluteUrlOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updateitemposterinvalid");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "My list", true);

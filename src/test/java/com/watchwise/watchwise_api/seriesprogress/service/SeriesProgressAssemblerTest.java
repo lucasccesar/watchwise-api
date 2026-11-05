@@ -40,10 +40,10 @@ class SeriesProgressAssemblerTest {
                 row("1396", 0L, null, null, null),
                 snapshotWithReleasedSeasons(2, 10),
                 Map.of(),
-                "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+                "/lucas-series-poster.jpg");
 
         assertThat(result.customPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+                .isEqualTo("/lucas-series-poster.jpg");
     }
 
     @Test

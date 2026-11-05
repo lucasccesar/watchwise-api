@@ -109,7 +109,7 @@ class UserListItemMapperTest {
                 "A favorite",
                 LocalDateTime.parse("2026-09-30T12:30:00"),
                 LocalDateTime.parse("2026-09-30T13:30:00"),
-                "https://example.com/poster.jpg",
+                "/poster.jpg",
                 contentState);
 
         UserListItemResponseDTO result = item.withRatingAverages(7.5, 8.0, 7.0);
@@ -121,15 +121,15 @@ class UserListItemMapperTest {
         assertThat(result.description()).isEqualTo("A favorite");
         assertThat(result.createdAt()).isEqualTo(LocalDateTime.parse("2026-09-30T12:30:00"));
         assertThat(result.updatedAt()).isEqualTo(LocalDateTime.parse("2026-09-30T13:30:00"));
-        assertThat(result.customPosterUrl()).isEqualTo("https://example.com/poster.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("/poster.jpg");
         assertThat(result.contentState()).isEqualTo(contentState);
         assertThat(result.episodeAverageRating()).isEqualTo(7.5);
         assertThat(result.globalEpisodeAverageRating()).isEqualTo(8.0);
         assertThat(result.contentAverageRating()).isEqualTo(7.0);
 
-        UserListItemResponseDTO updatedPoster = result.withCustomPosterUrl("https://example.com/updated-poster.jpg");
+        UserListItemResponseDTO updatedPoster = result.withCustomPosterUrl("/updated-poster.jpg");
 
-        assertThat(updatedPoster.customPosterUrl()).isEqualTo("https://example.com/updated-poster.jpg");
+        assertThat(updatedPoster.customPosterUrl()).isEqualTo("/updated-poster.jpg");
         assertThat(updatedPoster.contentState()).isEqualTo(contentState);
         assertThat(updatedPoster.episodeAverageRating()).isEqualTo(7.5);
         assertThat(updatedPoster.globalEpisodeAverageRating()).isEqualTo(8.0);

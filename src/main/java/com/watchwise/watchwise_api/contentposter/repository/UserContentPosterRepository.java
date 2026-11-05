@@ -22,7 +22,7 @@ public interface UserContentPosterRepository extends JpaRepository<UserContentPo
             INSERT INTO user_content_posters (
                 id, user_id, content_id, custom_poster_url, created_at, updated_at
             ) VALUES (
-                :id, :userId, :contentId, :customPosterUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                :id, :userId, :contentId, :customPosterPath, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
             ON CONFLICT (user_id, content_id) DO UPDATE
             SET custom_poster_url = EXCLUDED.custom_poster_url,
@@ -32,7 +32,7 @@ public interface UserContentPosterRepository extends JpaRepository<UserContentPo
             @Param("id") UUID id,
             @Param("userId") UUID userId,
             @Param("contentId") UUID contentId,
-            @Param("customPosterUrl") String customPosterUrl);
+            @Param("customPosterPath") String customPosterPath);
 
     @Modifying
     @Transactional

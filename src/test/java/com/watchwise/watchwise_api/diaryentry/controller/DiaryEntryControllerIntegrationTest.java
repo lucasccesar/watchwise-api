@@ -1506,8 +1506,8 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
-    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnCreate() throws Exception {
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Receives An Absolute URL")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlIsAnAbsoluteUrlOnCreate() throws Exception {
         RegisteredUser user = registerUser("creatediaryunsupportedposter");
         String body = """
                 {
@@ -1895,8 +1895,8 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[updateDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
-    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnUpdate() throws Exception {
+    @DisplayName("[updateDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Receives An Absolute URL")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlIsAnAbsoluteUrlOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updatediaryunsupportedposter");
         User entity = userRepository.findById(user.id()).orElseThrow();
         DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));

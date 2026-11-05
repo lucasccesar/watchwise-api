@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.contentposter.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.common.validation.TmdbPosterUrlPolicy;
+import com.watchwise.watchwise_api.common.validation.TmdbPosterPathPolicy;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -39,8 +39,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserContentPosterServiceImplTest {
 
-    private static final String FIRST_POSTER = TmdbPosterUrlPolicy.PREFIX + "first.png";
-    private static final String SECOND_POSTER = TmdbPosterUrlPolicy.PREFIX + "second.png";
+    private static final String FIRST_POSTER = TmdbPosterPathPolicy.PATH_PREFIX + "first.png";
+    private static final String SECOND_POSTER = TmdbPosterPathPolicy.PATH_PREFIX + "second.png";
 
     @Mock
     private UserContentPosterRepository userContentPosterRepository;
@@ -105,8 +105,8 @@ class UserContentPosterServiceImplTest {
     }
 
     @Test
-    @DisplayName("[upsert] Should Return Persisted Poster Response - When URL Is Valid")
-    void shouldReturnPersistedPosterResponseWhenUrlIsValid() {
+    @DisplayName("[upsert] Should Return Persisted Poster Response - When Poster Path Is Valid")
+    void shouldReturnPersistedPosterResponseWhenPosterPathIsValid() {
         LocalDateTime updatedAt = LocalDateTime.now();
         UserContentPoster stored = buildPoster(ownerId, FIRST_POSTER, updatedAt);
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(content));
@@ -145,13 +145,13 @@ class UserContentPosterServiceImplTest {
     }
 
     @Test
-    @DisplayName("[upsert] Should Throw BadRequestException - When Direct Service URL Is Invalid")
-    void shouldThrowBadRequestExceptionWhenDirectServiceUrlIsInvalid() {
-        String invalidUrl = "https://image.tmdb.org/t/p/w500/poster.png";
+    @DisplayName("[upsert] Should Throw BadRequestException - When Direct Service Absolute URL Is Rejected")
+    void shouldRejectAbsoluteUrlWhenCalledThroughDirectService() {
+        String absoluteUrl = "https://image.tmdb.org/t/p/w500/poster.png";
 
-        assertThatThrownBy(() -> userContentPosterService.upsert(ownerId, contentId, invalidUrl))
+        assertThatThrownBy(() -> userContentPosterService.upsert(ownerId, contentId, absoluteUrl))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("customPosterUrl must be a TMDB w342 poster URL");
+                .hasMessage("customPosterUrl must be a TMDB poster file path beginning with a single slash");
 
         verifyNoInteractions(contentRepository, userContentPosterRepository);
     }
@@ -189,7 +189,7 @@ class UserContentPosterServiceImplTest {
         UserContentPosterRepository.UserContentPosterPairProjection second =
                 pairProjection(secondOwnerId, secondContentId, SECOND_POSTER);
         UserContentPosterRepository.UserContentPosterPairProjection crossPair =
-                pairProjection(ownerId, secondContentId, "https://image.tmdb.org/t/p/w342/cross-pair.png");
+                pairProjection(ownerId, secondContentId, "/cross-pair.png");
         UserContentPosterService.UserContentPosterKey firstKey =
                 new UserContentPosterService.UserContentPosterKey(ownerId, contentId);
         UserContentPosterService.UserContentPosterKey secondKey =
@@ -218,26 +218,26 @@ class UserContentPosterServiceImplTest {
         verifyNoInteractions(userContentPosterRepository);
     }
 
-    private UserContentPoster buildPoster(UUID userId, String posterUrl) {
-        return buildPoster(userId, posterUrl, LocalDateTime.now());
+    private UserContentPoster buildPoster(UUID userId, String posterPath) {
+        return buildPoster(userId, posterPath, LocalDateTime.now());
     }
 
-    private UserContentPoster buildPoster(UUID userId, String posterUrl, LocalDateTime updatedAt) {
+    private UserContentPoster buildPoster(UUID userId, String posterPath, LocalDateTime updatedAt) {
         return UserContentPoster.builder()
                 .id(UUID.randomUUID())
-                .customPosterUrl(posterUrl)
+                .customPosterUrl(posterPath)
                 .updatedAt(updatedAt)
                 .createdAt(updatedAt.minusMinutes(1))
                 .build();
     }
 
     private UserContentPosterRepository.UserContentPosterPairProjection pairProjection(
-            UUID userId, UUID contentId, String posterUrl) {
+            UUID userId, UUID contentId, String posterPath) {
         UserContentPosterRepository.UserContentPosterPairProjection projection =
                 org.mockito.Mockito.mock(UserContentPosterRepository.UserContentPosterPairProjection.class);
         when(projection.getUserId()).thenReturn(userId);
         when(projection.getContentId()).thenReturn(contentId);
-        when(projection.getCustomPosterUrl()).thenReturn(posterUrl);
+        when(projection.getCustomPosterUrl()).thenReturn(posterPath);
         return projection;
     }
 }

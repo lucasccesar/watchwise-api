@@ -193,12 +193,12 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/tmdb-poster.jpg"));
         when(userContentPosterService.findByUserAndContentIds(requestingUserId, List.of(contentId)))
-                .thenReturn(Map.of(contentId, "https://image.tmdb.org/t/p/w342/custom-poster.jpg"));
+                .thenReturn(Map.of(contentId, "/custom-poster.jpg"));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.posterPath()).isEqualTo("/tmdb-poster.jpg");
-        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/custom-poster.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("/custom-poster.jpg");
         verify(userContentPosterService).findByUserAndContentIds(requestingUserId, List.of(contentId));
     }
 
@@ -211,11 +211,11 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/tmdb-poster.jpg"));
         when(userContentPosterService.findByUserAndContentIds(posterUserId, List.of(contentId)))
-                .thenReturn(Map.of(contentId, "https://image.tmdb.org/t/p/w342/friend-poster.jpg"));
+                .thenReturn(Map.of(contentId, "/friend-poster.jpg"));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId, posterUserId);
 
-        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/friend-poster.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("/friend-poster.jpg");
         verify(userVisibilityService).assertCanView(requestingUserId, posterUserId);
         verify(userContentPosterService).findByUserAndContentIds(posterUserId, List.of(contentId));
     }
@@ -294,14 +294,14 @@ class ContentDetailsServiceImplTest {
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/first-tmdb.jpg"));
         when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(movieDetails("/second-tmdb.jpg"));
         when(userContentPosterService.findByUserAndContentIds(eq(requestingUserId), any()))
-                .thenReturn(Map.of(firstId, "https://image.tmdb.org/t/p/w342/first-custom.jpg",
-                        secondId, "https://image.tmdb.org/t/p/w342/second-custom.jpg"));
+                .thenReturn(Map.of(firstId, "/first-custom.jpg",
+                        secondId, "/second-custom.jpg"));
 
         List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(firstId, secondId), requestingUserId);
 
         assertThat(result).extracting(ContentDetailsDTO::customPosterUrl)
-                .containsExactly("https://image.tmdb.org/t/p/w342/first-custom.jpg",
-                        "https://image.tmdb.org/t/p/w342/second-custom.jpg");
+                .containsExactly("/first-custom.jpg",
+                        "/second-custom.jpg");
         verify(userContentPosterService).findByUserAndContentIds(eq(requestingUserId), any());
         verifyNoMoreInteractions(userContentPosterService);
     }
