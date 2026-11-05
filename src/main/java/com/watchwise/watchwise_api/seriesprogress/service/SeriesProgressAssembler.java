@@ -108,6 +108,10 @@ public class SeriesProgressAssembler {
                 : Math.max(totalRuntimeMinutes.longValue() - watchedRuntimeMinutes, 0L);
     }
 
+    public boolean isAtFullProgress(Long watchedEpisodeCount, Integer totalEpisodeCount) {
+        return Double.valueOf(100.0).equals(percentage(watchedEpisodeCount, totalEpisodeCount));
+    }
+
     private Double percentage(Long watchedEpisodeCount, Integer totalEpisodeCount) {
         if (totalEpisodeCount == null || totalEpisodeCount <= 0) {
             return null;

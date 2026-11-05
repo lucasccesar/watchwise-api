@@ -1130,8 +1130,8 @@ class DiaryEntryServiceImplTest {
     // ---------- getSeriesInProgress ----------
 
     @Test
-    @DisplayName("[getSeriesInProgress] Should Build Detailed Envelope With Global Metrics And Directional Ordering")
-    void shouldBuildDetailedEnvelopeWithGlobalMetricsAndDirectionalOrderingForSeriesInProgress() {
+    @DisplayName("[getSeriesInProgress] Should Exclude Fully Watched Series Before Paging And Aggregation")
+    void shouldExcludeFullyWatchedSeriesBeforePagingAndAggregation() {
         DiaryEntryRepository.SeasonProgress progressA = seasonProgress("a", 1, 2L, 40L);
         DiaryEntryRepository.SeasonProgress progressB = seasonProgress("b", 1, 1L, 20L);
         List<SeriesProgressReadRepository.SeriesProgressCandidate> candidates = List.of(
@@ -1178,8 +1178,10 @@ class DiaryEntryServiceImplTest {
                 .extracting(SeasonProgressDTO::seasonNumber)
                 .doesNotContain(0);
         assertThat(result.aggregate())
-                .isEqualTo(new SeriesInProgressAggregateDTO(3L, 9L, 12L, 3L, null));
-        assertThat(result.totalElements()).isEqualTo(3L);
+                .isEqualTo(new SeriesInProgressAggregateDTO(2L, 5L, 9L, 4L, 80L));
+        assertThat(result.totalElements()).isEqualTo(2L);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.hasNext()).isFalse();
         assertThat(result.page()).isEqualTo(1);
         assertThat(result.size()).isEqualTo(2);
         verifyNoInteractions(tmdbClient);
@@ -1189,8 +1191,9 @@ class DiaryEntryServiceImplTest {
                 SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.ASC);
 
         assertThat(ascending.content()).extracting(SeriesInProgressResponseDTO::seriesTmdbId)
-                .containsExactly("off-page", "b");
-        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+                .containsExactly("b", "a");
+        assertThat(ascending.totalElements()).isEqualTo(2L);
+        verify(seriesProgressReadRepository).findCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class));
     }
@@ -1635,9 +1638,10 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        diaryEntryService.getSeriesInProgress(lucasId, lucasId, null, 10);
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, null, 10);
 
-        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isZero());
+        assertThat(result.page()).isEqualTo(1);
     }
 
     @Test
@@ -1645,9 +1649,10 @@ class DiaryEntryServiceImplTest {
     void shouldUsePageNumberMinusOneWhenPageNumberIsPositiveForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 3, 10);
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 3, 10);
 
-        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isEqualTo(2));
+        assertThat(result.page()).isEqualTo(3);
     }
 
     @Test
@@ -1666,10 +1671,10 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageSizeWhenPageSizeIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, null);
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, null);
 
-        assertThat(captureRequestedProgressPage())
-                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE));
+        assertThat(result.size()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -1677,10 +1682,10 @@ class DiaryEntryServiceImplTest {
     void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimitForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 1001);
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 1001);
 
-        assertThat(captureRequestedProgressPage())
-                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE));
+        assertThat(result.size()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test
@@ -1708,15 +1713,6 @@ class DiaryEntryServiceImplTest {
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
-    }
-
-    private PageRequest captureRequestedProgressPage() {
-        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
-                eq(lucasId), any(SeriesProgressReadRepository.SeriesProgressSort.class),
-                any(Sort.Direction.class), captor.capture());
-        assertThat(captor.getAllValues().getFirst().isUnpaged()).isTrue();
-        return (PageRequest) captor.getAllValues().get(1);
     }
 
     private Page<SeriesProgressReadRepository.SeriesProgressCandidate> candidatesPage(
