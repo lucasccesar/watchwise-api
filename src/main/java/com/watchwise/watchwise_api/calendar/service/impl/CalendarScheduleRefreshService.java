@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -33,6 +36,7 @@ import java.util.concurrent.RejectedExecutionException;
 public class CalendarScheduleRefreshService {
 
     private static final Logger log = LoggerFactory.getLogger(CalendarScheduleRefreshService.class);
+    private static final Duration SEASON_REFRESH_RETRY_DELAY = Duration.ofMinutes(1);
 
     private final WatchlistEntryRepository watchlistEntryRepository;
     private final CalendarScheduleSnapshotStore snapshotStore;
@@ -41,6 +45,10 @@ public class CalendarScheduleRefreshService {
     private final ExecutorService calendarScheduleRefreshExecutor;
     private final Clock clock;
     private final Set<RefreshKey> refreshesInFlight = ConcurrentHashMap.newKeySet();
+    private final Cache<RefreshKey, Boolean> failedSeasonRefreshes = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(SEASON_REFRESH_RETRY_DELAY)
+            .build();
 
     public CalendarScheduleRefreshService(
             WatchlistEntryRepository watchlistEntryRepository,
@@ -100,19 +108,23 @@ public class CalendarScheduleRefreshService {
         CalendarScheduleKey key = new CalendarScheduleKey(
                 ContentType.SERIES, seriesTmdbId, language, region);
         RefreshKey refreshKey = new RefreshKey(key, seasonNumber, false);
-        if (!refreshesInFlight.add(refreshKey)) {
+        if (failedSeasonRefreshes.getIfPresent(refreshKey) != null
+                || !refreshesInFlight.add(refreshKey)) {
             return;
         }
         try {
             CompletableFuture.runAsync(() -> {
                 try {
-                    refreshOneReserved(refreshKey, clock.instant());
+                    if (!refreshOneReserved(refreshKey, clock.instant())) {
+                        failedSeasonRefreshes.put(refreshKey, true);
+                    }
                 } finally {
                     refreshesInFlight.remove(refreshKey);
                 }
             }, calendarScheduleRefreshExecutor);
         } catch (RejectedExecutionException exception) {
             refreshesInFlight.remove(refreshKey);
+            failedSeasonRefreshes.put(refreshKey, true);
             log.warn("Calendar season refresh was rejected for {}", refreshKey, exception);
         }
     }
@@ -121,10 +133,14 @@ public class CalendarScheduleRefreshService {
         if (!refreshesInFlight.add(refreshKey)) {
             return;
         }
-        refreshOneReserved(refreshKey, checkedAt);
+        try {
+            refreshOneReserved(refreshKey, checkedAt);
+        } finally {
+            refreshesInFlight.remove(refreshKey);
+        }
     }
 
-    private void refreshOneReserved(RefreshKey refreshKey, Instant checkedAt) {
+    private boolean refreshOneReserved(RefreshKey refreshKey, Instant checkedAt) {
         try {
             CalendarScheduleKey key = refreshKey.scheduleKey();
             CalendarScheduleLookup lookup;
@@ -139,10 +155,12 @@ public class CalendarScheduleRefreshService {
             if (lookup instanceof CalendarScheduleLookup.Found found
                     && found.batch().origin() == TmdbLookupOrigin.REMOTE) {
                 scheduleSynchronizer.synchronize(found.batch(), checkedAt);
+                return true;
             }
             if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
                     && foundSeries.schedule().hasRemoteResults()) {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), checkedAt);
+                return true;
             }
             if (lookup instanceof CalendarScheduleLookup.NotFound notFound) {
                 if (key.type() == ContentType.SERIES && notFound.seasonNumber() != null) {
@@ -151,10 +169,10 @@ public class CalendarScheduleRefreshService {
                     snapshotStore.invalidate(key, checkedAt, refreshKey.discovery());
                 }
             }
+            return false;
         } catch (RuntimeException exception) {
             log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);
-        } finally {
-            refreshesInFlight.remove(refreshKey);
+            return false;
         }
     }
 
