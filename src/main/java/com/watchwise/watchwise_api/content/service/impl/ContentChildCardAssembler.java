@@ -17,7 +17,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -31,12 +31,24 @@ import java.util.UUID;
 import java.util.Set;
 
 @Service
-@RequiredArgsConstructor
 public class ContentChildCardAssembler {
 
     private static final int RECENT_EPISODES_LIMIT = 4;
 
     private final ContentCardAssembler contentCardAssembler;
+    private final ContentPageSeasonStateService seasonStateService;
+
+    @Autowired
+    public ContentChildCardAssembler(
+            ContentCardAssembler contentCardAssembler,
+            ContentPageSeasonStateService seasonStateService) {
+        this.contentCardAssembler = contentCardAssembler;
+        this.seasonStateService = seasonStateService;
+    }
+
+    public ContentChildCardAssembler(ContentCardAssembler contentCardAssembler) {
+        this(contentCardAssembler, null);
+    }
 
     public ContentPageSectionsDTO assembleSections(
             ContentDetailsDTO details, ContentCoordinate rootCoordinate, UUID viewerId) {
@@ -48,16 +60,54 @@ public class ContentChildCardAssembler {
             ContentDetailsDTO parentSeriesDetails,
             ContentCoordinate rootCoordinate,
             UUID viewerId) {
+        return assembleSections(details, parentSeriesDetails, null, rootCoordinate, viewerId);
+    }
+
+    public ContentPageSectionsDTO assembleSectionsWithSeasonSummaries(
+            ContentDetailsDTO details,
+            List<SeasonSummaryDTO> siblingSeasons,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId,
+            String preferredRegion,
+            String preferredLanguage) {
+        return assembleSections(
+                details, null, siblingSeasons, rootCoordinate, viewerId, preferredRegion, preferredLanguage);
+    }
+
+    private ContentPageSectionsDTO assembleSections(
+            ContentDetailsDTO details,
+            ContentDetailsDTO parentSeriesDetails,
+            List<SeasonSummaryDTO> siblingSeasons,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId) {
+        return assembleSections(details, parentSeriesDetails, siblingSeasons, rootCoordinate, viewerId, null, null);
+    }
+
+    private ContentPageSectionsDTO assembleSections(
+            ContentDetailsDTO details,
+            ContentDetailsDTO parentSeriesDetails,
+            List<SeasonSummaryDTO> siblingSeasons,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId,
+            String preferredRegion,
+            String preferredLanguage) {
         Objects.requireNonNull(details, "details is required");
         Objects.requireNonNull(rootCoordinate, "rootCoordinate is required");
         Objects.requireNonNull(viewerId, "viewerId is required");
 
-        SectionSpecs sections = sectionSpecs(details, parentSeriesDetails, rootCoordinate);
+        SectionSpecs sections = sectionSpecs(details, parentSeriesDetails, siblingSeasons, rootCoordinate);
         List<CardSpec> allSpecs = new ArrayList<>();
         allSpecs.addAll(sections.seasons());
         allSpecs.addAll(sections.episodes());
         allSpecs.addAll(sections.recentEpisodes());
         Map<ContentCoordinate, ContentChildCardDTO> cards = assembleCards(allSpecs, viewerId);
+        if (siblingSeasons != null
+                && (rootCoordinate.type() == ContentType.SEASON || rootCoordinate.type() == ContentType.SERIES)
+                && seasonStateService != null) {
+            cards = resolveSeasonViewerStates(
+                    sections.seasons(), cards, siblingSeasons, rootCoordinate,
+                    viewerId, preferredRegion, preferredLanguage);
+        }
         return new ContentPageSectionsDTO(
                 toCards(sections.seasons(), cards),
                 toCards(sections.episodes(), cards),
@@ -108,6 +158,7 @@ public class ContentChildCardAssembler {
     private SectionSpecs sectionSpecs(
             ContentDetailsDTO details,
             ContentDetailsDTO parentSeriesDetails,
+            List<SeasonSummaryDTO> siblingSeasons,
             ContentCoordinate rootCoordinate) {
         return switch (rootCoordinate.type()) {
             case SERIES -> new SectionSpecs(
@@ -115,9 +166,11 @@ public class ContentChildCardAssembler {
                     List.of(),
                     seriesRecentEpisodeSpecs(details.recentEpisodes(), rootCoordinate.tmdbId()));
             case SEASON -> new SectionSpecs(
-                    parentSeriesDetails == null
-                            ? List.of()
-                            : seriesSeasonSpecs(parentSeriesDetails.seasons(), rootCoordinate.seriesTmdbId()),
+                    siblingSeasons != null
+                            ? seriesSeasonSpecs(siblingSeasons, rootCoordinate.seriesTmdbId())
+                            : parentSeriesDetails == null
+                                    ? List.of()
+                                    : seriesSeasonSpecs(parentSeriesDetails.seasons(), rootCoordinate.seriesTmdbId()),
                     seasonEpisodeSpecs(
                             details.episodes(), rootCoordinate.seriesTmdbId(), rootCoordinate.seasonNumber()),
                     List.of());
@@ -255,6 +308,59 @@ public class ContentChildCardAssembler {
                     result.viewerStatesByCoordinate().get(spec.coordinate())));
         }
         return cards;
+    }
+
+    private Map<ContentCoordinate, ContentChildCardDTO> resolveSeasonViewerStates(
+            List<CardSpec> seasonSpecs,
+            Map<ContentCoordinate, ContentChildCardDTO> cards,
+            List<SeasonSummaryDTO> siblingSeasons,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId,
+            String preferredRegion,
+            String preferredLanguage) {
+        Map<ContentCoordinate, ContentViewerStateDTO> currentStates = new LinkedHashMap<>();
+        for (CardSpec spec : seasonSpecs) {
+            ContentChildCardDTO card = cards.get(spec.coordinate());
+            if (card != null) {
+                currentStates.put(spec.coordinate(), card.viewerState());
+            }
+        }
+        Map<ContentCoordinate, ContentViewerStateDTO> resolvedStates = seasonStateService.resolve(
+                viewerId,
+                rootCoordinate.type() == ContentType.SERIES
+                        ? rootCoordinate.tmdbId()
+                        : rootCoordinate.seriesTmdbId(),
+                preferredRegion,
+                preferredLanguage,
+                seasonSpecs.stream().map(CardSpec::coordinate).toList(),
+                siblingSeasons,
+                currentStates);
+        Map<ContentCoordinate, ContentChildCardDTO> result = new LinkedHashMap<>(cards);
+        resolvedStates.forEach((coordinate, viewerState) -> {
+            ContentChildCardDTO card = result.get(coordinate);
+            if (card != null) {
+                result.put(coordinate, copyWithViewerState(card, viewerState));
+            }
+        });
+        return result;
+    }
+
+    private ContentChildCardDTO copyWithViewerState(
+            ContentChildCardDTO card, ContentViewerStateDTO viewerState) {
+        return new ContentChildCardDTO(
+                card.contentId(),
+                card.type(),
+                card.tmdbId(),
+                card.seriesTmdbId(),
+                card.seasonNumber(),
+                card.episodeNumber(),
+                card.title(),
+                card.overview(),
+                card.posterPath(),
+                card.releaseDate(),
+                card.runtimeMinutes(),
+                card.stats(),
+                viewerState);
     }
 
     private ContentChildCardDTO toChildCard(

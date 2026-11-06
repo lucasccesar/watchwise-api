@@ -706,6 +706,20 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     List<SeasonProgress> findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
             @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
+    @Query(value = """
+            SELECT c.season_number AS seasonNumber,
+                   MAX(COALESCE(d.watched_date, d.created_at::date)) AS lastWatchedDate
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+              AND c.type = 'EPISODE'
+              AND c.season_number > 0
+              AND c.series_tmdb_id = :seriesTmdbId
+            GROUP BY c.season_number
+            """, nativeQuery = true)
+    List<SeasonViewerHistoryDate> findSeasonViewerHistoryDates(
+            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
+
     interface SeriesInProgress {
         String getSeriesTmdbId();
         Long getWatchedEpisodeCount();
@@ -751,6 +765,12 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         default Boolean getWatchedRuntimeComplete() {
             return true;
         }
+    }
+
+    interface SeasonViewerHistoryDate {
+        Integer getSeasonNumber();
+
+        LocalDate getLastWatchedDate();
     }
 
     interface HomeWatchAggregate {

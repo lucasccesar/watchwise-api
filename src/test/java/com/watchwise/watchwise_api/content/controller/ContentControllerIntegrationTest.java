@@ -758,7 +758,7 @@ class ContentControllerIntegrationTest {
         mockMvc.perform(get("/contents/" + season.getId() + "/page").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.details.type").value("SEASON"))
-                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.seasons[0].seasonNumber").value(1))
                 .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
                 .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value("1399"))
                 .andExpect(jsonPath("$.sections.episodes[0].episodeNumber").value(1))

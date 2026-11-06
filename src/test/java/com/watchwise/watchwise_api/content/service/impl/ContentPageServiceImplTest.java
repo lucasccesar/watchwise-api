@@ -8,12 +8,14 @@ import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.CrewMemberDTO;
+import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.ContentPageDetails;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import com.watchwise.watchwise_api.content.service.ContentPageService;
 import com.watchwise.watchwise_api.content.service.ContentPageStatsService;
@@ -126,15 +128,16 @@ class ContentPageServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getPage] Should Assemble Series Sections Without Looking Up A Parent")
-    void shouldAssembleSeriesSectionsWithoutLookingUpAParent() {
+    @DisplayName("[getPage] Should Resolve Series Season Viewer State From Series Summaries")
+    void shouldResolveSeriesSeasonViewerStateFromSeriesSummaries() {
         UUID seriesId = UUID.randomUUID();
         Content series = content(ContentType.SERIES, seriesId, "1399", null, null, null);
         ContentDetailsDTO seriesDetails = details(seriesId, ContentType.SERIES);
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentCoordinate coordinate = ContentCoordinate.from(series);
         stubCommonPageReads(series, seriesDetails, coordinate);
-        when(contentChildCardAssembler.assembleSections(seriesDetails, null, coordinate, VIEWER_ID))
+        when(contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
+                seriesDetails, seriesDetails.seasons(), coordinate, VIEWER_ID, "US", "en-US"))
                 .thenReturn(sections);
         when(contentChildCardAssembler.assembleNavigation(seriesDetails, null, coordinate, VIEWER_ID))
                 .thenReturn(null);
@@ -142,7 +145,8 @@ class ContentPageServiceImplTest {
         ContentPageDTO result = contentPageService.getPage(seriesId, VIEWER_ID);
 
         assertThat(result.sections()).isEqualTo(sections);
-        verify(contentChildCardAssembler).assembleSections(seriesDetails, null, coordinate, VIEWER_ID);
+        verify(contentChildCardAssembler).assembleSectionsWithSeasonSummaries(
+                seriesDetails, seriesDetails.seasons(), coordinate, VIEWER_ID, "US", "en-US");
         verify(contentRepository, org.mockito.Mockito.never())
                 .findByTmdbIdAndType(org.mockito.ArgumentMatchers.anyString(), eq(ContentType.SERIES));
         verify(contentRepository, org.mockito.Mockito.never())
@@ -152,28 +156,31 @@ class ContentPageServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getPage] Should Pass Parent Series Details To Season Cards")
-    void shouldPassParentSeriesDetailsToSeasonCards() {
+    @DisplayName("[getPage] Should Use Season Summaries Without Loading The Parent Series")
+    void shouldUseSeasonSummariesWithoutLoadingTheParentSeries() {
         UUID seasonId = UUID.randomUUID();
-        UUID seriesId = UUID.randomUUID();
         Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
-        Content series = content(ContentType.SERIES, seriesId, "1399", null, null, null);
         ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON);
-        ContentDetailsDTO seriesDetails = details(seriesId, ContentType.SERIES);
+        List<SeasonSummaryDTO> siblingSeasons = List.of(
+                new SeasonSummaryDTO(1, "Season 1", "/season.jpg", null, 8, 8));
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentCoordinate coordinate = ContentCoordinate.from(season);
         stubCommonPageReads(season, seasonDetails, coordinate);
-        when(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).thenReturn(Optional.of(series));
-        when(contentDetailsService.getDetails(seriesId, VIEWER_ID)).thenReturn(seriesDetails);
-        when(contentChildCardAssembler.assembleSections(
-                seasonDetails, seriesDetails, coordinate, VIEWER_ID)).thenReturn(sections);
+        when(contentDetailsService.getPageDetails(seasonId, VIEWER_ID, "en-US", "US"))
+                .thenReturn(new ContentPageDetails(seasonDetails, siblingSeasons));
+        when(contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
+                seasonDetails, siblingSeasons, coordinate, VIEWER_ID, "US", "en-US")).thenReturn(sections);
         when(contentChildCardAssembler.assembleNavigation(seasonDetails, null, coordinate, VIEWER_ID)).thenReturn(null);
 
         ContentPageDTO result = contentPageService.getPage(seasonId, VIEWER_ID);
 
         assertThat(result.sections()).isEqualTo(sections);
-        verify(contentDetailsService).getDetails(seriesId, VIEWER_ID);
-        verify(contentChildCardAssembler).assembleSections(seasonDetails, seriesDetails, coordinate, VIEWER_ID);
+        verify(contentRepository, org.mockito.Mockito.never())
+                .findByTmdbIdAndType("1399", ContentType.SERIES);
+        verify(contentDetailsService, org.mockito.Mockito.never()).getDetails(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(contentChildCardAssembler).assembleSectionsWithSeasonSummaries(
+                seasonDetails, siblingSeasons, coordinate, VIEWER_ID, "US", "en-US");
     }
 
     @Test
@@ -260,7 +267,12 @@ class ContentPageServiceImplTest {
             Content content, ContentDetailsDTO details, ContentCoordinate coordinate) {
         when(contentRepository.findById(content.getId())).thenReturn(Optional.of(content));
         when(userRepository.findById(VIEWER_ID)).thenReturn(Optional.of(viewer()));
-        when(contentDetailsService.getDetails(content.getId(), VIEWER_ID)).thenReturn(details);
+        if (content.getType() == ContentType.SEASON) {
+            when(contentDetailsService.getPageDetails(content.getId(), VIEWER_ID, "en-US", "US"))
+                    .thenReturn(new ContentPageDetails(details, List.of()));
+        } else {
+            when(contentDetailsService.getDetails(content.getId(), VIEWER_ID)).thenReturn(details);
+        }
         lenient().when(contentPageMetadataService.getMetadata(eq(content), eq("en-US"), eq("US")))
                 .thenReturn(new ContentPageMetadataDTO(null, null, null, null, null, List.of()));
         when(contentPageStatsService.getStats(content.getId()))

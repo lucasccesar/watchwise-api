@@ -49,6 +49,13 @@ public interface CalendarScheduleSnapshotRepository extends JpaRepository<Calend
             String region,
             String language);
 
+    List<CalendarScheduleSnapshot> findByEventTypeAndSeriesTmdbIdAndSeasonNumberInAndRegionAndLanguage(
+            CalendarScheduleSnapshot.EventType eventType,
+            String seriesTmdbId,
+            Collection<Integer> seasonNumbers,
+            String region,
+            String language);
+
     List<CalendarScheduleSnapshot> findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
             CalendarScheduleSnapshot.EventType eventType,
             String seriesTmdbId,

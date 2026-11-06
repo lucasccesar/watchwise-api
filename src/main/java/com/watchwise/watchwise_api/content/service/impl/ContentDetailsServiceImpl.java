@@ -49,6 +49,7 @@ import com.watchwise.watchwise_api.content.dto.ProductionCompanyDTO;
 import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
 import com.watchwise.watchwise_api.content.dto.VideoDTO;
 import com.watchwise.watchwise_api.content.dto.WatchProviderDTO;
+import com.watchwise.watchwise_api.content.service.ContentPageDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -130,6 +131,24 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     }
 
     @Override
+    public ContentPageDetails getPageDetails(
+            UUID contentId, UUID requestingUserId, String preferredLanguage, String preferredRegion) {
+        UUID resolvedPosterUserId = resolvePosterUserId(requestingUserId, requestingUserId);
+        Content content = contentRepository.findById(contentId)
+                .orElseThrow(() -> new NotFoundException("Content not found"));
+        String customPosterUrl = userContentPosterService
+                .findByUserAndContentIds(resolvedPosterUserId, List.of(contentId))
+                .get(contentId);
+        if (content.getType() == ContentType.SEASON) {
+            return buildSeasonPageDetails(
+                    content, preferredLanguage, preferredRegion, customPosterUrl);
+        }
+        return new ContentPageDetails(
+                buildDetails(content, preferredLanguage, preferredRegion, customPosterUrl),
+                List.of());
+    }
+
+    @Override
     public List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId) {
         return getDetailsBatch(contentIds, requestingUserId, requestingUserId);
     }
@@ -187,7 +206,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         return switch (content.getType()) {
             case MOVIE -> buildMovieDetails(content, language, region, customPosterUrl);
             case SERIES -> buildSeriesDetails(content, language, region, customPosterUrl);
-            case SEASON -> buildSeasonDetails(content, language, region, customPosterUrl);
+            case SEASON -> buildSeasonPageDetails(content, language, region, customPosterUrl).details();
             case EPISODE -> buildEpisodeDetails(content, language, region, customPosterUrl);
         };
     }
@@ -304,7 +323,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.voteAverage());
     }
 
-    private ContentDetailsDTO buildSeasonDetails(
+    private ContentPageDetails buildSeasonPageDetails(
             Content content, String language, String region, String customPosterUrl) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup = tmdbClient
@@ -315,7 +334,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         List<Integer> episodeRuntimes = runtimesOf(season.episodes());
         synchronizeSeasonSchedule(content, language, region, seasonLookup, season, series, checkedAt);
 
-        return new ContentDetailsDTO(
+        ContentDetailsDTO details = new ContentDetailsDTO(
                 content.getId(),
                 ContentType.SEASON,
                 season.name(),
@@ -349,6 +368,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 resolveTvTitle(series, region),
                 releaseYearOf(series.firstAirDate()),
                 season.voteAverage());
+        return new ContentPageDetails(details, seasonSummaries(series.seasons(), List.of()));
     }
 
     private ContentDetailsDTO buildEpisodeDetails(

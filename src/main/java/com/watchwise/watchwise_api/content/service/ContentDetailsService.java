@@ -11,6 +11,9 @@ public interface ContentDetailsService {
 
     ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId, UUID posterUserId);
 
+    ContentPageDetails getPageDetails(
+            UUID contentId, UUID requestingUserId, String preferredLanguage, String preferredRegion);
+
     List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId);
 
     List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId, UUID posterUserId);

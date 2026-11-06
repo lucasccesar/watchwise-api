@@ -24,8 +24,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 public class CalendarScheduleRefreshService {
@@ -38,6 +40,7 @@ public class CalendarScheduleRefreshService {
     private final CalendarScheduleSynchronizer scheduleSynchronizer;
     private final ExecutorService calendarScheduleRefreshExecutor;
     private final Clock clock;
+    private final Set<RefreshKey> refreshesInFlight = ConcurrentHashMap.newKeySet();
 
     public CalendarScheduleRefreshService(
             WatchlistEntryRepository watchlistEntryRepository,
@@ -89,7 +92,39 @@ public class CalendarScheduleRefreshService {
         }
     }
 
+    public void refreshSeasonInBackground(
+            String seriesTmdbId, Integer seasonNumber, String region, String language) {
+        if (seriesTmdbId == null || seriesTmdbId.isBlank() || seasonNumber == null || seasonNumber <= 0) {
+            return;
+        }
+        CalendarScheduleKey key = new CalendarScheduleKey(
+                ContentType.SERIES, seriesTmdbId, language, region);
+        RefreshKey refreshKey = new RefreshKey(key, seasonNumber, false);
+        if (!refreshesInFlight.add(refreshKey)) {
+            return;
+        }
+        try {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    refreshOneReserved(refreshKey, clock.instant());
+                } finally {
+                    refreshesInFlight.remove(refreshKey);
+                }
+            }, calendarScheduleRefreshExecutor);
+        } catch (RejectedExecutionException exception) {
+            refreshesInFlight.remove(refreshKey);
+            log.warn("Calendar season refresh was rejected for {}", refreshKey, exception);
+        }
+    }
+
     private void refreshOne(RefreshKey refreshKey, Instant checkedAt) {
+        if (!refreshesInFlight.add(refreshKey)) {
+            return;
+        }
+        refreshOneReserved(refreshKey, checkedAt);
+    }
+
+    private void refreshOneReserved(RefreshKey refreshKey, Instant checkedAt) {
         try {
             CalendarScheduleKey key = refreshKey.scheduleKey();
             CalendarScheduleLookup lookup;
@@ -118,6 +153,8 @@ public class CalendarScheduleRefreshService {
             }
         } catch (RuntimeException exception) {
             log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);
+        } finally {
+            refreshesInFlight.remove(refreshKey);
         }
     }
 

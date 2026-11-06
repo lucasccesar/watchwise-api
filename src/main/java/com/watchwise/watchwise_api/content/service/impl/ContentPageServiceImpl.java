@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.ContentPageDetails;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import com.watchwise.watchwise_api.content.service.ContentPageService;
 import com.watchwise.watchwise_api.content.service.ContentPageStatsService;
@@ -47,14 +48,17 @@ public class ContentPageServiceImpl implements ContentPageService {
         User viewer = userRepository.findById(viewerId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        ContentDetailsDTO details = contentDetailsService.getDetails(contentId, viewerId);
+        ContentPageDetails pageDetails = content.getType() == ContentType.SEASON
+                ? contentDetailsService.getPageDetails(
+                        contentId, viewerId, viewer.getPreferredLanguage(), viewer.getPreferredRegion())
+                : new ContentPageDetails(contentDetailsService.getDetails(contentId, viewerId), List.of());
+        ContentDetailsDTO details = pageDetails.details();
         ContentCoordinate rootCoordinate = ContentCoordinate.from(content);
         ContentViewerStateDTO viewerState = contentViewerStateService.resolve(
                         viewerId, List.of(rootCoordinate), Map.of())
                 .statesByCoordinate()
                 .get(rootCoordinate);
 
-        ContentDetailsDTO parentSeriesDetails = parentSeriesDetails(content, viewerId);
         ContentDetailsDTO parentSeasonDetails = parentSeasonDetails(content, viewerId);
         ContentPageMetadataDTO metadata = contentPageMetadataService.getMetadata(
                 content, viewer.getPreferredLanguage(), viewer.getPreferredRegion());
@@ -65,8 +69,23 @@ public class ContentPageServiceImpl implements ContentPageService {
                     : details.posterPath();
             metadata = metadata.withPresentation(presentationPosterPath, details.crew(), true);
         }
-        ContentPageSectionsDTO sections = contentChildCardAssembler.assembleSections(
-                details, parentSeriesDetails, rootCoordinate, viewerId);
+        ContentPageSectionsDTO sections = content.getType() == ContentType.SEASON
+                ? contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
+                        details,
+                        pageDetails.siblingSeasons(),
+                        rootCoordinate,
+                        viewerId,
+                        viewer.getPreferredRegion(),
+                        viewer.getPreferredLanguage())
+                : content.getType() == ContentType.SERIES
+                        ? contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
+                                details,
+                                details.seasons(),
+                                rootCoordinate,
+                                viewerId,
+                                viewer.getPreferredRegion(),
+                                viewer.getPreferredLanguage())
+                : contentChildCardAssembler.assembleSections(details, rootCoordinate, viewerId);
         ContentNavigationDTO navigation = contentChildCardAssembler.assembleNavigation(
                 details, parentSeasonDetails, rootCoordinate, viewerId);
 
@@ -78,15 +97,6 @@ public class ContentPageServiceImpl implements ContentPageService {
                 viewerState,
                 navigation,
                 sections);
-    }
-
-    private ContentDetailsDTO parentSeriesDetails(Content content, UUID viewerId) {
-        if (content.getType() != ContentType.SEASON) {
-            return null;
-        }
-        return contentRepository.findByTmdbIdAndType(content.getSeriesTmdbId(), ContentType.SERIES)
-                .map(parent -> contentDetailsService.getDetails(parent.getId(), viewerId))
-                .orElse(null);
     }
 
     private ContentDetailsDTO parentSeasonDetails(Content content, UUID viewerId) {

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +30,13 @@ public interface CalendarScheduleCompletenessRepository extends JpaRepository<Ca
     List<CalendarScheduleCompleteness> findByGroupTypeAndSeriesTmdbIdInAndRegionAndLanguage(
             CalendarScheduleCompleteness.GroupType groupType,
             java.util.Collection<String> seriesTmdbIds,
+            String region,
+            String language);
+
+    List<CalendarScheduleCompleteness> findByGroupTypeAndSeriesTmdbIdAndSeasonNumberInAndRegionAndLanguage(
+            CalendarScheduleCompleteness.GroupType groupType,
+            String seriesTmdbId,
+            Collection<Integer> seasonNumbers,
             String region,
             String language);
 
