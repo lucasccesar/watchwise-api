@@ -193,7 +193,7 @@ public class ContentChildCardAssembler {
                         summary.posterPath(),
                         summary.airDate(),
                         null,
-                        summary.episodeCount(),
+                        summary.airedEpisodeCount(),
                         summary.tmdbVoteAverage(),
                         true))
                 .toList();
@@ -328,7 +328,7 @@ public class ContentChildCardAssembler {
                 currentStates.put(spec.coordinate(), card.viewerState());
             }
         }
-        Map<ContentCoordinate, ContentViewerStateDTO> resolvedStates = seasonStateService.resolve(
+        ContentPageSeasonStateService.Resolution resolution = seasonStateService.resolve(
                 viewerId,
                 rootCoordinate.type() == ContentType.SERIES
                         ? rootCoordinate.tmdbId()
@@ -339,32 +339,28 @@ public class ContentChildCardAssembler {
                 siblingSeasons,
                 currentStates);
         Map<ContentCoordinate, ContentChildCardDTO> result = new LinkedHashMap<>(cards);
-        resolvedStates.forEach((coordinate, viewerState) -> {
+        resolution.viewerStates().forEach((coordinate, viewerState) -> {
             ContentChildCardDTO card = result.get(coordinate);
             if (card != null) {
-                result.put(coordinate, copyWithViewerState(card, viewerState));
+                Integer airedEpisodeCount = resolution.airedEpisodeCounts().get(coordinate);
+                result.put(coordinate, new ContentChildCardDTO(
+                        card.contentId(),
+                        card.type(),
+                        card.tmdbId(),
+                        card.seriesTmdbId(),
+                        card.seasonNumber(),
+                        airedEpisodeCount == null ? card.airedEpisodeCount() : airedEpisodeCount,
+                        card.episodeNumber(),
+                        card.title(),
+                        card.overview(),
+                        card.posterPath(),
+                        card.releaseDate(),
+                        card.runtimeMinutes(),
+                        card.stats(),
+                        viewerState));
             }
         });
         return result;
-    }
-
-    private ContentChildCardDTO copyWithViewerState(
-            ContentChildCardDTO card, ContentViewerStateDTO viewerState) {
-        return new ContentChildCardDTO(
-                card.contentId(),
-                card.type(),
-                card.tmdbId(),
-                card.seriesTmdbId(),
-                card.seasonNumber(),
-                card.episodeCount(),
-                card.episodeNumber(),
-                card.title(),
-                card.overview(),
-                card.posterPath(),
-                card.releaseDate(),
-                card.runtimeMinutes(),
-                card.stats(),
-                viewerState);
     }
 
     private ContentChildCardDTO toChildCard(
@@ -386,7 +382,7 @@ public class ContentChildCardAssembler {
                 coordinate.tmdbId(),
                 coordinate.seriesTmdbId(),
                 coordinate.seasonNumber(),
-                spec.episodeCount(),
+                spec.airedEpisodeCount(),
                 coordinate.episodeNumber(),
                 spec.title(),
                 spec.overview(),
@@ -458,7 +454,7 @@ public class ContentChildCardAssembler {
             String posterPath,
             LocalDate releaseDate,
             Integer runtimeMinutes,
-            Integer episodeCount,
+            Integer airedEpisodeCount,
             Double tmdbVoteAverage,
             boolean tmdbVoteAverageResolved) {
     }

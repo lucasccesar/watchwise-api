@@ -11,7 +11,7 @@ public record ContentChildCardDTO(
         String tmdbId,
         String seriesTmdbId,
         Integer seasonNumber,
-        Integer episodeCount,
+        Integer airedEpisodeCount,
         Integer episodeNumber,
         String title,
         String overview,

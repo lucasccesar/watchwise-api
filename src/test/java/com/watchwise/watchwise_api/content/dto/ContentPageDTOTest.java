@@ -57,7 +57,7 @@ class ContentPageDTOTest {
         assertThat(fieldNames(json.get("sections"))).containsExactlyInAnyOrder(
                 "seasons", "episodes", "recentEpisodes");
         assertThat(fieldNames(json.get("sections").get("seasons").get(0))).containsExactlyInAnyOrder(
-                "contentId", "type", "tmdbId", "seriesTmdbId", "seasonNumber", "episodeCount", "episodeNumber", "title",
+                "contentId", "type", "tmdbId", "seriesTmdbId", "seasonNumber", "airedEpisodeCount", "episodeNumber", "title",
                 "overview", "posterPath", "releaseDate", "runtimeMinutes", "stats", "viewerState");
         assertThat(json.get("sections").get("seasons").get(0).get("contentId").isNull()).isTrue();
         assertThat(json.get("metadata").get("watchProviders")).isEmpty();

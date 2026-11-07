@@ -37,7 +37,7 @@ public class ContentPageSeasonStateService {
     private final CalendarScheduleRefreshService scheduleRefreshService;
     private final Clock clock;
 
-    public Map<ContentCoordinate, ContentViewerStateDTO> resolve(
+    public Resolution resolve(
             UUID viewerId,
             String seriesTmdbId,
             String region,
@@ -53,7 +53,7 @@ public class ContentPageSeasonStateService {
                         .distinct()
                         .toList();
         if (coordinates.isEmpty() || seriesTmdbId == null || seriesTmdbId.isBlank()) {
-            return Map.of();
+            return new Resolution(Map.of(), Map.of());
         }
 
         Map<Integer, ContentViewerStateDTO> statesBySeason = new LinkedHashMap<>();
@@ -81,12 +81,15 @@ public class ContentPageSeasonStateService {
                                         Collectors.toCollection(LinkedHashSet::new))));
         Map<Integer, LocalDate> latestDateBySeason = latestDatesBySeason(viewerId, seriesTmdbId);
 
+        Map<Integer, Integer> expectedCounts = expectedEpisodeCounts(seasonSummaries);
+        Map<Integer, Integer> airedCountsBySeason = airedEpisodeCounts(seasonSummaries);
         Set<Integer> seasonsNeedingSchedule = coordinates.stream()
                 .map(ContentCoordinate::seasonNumber)
                 .filter(Objects::nonNull)
-                .filter(season -> !watchedNumbersBySeason.getOrDefault(season, Set.of()).isEmpty())
-                .filter(season -> statesBySeason.get(season) == null
-                        || statesBySeason.get(season).watchStatus() != WatchStatus.WATCHED)
+                .filter(season -> !airedCountsBySeason.containsKey(season)
+                        || (!watchedNumbersBySeason.getOrDefault(season, Set.of()).isEmpty()
+                                && (statesBySeason.get(season) == null
+                                        || statesBySeason.get(season).watchStatus() != WatchStatus.WATCHED)))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
         Map<Integer, CalendarScheduleCompleteness> markers = Map.of();
@@ -109,7 +112,6 @@ public class ContentPageSeasonStateService {
                     .collect(Collectors.groupingBy(CalendarScheduleSnapshot::getSeasonNumber));
         }
 
-        Map<Integer, Integer> expectedCounts = expectedEpisodeCounts(seasonSummaries);
         LocalDate today = LocalDate.now(clock);
         LocalDateTime checkedAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         Map<ContentCoordinate, ContentViewerStateDTO> result = new LinkedHashMap<>();
@@ -121,6 +123,23 @@ public class ContentPageSeasonStateService {
             }
             Set<Integer> watchedEpisodeNumbers = watchedNumbersBySeason.getOrDefault(seasonNumber, Set.of());
             LocalDate lastWatchedDate = latestDateBySeason.getOrDefault(seasonNumber, base.lastWatchedDate());
+            List<CalendarScheduleSnapshot> seasonSnapshots = snapshots.getOrDefault(seasonNumber, List.of());
+            boolean trustedSchedule = isTrustedSchedule(
+                    markers.get(seasonNumber), seasonSnapshots, expectedCounts.get(seasonNumber), checkedAt);
+            Set<Integer> releasedEpisodeNumbers = trustedSchedule
+                    ? seasonSnapshots.stream()
+                            .filter(snapshot -> Boolean.TRUE.equals(snapshot.getPresentInLastTmdbSnapshot()))
+                            .filter(snapshot -> snapshot.getSeasonNumber() != null
+                                    && snapshot.getSeasonNumber().equals(seasonNumber))
+                            .filter(snapshot -> snapshot.getEpisodeNumber() != null && snapshot.getEpisodeNumber() > 0)
+                            .filter(snapshot -> snapshot.getReleaseDate() != null
+                                    && !snapshot.getReleaseDate().isAfter(today))
+                            .map(CalendarScheduleSnapshot::getEpisodeNumber)
+                            .collect(Collectors.toCollection(LinkedHashSet::new))
+                    : Set.of();
+            if (!airedCountsBySeason.containsKey(seasonNumber) && trustedSchedule) {
+                airedCountsBySeason.put(seasonNumber, releasedEpisodeNumbers.size());
+            }
 
             if (base.watchStatus() == WatchStatus.WATCHED) {
                 result.put(coordinate, copyWithWatchState(
@@ -133,24 +152,12 @@ public class ContentPageSeasonStateService {
                 continue;
             }
 
-            CalendarScheduleCompleteness marker = markers.get(seasonNumber);
-            List<CalendarScheduleSnapshot> seasonSnapshots = snapshots.getOrDefault(seasonNumber, List.of());
-            Integer expectedEpisodeCount = expectedCounts.get(seasonNumber);
-            if (!isTrustedSchedule(marker, seasonSnapshots, expectedEpisodeCount, checkedAt)) {
+            if (!trustedSchedule) {
                 scheduleRefreshService.refreshSeasonInBackground(seriesTmdbId, seasonNumber, region, language);
                 result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
                 continue;
             }
 
-            Set<Integer> releasedEpisodeNumbers = seasonSnapshots.stream()
-                    .filter(snapshot -> Boolean.TRUE.equals(snapshot.getPresentInLastTmdbSnapshot()))
-                    .filter(snapshot -> snapshot.getSeasonNumber() != null
-                            && snapshot.getSeasonNumber().equals(seasonNumber))
-                    .filter(snapshot -> snapshot.getEpisodeNumber() != null && snapshot.getEpisodeNumber() > 0)
-                    .filter(snapshot -> snapshot.getReleaseDate() != null
-                            && !snapshot.getReleaseDate().isAfter(today))
-                    .map(CalendarScheduleSnapshot::getEpisodeNumber)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
             if (releasedEpisodeNumbers.isEmpty()) {
                 result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
                 continue;
@@ -165,7 +172,14 @@ public class ContentPageSeasonStateService {
             result.put(coordinate, copyWithWatchState(
                     base, status, lastWatchedDate, (int) watchedReleasedCount, releasedEpisodeNumbers.size()));
         }
-        return Map.copyOf(result);
+        Map<ContentCoordinate, Integer> airedCountsByCoordinate = new LinkedHashMap<>();
+        for (ContentCoordinate coordinate : coordinates) {
+            Integer airedCount = airedCountsBySeason.get(coordinate.seasonNumber());
+            if (airedCount != null) {
+                airedCountsByCoordinate.put(coordinate, airedCount);
+            }
+        }
+        return new Resolution(result, airedCountsByCoordinate);
     }
 
     private Map<Integer, LocalDate> latestDatesBySeason(UUID viewerId, String seriesTmdbId) {
@@ -196,6 +210,21 @@ public class ContentPageSeasonStateService {
                 .collect(Collectors.toMap(
                         SeasonSummaryDTO::seasonNumber,
                         SeasonSummaryDTO::episodeCount,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+    }
+
+    private Map<Integer, Integer> airedEpisodeCounts(Collection<SeasonSummaryDTO> summaries) {
+        if (summaries == null || summaries.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        return summaries.stream()
+                .filter(Objects::nonNull)
+                .filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() > 0)
+                .filter(summary -> summary.airedEpisodeCount() != null && summary.airedEpisodeCount() >= 0)
+                .collect(Collectors.toMap(
+                        SeasonSummaryDTO::seasonNumber,
+                        SeasonSummaryDTO::airedEpisodeCount,
                         (first, ignored) -> first,
                         LinkedHashMap::new));
     }
@@ -271,5 +300,14 @@ public class ContentPageSeasonStateService {
                 null,
                 0,
                 List.of());
+    }
+
+    public record Resolution(
+            Map<ContentCoordinate, ContentViewerStateDTO> viewerStates,
+            Map<ContentCoordinate, Integer> airedEpisodeCounts) {
+        public Resolution {
+            viewerStates = Map.copyOf(viewerStates);
+            airedEpisodeCounts = Map.copyOf(airedEpisodeCounts);
+        }
     }
 }

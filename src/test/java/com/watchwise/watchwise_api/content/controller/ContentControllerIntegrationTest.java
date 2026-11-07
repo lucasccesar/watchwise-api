@@ -759,7 +759,7 @@ class ContentControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.details.type").value("SEASON"))
                 .andExpect(jsonPath("$.sections.seasons[0].seasonNumber").value(1))
-                .andExpect(jsonPath("$.sections.seasons[0].episodeCount").value(1))
+                .andExpect(jsonPath("$.sections.seasons[0].airedEpisodeCount").value(1))
                 .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
                 .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value("1399"))
                 .andExpect(jsonPath("$.sections.episodes[0].episodeNumber").value(1))
@@ -892,7 +892,7 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.sections.seasons[0].contentId").value(season.getId().toString()))
                 .andExpect(jsonPath("$.sections.seasons[0].seriesTmdbId").value("1399"))
                 .andExpect(jsonPath("$.sections.seasons[0].seasonNumber").value(1))
-                .andExpect(jsonPath("$.sections.seasons[0].episodeCount").value(1));
+                .andExpect(jsonPath("$.sections.seasons[0].airedEpisodeCount").value(1));
 
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
     }

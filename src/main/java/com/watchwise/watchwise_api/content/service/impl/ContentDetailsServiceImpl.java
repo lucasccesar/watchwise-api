@@ -368,7 +368,15 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 resolveTvTitle(series, region),
                 releaseYearOf(series.firstAirDate()),
                 season.voteAverage());
-        return new ContentPageDetails(details, seasonSummaries(series.seasons(), List.of()));
+        List<SeasonSummaryDTO> siblingSeasons = seasonSummaries(series.seasons(), List.of()).stream()
+                .map(summary -> Objects.equals(summary.seasonNumber(), season.seasonNumber())
+                        ? new SeasonSummaryDTO(
+                                summary.seasonNumber(), summary.name(), summary.posterPath(), summary.airDate(),
+                                summary.episodeCount(), airedEpisodeCount(season, LocalDate.now()),
+                                summary.tmdbVoteAverage())
+                        : summary)
+                .toList();
+        return new ContentPageDetails(details, siblingSeasons);
     }
 
     private ContentDetailsDTO buildEpisodeDetails(

@@ -124,13 +124,13 @@ class ContentChildCardAssemblerTest {
                 .containsExactly(1, 2);
         assertThat(result.seasons().get(0))
                 .extracting(ContentChildCardDTO::contentId, ContentChildCardDTO::title,
-                        ContentChildCardDTO::episodeCount,
+                        ContentChildCardDTO::airedEpisodeCount,
                         ContentChildCardDTO::posterPath, ContentChildCardDTO::releaseDate,
                         ContentChildCardDTO::stats, ContentChildCardDTO::viewerState)
                 .containsExactly(seasonOneId, "Season 1", 10, "/season-1.png", LocalDate.of(2021, 1, 1),
                         seasonStats, watched);
         assertThat(result.seasons().get(1).contentId()).isNull();
-        assertThat(result.seasons().get(1).episodeCount()).isEqualTo(10);
+        assertThat(result.seasons().get(1).airedEpisodeCount()).isEqualTo(3);
         assertThat(result.recentEpisodes()).extracting(ContentChildCardDTO::episodeNumber)
                 .containsExactly(3, 2, 10);
         assertThat(result.recentEpisodes().get(0))
