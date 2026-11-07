@@ -119,9 +119,10 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
 
         List<ReviewTarget> reviewTargets = loadReviewsWithoutSocialData();
         long[] interactionCounts = createReviewCommentsAndLikes(userIds, reviewTargets);
+        long likesOnReviewsAndComments = countLikesOnReviewSocialTargets();
         log.info("Separate opinion seed complete: {} eligible targets, {} ratings, {} written reviews, " +
                         "{} review comments, {} likes; {} users had an unavailable schedule",
-                eligibleTargets, ratingsCreated, reviewsCreated, interactionCounts[0], interactionCounts[1],
+                eligibleTargets, ratingsCreated, reviewsCreated, interactionCounts[0], likesOnReviewsAndComments,
                 unavailableUsers);
     }
 
@@ -302,6 +303,31 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
         return jdbcTemplate.query(sql, (resultSet, rowNumber) -> new ReviewTarget(
                 resultSet.getObject("id", UUID.class),
                 resultSet.getObject("user_id", UUID.class)), DEMO_USERNAME_PREFIX);
+    }
+
+    private long countLikesOnReviewSocialTargets() {
+        String sql = """
+                WITH demo_reviews AS (
+                    SELECT review.id
+                    FROM content_reviews review
+                    JOIN users owner ON owner.id = review.user_id
+                    WHERE position(? in owner.username) = 1
+                      AND review.publication_kind = 'WRITTEN_REVIEW'
+                ), target_counts AS (
+                    SELECT count(*) AS likes_count
+                    FROM likes like_row
+                    JOIN demo_reviews review ON review.id = like_row.content_review_id
+                    UNION ALL
+                    SELECT count(*) AS likes_count
+                    FROM likes like_row
+                    JOIN comments comment ON comment.id = like_row.comment_id
+                    JOIN demo_reviews review ON review.id = comment.content_review_id
+                )
+                SELECT coalesce(sum(likes_count), 0)
+                FROM target_counts
+                """;
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, DEMO_USERNAME_PREFIX);
+        return count == null ? 0 : count;
     }
 
     private long[] createReviewCommentsAndLikes(List<UUID> userIds, List<ReviewTarget> reviews) {
