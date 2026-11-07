@@ -193,6 +193,7 @@ public class ContentChildCardAssembler {
                         summary.posterPath(),
                         summary.airDate(),
                         null,
+                        summary.episodeCount(),
                         summary.tmdbVoteAverage(),
                         true))
                 .toList();
@@ -257,6 +258,7 @@ public class ContentChildCardAssembler {
                         null,
                         null,
                         null,
+                        null,
                         false)
                 : episodeSpec(rootCoordinate.seriesTmdbId(), rootCoordinate.seasonNumber(), summary);
     }
@@ -275,6 +277,7 @@ public class ContentChildCardAssembler {
                 summary.stillPath(),
                 summary.airDate(),
                 summary.runtime(),
+                null,
                 summary.tmdbVoteAverage(),
                 true);
     }
@@ -353,6 +356,7 @@ public class ContentChildCardAssembler {
                 card.tmdbId(),
                 card.seriesTmdbId(),
                 card.seasonNumber(),
+                card.episodeCount(),
                 card.episodeNumber(),
                 card.title(),
                 card.overview(),
@@ -382,6 +386,7 @@ public class ContentChildCardAssembler {
                 coordinate.tmdbId(),
                 coordinate.seriesTmdbId(),
                 coordinate.seasonNumber(),
+                spec.episodeCount(),
                 coordinate.episodeNumber(),
                 spec.title(),
                 spec.overview(),
@@ -453,6 +458,7 @@ public class ContentChildCardAssembler {
             String posterPath,
             LocalDate releaseDate,
             Integer runtimeMinutes,
+            Integer episodeCount,
             Double tmdbVoteAverage,
             boolean tmdbVoteAverageResolved) {
     }
