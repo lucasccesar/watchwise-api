@@ -1,0 +1,17 @@
+Migration inventory:
+  active: instruction files - 2 found
+    - .claude/CLAUDE.md
+    - AGENTS.md
+  active: skills - 1 found
+    - graphify
+  inactive: command sources - none found
+  inactive: subagents - none found
+Migration surfaces:
+  active: AGENTS.md - 1 instruction file(s) found.
+  inactive: skills - Not selected by CLI flags.
+  active: MCP config - 0 MCP server(s) converted into config.toml.
+  inactive: subagents - Not selected by CLI flags.
+Migration report:
+  rewritten: AGENTS.md - Existing Codex instructions already present at C:\Users\ggluk\AppData\Local\Temp\watchwise-codex-migration\AGENTS.md.
+  rewritten: .codex/hooks.json - Rewritten for Codex hooks; review behavior before relying on it. Codex hooks require `[features].codex_hooks = true`, only execute `command` handlers, skip `async` / `prompt` / `agent` handlers, ignore `matcher` for `UserPromptSubmit` and `Stop`, and `PreToolUse` / `PostToolUse` currently run for shell commands only.
+  rewritten: .codex/config.toml - Converted 0 MCP server entries.

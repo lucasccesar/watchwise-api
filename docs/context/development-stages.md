@@ -1,0 +1,215 @@
+# Watchwise
+
+Sequência recomendada de desenvolvimento — Entity → Repository → Service → Controller
+
+Ordem de implementação baseada nas dependências de chave estrangeira do modelo lógico e nos
+endpoints do OpenAPI da aplicação. A lógica geral: primeiro as entidades "raiz" sem dependências,
+depois quem depende só delas, e por último quem depende de várias outras entidades (Comentario,
+Curtida) ou agrega tudo (Busca, Resumo).
+
+**Revisado em 2026-10-28**: o escopo funcional principal está implementado. `GET /search` foi concluído
+em 2026-09-09; o checklist anterior ainda o listava como pendente. O que falta para o lançamento é
+configuração/infraestrutura e validação operacional, listadas abaixo.
+
+---
+
+## Fase 8 — Busca (concluída)
+
+### Fase 8 (concluída em 2026-09-09) — Busca
+
+`Search` é uma agregação de leitura: não cria entidade, migration, `Content` nem persiste resultados
+do TMDB. `GET /search` reúne conteúdos e pessoas retornados ao vivo pelo TMDB com usuários e listas
+do banco local. O array `contents` mistura filmes e séries; `people`, `lists` e `users` continuam
+arrays separados. Status em 2026-09-09: os itens 1-8 abaixo foram implementados; a documentação e a
+verificação da fase estão sincronizadas com o código:
+
+Os itens 6-8 foram concluídos em 2026-09-09.
+
+1. **[implementado em 2026-09-09] Atualizar o contrato OpenAPI antes do código.** Manter `GET /search` autenticado e o filtro
+   opcional `type` (`MOVIE`, `SERIES`, `PERSON`, `LIST`, `USER`). Exigir `q` não vazio, depois de
+   trim, com no mínimo 3 caracteres. Adicionar `page` e `size`; ambos são 1-based para o cliente e
+   `size` tem máximo de 20. Modelar a paginação sem um total global fictício: a página TMDB cobre os
+   resultados externos e as páginas locais cobrem listas e usuários, pois cada fonte tem seu próprio
+   total.
+2. **[implementado em 2026-09-09] Definir os DTOs de Search.** Criar DTOs de resultado para conteúdo TMDB (filme ou série), pessoa
+   TMDB e a resposta agregada. Para listas, criar `SearchUserListDTO` em vez de reutilizar
+   `UserListResponseDTO` ou `UserListPreviewDTO`: ele deve conter `id`, `user` (`UserPreviewDTO`),
+   `name`, `previewItems` (até os 5 primeiros `ContentRefDTO`, por `position`) e
+   `nestedListsCount`. O dono é necessário porque Search reúne listas de vários usuários; os cinco
+   previews são necessários para o card de lista. Atualizar `SearchResult` para usar esse DTO.
+3. **[implementado em 2026-09-09] Preparar as consultas locais.** Reaproveitar a busca prefixada e case-insensitive de usuário
+   existente, incluindo perfis privados apenas no formato seguro de `UserPreviewDTO`. Adicionar a
+   consulta de listas por nome com escape dos curingas de `LIKE`, paginação e filtros de visibilidade:
+   o dono vê as próprias listas, qualquer viewer vê `PUBLIC`, e `FOLLOWERS` só aparece para quem
+   segue o dono com status aceito; `PRIVATE` não aparece para terceiros. Reaproveitar
+   `UserListItemService.getPreviewItemsByListIds(...)` para buscar em lote os cinco previews, sem
+   consulta por lista.
+4. **[implementado em 2026-09-08] Estender o proxy TMDB.** Adicionar os modelos de resposta e métodos de busca de filme, série,
+   pessoa e busca múltipla. Sem `type`, usar a busca múltipla e separar pessoas de `contents`,
+   preservando filmes e séries misturados e a ordenação do TMDB. Com `type`, chamar somente o
+   endpoint TMDB necessário; `LIST` e `USER` não fazem chamada externa. Enviar idioma preferido do
+   viewer, `page` e `include_adult=false`. Criar cache Caffeine específico de Search, de TTL
+   curto e chaveado por consulta normalizada, tipo, idioma e página; jamais persistir o retorno.
+5. **[implementado em 2026-09-09] Implementar `SearchService` e `SearchServiceImpl`.** Orquestrar TMDB, `UserRepository`,
+   `UserListRepository`, `UserListItemService` e os mappers/DTOs de Search. A visibilidade de listas
+   de seguidores permanece encapsulada na consulta de `UserListRepository`; `SearchService` não deve
+   duplicá-la injetando `FollowerRepository`.
+   Respeitar o limite de 20 tanto na página enviada ao TMDB quanto nas `PageRequest` locais; ampliar
+   `PageRequestFactory` de forma reutilizável se ele precisar aceitar um teto específico por chamada,
+   sem criar validação de paginação dentro de Search. Uma indisponibilidade do TMDB deve resultar em
+   `TmdbUnavailableException` e resposta `502`, sem resposta parcial ou cache vencido. Uma busca só
+   local não depende do TMDB e continua funcionando quando ele estiver indisponível.
+6. **[implementado em 2026-09-09] Cobrir o serviço com testes.** A cobertura inclui cada `type`, a busca múltipla com filmes e séries no mesmo array, mapeamento dos cards, paginação e limite de 20, escape de `%` e `_`, visibilidade delegada das listas, previews em lote, resultados vazios, buscas locais sem TMDB e indisponibilidade TMDB nos tipos externos.
+7. **[implementado em 2026-09-09] Implementar `SearchController` em `/search` e os testes de controller.** Validar os parâmetros,
+   obter o viewer autenticado e converter todos os erros para `ApiError`/`ValidationApiError` pelo
+   `GlobalExceptionHandler`. Testar `200`, `400` para termo/tipo/paginação inválidos, `401` sem sessão
+   e `502` para indisponibilidade TMDB, confirmando que nenhum erro usa o corpo padrão do Spring.
+8. **[implementado em 2026-09-09] Fechar a documentação e a verificação.** Conferir que o contrato em
+   `openapi.yaml` corresponde à implementação, atualizar
+   `business-rules.md` com visibilidade das listas e semântica da busca somente após elas existirem no
+   código, e registrar a entrega em `progress.md`. Os testes unitários, os testes de controller e a suíte
+   Maven completa passaram antes de considerar a fase concluída.
+
+*Como as demais agregações da Fase 8, Search é leitura pura sobre dados já existentes. A diferença é
+o proxy TMDB: ele deve seguir o padrão de retry, cache e falha explícita (`TmdbUnavailableException`
+→ `502`) de `ContentDetailsServiceImpl`, sem deixar uma falha externa vazar como resposta padrão.*
+
+---
+
+## Pré-deploy — na ordem recomendada de execução
+
+Detalhe completo em `docs/pending/pending-to-deploy.md`. A ordem abaixo fecha primeiro as escolhas de
+provedor e storage, depois configura produção, entrega e-mails, prepara recuperação/observabilidade e
+valida o comportamento operacional antes de escalar.
+
+| # | Item | Por quê nessa posição |
+|---|---|---|
+| 1 | **Escolher host da API, PostgreSQL e storage durável** | Define URLs, limites de conexão, diretórios de importação e custo/franquias. |
+| 2 | **Completar `application-prod.properties`** com secrets via ambiente, `ddl-auto=validate`, `open-in-view=false` e logs SQL desligados | A API precisa iniciar no profile `prod` e validar migrations. |
+| 3 | **Configurar Resend** — API key, remetente e domínio verificado | Confirmação de cadastro, alteração de e-mail e recuperação de senha dependem do envio real. |
+| 4 | **Health check, CI/CD, backups e restauração** | Permite detectar falhas de deploy e recuperar dados antes do lançamento. |
+| 5 | **Revisão de segurança, carga e Gate R10** | O primeiro release fica em uma réplica; só escalar depois de comprovar limites, jobs, reinícios e concorrência em ambiente adequado. |
+| 6 | **Definir peso máximo total dos caches** com base na memória medida | Limite por número de entradas já existe; falta escolher o teto em bytes sem inventar um valor. |
+---
+
+## Resumo do que já foi implementado (Fases 1-10)
+
+**Fase 1 — Fundação:** `Usuario` e `Conteudo` completos (entity → repository → service → controller
+→ testes).
+
+**Fase 1.5 — Auth hardening:** confirmação de e-mail com cadastro pendente, tokens de uso único,
+reenvio e entrega pelo Resend; recuperação de senha invalida as sessões existentes. Mantidos `/auth/oauth/{provider}`,
+`POST /auth/logout-all`, detecção de reuso de refresh token, `auth_version` e rate limits compartilháveis.
+A API key e o remetente Resend são configuração externa; o domínio precisa ser verificado pelo provedor.
+
+**Fase 2 — Dependem só de Usuario:** `Seguidor`/`Follower` e `SeguePessoa`/`FollowedPerson`
+completos. `BloqueioUsuario`/`UserBlock` também foi implementado em 2026-10-16, após `User`,
+com migration V72, repositório, serviços e `UserBlockController`. A interface `UserBlockAccessService`
+centraliza o teste de bloqueio nos dois sentidos, reutilizado por Follower e Comment.
+
+**Fase 3 — Dependem de Usuario + Conteudo:** `UserContentPoster` foi implementado antes dos recursos
+dependentes como o override canônico por usuário/conteúdo. `Top5`/`Top5Entry`, `Watchlist`/
+`WatchlistEntry`, `Dropped`/`DroppedEntry` e `Log`/`DiaryEntry` estão completos, incluindo a cascata de
+remoção automática de watchlist/dropped ao logar. Autorização por dono do recurso padronizada aqui e
+reaproveitada em todas as fases seguintes.
+
+**Fase 4 — Dependem de Usuario (+ Conteudo via itens):** `Lista`/`UserList` e `ItemLista`/
+`UserListItem` completos, incluindo listas aninhadas (profundidade máxima 1 nível, sem ciclo, sem
+comentário/curtida em lista-de-listas) e a trava de grupo de tipo de conteúdo (filme/série, temporada
+e episódio não se misturam na mesma lista, adicionada em 2026-09-01).
+
+**Fase 5 — Depende de Usuario + Conteudo + Lista + Log:** `Comentario`/`Comment` completo (alvo único
+entre Conteudo/Lista/Log, resposta a comentário, cascata de exclusão, limite de 280 caracteres).
+
+**Fase 6 — Depende de Usuario + Comentario + Log:** `Curtida`/`Like` completo (comentário e diário),
+com `likesCount` denormalizado.
+
+**Fase 7 — Satélite:** `Notificacao`/`Notification` completo, incluindo a primeira integração real do
+backend com a API do TMDB (`TmdbClient`, jobs agendados `ContentTrackingJob`/
+`FollowedPersonTrackingJob`).
+
+**Fase 8 — Agregações (concluída):** `Resumo`/`Summary` (incluindo Month/Year in
+Review, All Time Stats, grade de notas por episódio, resumo da Home) e as agregações que surgiram de
+levantamentos de gaps contra `docs/context/telas.md` ao longo do caminho — `series-in-progress`,
+`liked-lists`, estatísticas/reviews por `Content`, e `GET /feed` (paginação por cursor). Todas as
+agregações do roteiro original e a busca estão concluídas.
+
+Também construído fora do roteiro original, a pedido do usuário ao longo do caminho: proxy de
+detalhe do TMDB (`GET /contents/{contentId}/details`, incluindo budget/revenue/production
+companies/crew/videos), "Assistido com" (`WatchCompanion`), pôster customizado canônico por
+usuário/conteúdo (incluindo diário/Top5/listas, Progress e Summary), filtro de posts mecânicos no feed
+(`DiaryEntry.ignore`).
+
+**Fase 9 — Picks (concluído):** após `User` e `Content`, `PicksTemplate`, categorias, opções fixas,
+`Pick` e `PickSelection` foram implementados. Templates usam a role persistida de `User` para derivar
+`OFFICIAL`/`COMMUNITY`; possuem creator nullable e datas de elegibilidade globais para conteúdo. O
+preenchimento permite Picks independentes por usuário/template, exige ao menos uma selection válida,
+aplica visibilidade e paginação, e protege a última selection. Categorias e opções usadas ficam
+imutáveis; excluir template com Picks desvincula o creator, e sem Picks remove o agregado. As rotas
+estão em `openapi.yaml` sob Picks Templates e Picks.
+
+**Fase 10 — Jogos diários (concluída em 2026-09-27):** depois das dependências `User` e dos dados
+externos do TMDB, `DailyChallenge`, `DailyChallengeHint` e `UserDailyGameResult` foram persistidos sem
+FK para `Content`. A geração global congela snapshots, pistas e identidades TMDB para as oito modalidades,
+com retries limitados, sem reuso de respostas e locks advisory. O módulo também inclui o adaptador TMDB
+com retry/cache, validação de candidatos, busca de filmes/séries/pessoas e a busca composta de episódios,
+histórico, rankings acumulados e o `DailyGameController` para hoje, tentativas, histórico e rankings.
+
+**Diário de séries/temporadas — modelo pós-V82 validado em B10 (2026-10-24):** antes do lançamento,
+V82 restringe DiaryEntry a eventos MOVIE/EPISODE e limpa os dados legados de conclusão; nenhum backfill
+é executado. A tela unificada combina os eventos com conclusões SERIES/SEASON derivadas das passadas de
+episódios. Notas atuais e reviews de série/temporada são persistidas separadamente; as reviews mantêm
+snapshot do score publicado e contexto da passada. Bulks SERIES/SEASON deixam seus eventos EPISODE
+inferiores com `ignore=true`, preservando o histórico e evitando um post por episódio no feed. As leituras
+quentes foram medidas com 100 séries e 100.000 eventos: 20 itens na página, total 100.000, 12 statements
+(10 Hibernate + 2 named JDBC), sem chamadas TMDB e sem reler séries não alteradas. `EXPLAIN
+(ANALYZE, BUFFERS)` no PostgreSQL descartável mediu 124,130 ms para a página e 66,850 ms para o count;
+isso é observação local, não SLO. A suíte completa pós-fix concluiu com BUILD SUCCESS: 4.488 testes,
+zero falhas/erros e dois ignorados. O ciclo de integração cobre a conclusão de S1, sua remoção da linha
+SERIES após o anúncio de S2, a edição da nota sem nova review enquanto a série está pendente, reviews
+múltiplas da série na passada existente após assistir S2 e a volta da passada 2 como rewatch após S2 ser
+reassistida. Os snapshots das reviews antigas não mudam.
+
+---
+
+## Settings — concluído em 2026-10-16
+
+Após `User`, `Follower` e `UserBlock`, foi implementado `SettingsViewService`, sem entidade ou
+migration própria, exposto por `UserController` em `GET /users/me/settings`. A resposta reúne perfil,
+privacidade, preferências e e-mail do próprio usuário; faz leituras limitadas, com no máximo dez
+solicitações pendentes e dez bloqueados, totais completos e ordenação `createdAt DESC, id DESC`.
+Perfil público retorna zero pendências e lista vazia sem consultar pendências. Não calcula estatísticas
+do diário/gêneros nem consulta TMDB; não expõe senha, role ou dados de sessão.
+
+Os bloqueios são administrados em `GET /users/me/blocked` e `POST`/`DELETE /users/me/blocked/{userId}`.
+Bloquear remove relações de follow aceitas ou pendentes nos dois sentidos; desbloquear não as restaura.
+Follower e Comment aplicam os efeitos sociais; comentários são excluídos por autor bloqueado em qualquer
+sentido no banco antes de paginar, contar e selecionar as prévias recentes.
+
+`PATCH /users/me` continua editando perfil, privacidade, credenciais e preferências, inclusive
+`profilePicture` e `banner` como URLs. A única nova ação de mídia é `DELETE /users/me/banner`,
+idempotente e autenticada com CSRF, sem upload/storage nem remoção dedicada de foto.
+
+## Por que essa ordem otimiza seu tempo
+
+- Você nunca implementa um repository/service que referencia uma FK para uma entidade que ainda não existe (evita mocks provisórios e retrabalho).
+- O módulo Auth saiu "de graça" junto com Usuario, já que os endpoints de login/registro só manipulam essa entidade — e a Fase 1.5 garantiu que ele ficasse fechado antes de virar dependência silenciosa do resto.
+- Autorização por dono do recurso nasceu na Fase 3 (primeiro recurso "de alguém" a proteger) e se repetiu como padrão já decidido nas fases seguintes, em vez de ser reinventada a cada entidade nova.
+- Busca ficou por último porque é leitura pura sobre dado que só existe depois que tudo mais estivesse populado — testá-la antes seria testar contra um banco vazio.
+- A ordem de pré-deploy segue a mesma lógica: nunca revisar segurança ou empacotar pra produção antes de a config e a superfície exposta (Actuator, domínio de imagem) já existirem de verdade.
+
+---
+
+## Calendário mensal de lançamentos — implementado em 2026-09-12/13
+
+O calendário é uma agregação autenticada de leitura em `GET /users/me/calendar?month=YYYY-MM`.
+Ele não cria uma entidade de eventos por usuário: `CalendarScheduleSnapshot` e
+`CalendarScheduleCompleteness` armazenam apenas fatos externos compartilhados por TMDB ID, região e
+idioma. A resposta combina watchlist, séries em progresso, snapshots, estado assistido do usuário e
+montagem mensal.
+
+O módulo inclui o provider TMDB com release dates regionais de filmes e temporadas regulares, cache
+Caffeine por chave de schedule, refresh agendado com deduplicação por locale e reconciliação transacional,
+o controller autenticado e a sincronização de dados remotos acessados por `content/details`. Temporada
+0 é excluída, datas ausentes não viram eventos, agrupamentos só ocorrem com completude comprovada e
+falhas isoladas preservam snapshots anteriores.
