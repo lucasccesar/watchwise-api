@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.EpisodeNavigationContext;
+import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -144,6 +145,15 @@ public class ContentChildCardAssembler {
 
     public ContentNavigationDTO assembleNavigation(
             EpisodeNavigationContext context, ContentCoordinate rootCoordinate, UUID viewerId) {
+        return assembleNavigation(context, rootCoordinate, viewerId, null, null);
+    }
+
+    public ContentNavigationDTO assembleNavigation(
+            EpisodeNavigationContext context,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId,
+            ContentViewerStateService.Resolution viewerState,
+            Map<UUID, ContentStatsResponseDTO> statsByContentId) {
         Objects.requireNonNull(rootCoordinate, "rootCoordinate is required");
         Objects.requireNonNull(viewerId, "viewerId is required");
         if (rootCoordinate.type() != ContentType.EPISODE || context == null) {
@@ -159,7 +169,8 @@ public class ContentChildCardAssembler {
                 : episodeSpec(rootCoordinate.seriesTmdbId(),
                         context.nextEpisode().seasonNumber(), context.nextEpisode());
         return assembleNavigationCards(
-                rootCoordinate, context.seasonEpisodeCount(), previous, next, viewerId);
+                rootCoordinate, context.seasonEpisodeCount(), previous, next, viewerId,
+                viewerState, statsByContentId);
     }
 
     private ContentNavigationDTO assembleNavigationCards(
@@ -168,6 +179,17 @@ public class ContentChildCardAssembler {
             CardSpec previous,
             CardSpec next,
             UUID viewerId) {
+        return assembleNavigationCards(rootCoordinate, seasonEpisodeCount, previous, next, viewerId, null, null);
+    }
+
+    private ContentNavigationDTO assembleNavigationCards(
+            ContentCoordinate rootCoordinate,
+            Integer seasonEpisodeCount,
+            CardSpec previous,
+            CardSpec next,
+            UUID viewerId,
+            ContentViewerStateService.Resolution viewerState,
+            Map<UUID, ContentStatsResponseDTO> statsByContentId) {
         List<CardSpec> adjacent = new ArrayList<>();
         if (previous != null) {
             adjacent.add(previous);
@@ -175,7 +197,8 @@ public class ContentChildCardAssembler {
         if (next != null) {
             adjacent.add(next);
         }
-        Map<ContentCoordinate, ContentChildCardDTO> cards = assembleCards(adjacent, viewerId);
+        Map<ContentCoordinate, ContentChildCardDTO> cards = assembleCards(
+                adjacent, viewerId, viewerState, statsByContentId);
         return new ContentNavigationDTO(
                 rootCoordinate.seriesTmdbId(),
                 rootCoordinate.seasonNumber(),
@@ -314,6 +337,14 @@ public class ContentChildCardAssembler {
 
     private Map<ContentCoordinate, ContentChildCardDTO> assembleCards(
             List<CardSpec> specs, UUID viewerId) {
+        return assembleCards(specs, viewerId, null, null);
+    }
+
+    private Map<ContentCoordinate, ContentChildCardDTO> assembleCards(
+            List<CardSpec> specs,
+            UUID viewerId,
+            ContentViewerStateService.Resolution viewerState,
+            Map<UUID, ContentStatsResponseDTO> statsByContentId) {
         Map<ContentCoordinate, CardSpec> distinctSpecsByCoordinate = new LinkedHashMap<>();
         for (CardSpec spec : safeList(specs)) {
             distinctSpecsByCoordinate.putIfAbsent(spec.coordinate(), spec);
@@ -331,7 +362,10 @@ public class ContentChildCardAssembler {
         ContentCardAssembler.AssemblyResult result = contentCardAssembler.assembleWithViewerStates(
                 cardSpecs,
                 new ContentCardContext(TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, null, null, viewerId),
-                Set.of(ContentCardFieldSet.STATS, ContentCardFieldSet.VIEWER_STATE));
+                Set.of(ContentCardFieldSet.STATS, ContentCardFieldSet.VIEWER_STATE),
+                false,
+                viewerState,
+                statsByContentId);
 
         Map<ContentCoordinate, ContentChildCardDTO> cards = new LinkedHashMap<>();
         for (CardSpec spec : distinctSpecs) {

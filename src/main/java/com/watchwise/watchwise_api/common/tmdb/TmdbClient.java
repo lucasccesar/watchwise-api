@@ -606,6 +606,19 @@ public class TmdbClient {
         return cacheCardMetadata(key, language, result, this::seasonCardMetadata);
     }
 
+    public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonEpisodeDetails(
+            String seriesTmdbId, Integer seasonNumber, String language) {
+        String key = seriesTmdbId + "|" + seasonNumber + "|" + language;
+        TmdbLookupResult<TmdbSeasonFullDetails> fullDetails = tmdbSeasonFullDetailsCache.getIfPresent(key);
+        if (fullDetails instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found) {
+            return new TmdbLookupResult.Found<>(found.value(), TmdbLookupOrigin.CACHE);
+        }
+        if (fullDetails instanceof TmdbLookupResult.NotFound<TmdbSeasonFullDetails>) {
+            return fullDetails;
+        }
+        return getCalendarSeasonDetails(seriesTmdbId, seasonNumber, language);
+    }
+
     public TmdbLookupResult<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
         TmdbCardMetadataKey key = new TmdbCardMetadataKey(

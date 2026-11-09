@@ -91,6 +91,24 @@ public class ContentCardAssembler {
             Collection<ContentCardSpec> specs,
             ContentCardContext context,
             Set<ContentCardFieldSet> fields) {
+        return assembleWithViewerStates(specs, context, fields, true);
+    }
+
+    AssemblyResult assembleWithViewerStates(
+            Collection<ContentCardSpec> specs,
+            ContentCardContext context,
+            Set<ContentCardFieldSet> fields,
+            boolean includeEpisodeBackdrops) {
+        return assembleWithViewerStates(specs, context, fields, includeEpisodeBackdrops, null, null);
+    }
+
+    AssemblyResult assembleWithViewerStates(
+            Collection<ContentCardSpec> specs,
+            ContentCardContext context,
+            Set<ContentCardFieldSet> fields,
+            boolean includeEpisodeBackdrops,
+            ContentViewerStateService.Resolution resolvedViewerState,
+            Map<UUID, ContentStatsResponseDTO> resolvedStats) {
         Objects.requireNonNull(context, "context is required");
         List<ContentCardSpec> distinctSpecs = distinctSpecs(specs);
         if (distinctSpecs.isEmpty()) {
@@ -105,8 +123,9 @@ public class ContentCardAssembler {
         List<ContentCoordinate> coordinates = distinctSpecs.stream()
                 .map(ContentCardSpec::coordinate)
                 .toList();
-        ContentViewerStateService.Resolution resolution = contentViewerStateService.resolve(
-                viewerId, coordinates, Map.of());
+        ContentViewerStateService.Resolution resolution = resolvedViewerState == null
+                ? contentViewerStateService.resolve(viewerId, coordinates, Map.of())
+                : resolvedViewerState;
         List<UUID> existingContentIds = coordinates.stream()
                 .map(resolution.existingContentIdsByCoordinate()::get)
                 .filter(Objects::nonNull)
@@ -114,7 +133,7 @@ public class ContentCardAssembler {
                 .toList();
 
         Map<UUID, ContentStatsResponseDTO> statsByContentId = requestedFields.contains(ContentCardFieldSet.STATS)
-                ? statsByContentId(existingContentIds)
+                ? resolvedStats == null ? statsByContentId(existingContentIds) : resolvedStats
                 : Map.of();
         Map<UUID, String> customPosterByContentId = requestedFields.contains(ContentCardFieldSet.SOCIAL_METADATA)
                 && context.posterUserId() != null
@@ -124,7 +143,7 @@ public class ContentCardAssembler {
                 : Map.of();
 
         Map<ContentCoordinate, CardMetadata> metadataByCoordinate = metadataByCoordinate(
-                distinctSpecs, context, requestedFields);
+                distinctSpecs, context, requestedFields, includeEpisodeBackdrops);
 
         Map<ContentCoordinate, CardData> cardDataByCoordinate = distinctSpecs.stream()
                 .collect(Collectors.toMap(
@@ -132,7 +151,9 @@ public class ContentCardAssembler {
                         spec -> new CardData(
                                 spec,
                                 metadataByCoordinate.get(spec.coordinate()),
-                                metadataByCoordinate.get(seriesCoordinateFor(spec)),
+                                includeEpisodeBackdrops
+                                        ? metadataByCoordinate.get(seriesCoordinateFor(spec))
+                                        : null,
                                 resolution.existingContentIdsByCoordinate().get(spec.coordinate()),
                                 resolution.statesByCoordinate().get(spec.coordinate()),
                                 statsByContentId,
@@ -155,7 +176,8 @@ public class ContentCardAssembler {
     private Map<ContentCoordinate, CardMetadata> metadataByCoordinate(
             List<ContentCardSpec> specs,
             ContentCardContext context,
-            Set<ContentCardFieldSet> requestedFields) {
+            Set<ContentCardFieldSet> requestedFields,
+            boolean includeEpisodeBackdrops) {
         Map<ContentCoordinate, CardMetadata> metadataByCoordinate = new LinkedHashMap<>();
         if (!requestedFields.contains(ContentCardFieldSet.BASIC_METADATA)) {
             specs.forEach(spec -> metadataByCoordinate.put(
@@ -163,10 +185,10 @@ public class ContentCardAssembler {
             return metadataByCoordinate;
         }
 
-        Set<ContentCoordinate> seriesBackdropCoordinates = specs.stream()
+        Set<ContentCoordinate> seriesBackdropCoordinates = includeEpisodeBackdrops ? specs.stream()
                 .map(this::seriesCoordinateFor)
                 .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+                .collect(Collectors.toSet()) : Set.of();
         Map<ContentCoordinate, ContentCardSpec> specsByCoordinate = specs.stream()
                 .collect(Collectors.toMap(
                         ContentCardSpec::coordinate,

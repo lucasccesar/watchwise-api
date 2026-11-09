@@ -95,6 +95,13 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbTvFullDetails series = tvDetails(content.getSeriesTmdbId(), language);
+        return getEpisodeMetadata(content, language, region, episode, series);
+    }
+
+    @Override
+    public ContentPageMetadataDTO getEpisodeMetadata(
+            Content content, String language, String region,
+            TmdbEpisodeFullDetails episode, TmdbTvFullDetails series) {
         return tvMetadata(
                 series,
                 tvCertification(content.getSeriesTmdbId(), language, region),

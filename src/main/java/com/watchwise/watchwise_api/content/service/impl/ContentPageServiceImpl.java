@@ -5,8 +5,10 @@ import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentNavigationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageMetadataDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPageStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
+import com.watchwise.watchwise_api.content.dto.EpisodeSummaryDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -21,9 +23,9 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,30 +50,39 @@ public class ContentPageServiceImpl implements ContentPageService {
         User viewer = userRepository.findById(viewerId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        ContentPageDetails pageDetails = (content.getType() == ContentType.SEASON
-                        || content.getType() == ContentType.EPISODE)
-                ? contentDetailsService.getPageDetails(
-                        contentId, viewerId, viewer.getPreferredLanguage(), viewer.getPreferredRegion())
-                : new ContentPageDetails(contentDetailsService.getDetails(contentId, viewerId), List.of());
+        ContentPageDetails pageDetails = contentDetailsService.getPageDetails(
+                content, viewerId, viewer.getPreferredLanguage(), viewer.getPreferredRegion());
         boolean pageDetailsAvailable = pageDetails != null;
         if (pageDetails == null) {
             pageDetails = new ContentPageDetails(contentDetailsService.getDetails(contentId, viewerId), List.of());
         }
         ContentDetailsDTO details = pageDetails.details();
         ContentCoordinate rootCoordinate = ContentCoordinate.from(content);
-        ContentViewerStateDTO viewerState = contentViewerStateService.resolve(
-                        viewerId, List.of(rootCoordinate), Map.of())
-                .statesByCoordinate()
-                .get(rootCoordinate);
+        ContentViewerStateService.Resolution episodePageState = null;
+        ContentPageStatsService.Resolution episodePageStats = null;
+        ContentViewerStateDTO viewerState;
+        if (content.getType() == ContentType.EPISODE && pageDetailsAvailable) {
+            List<ContentCoordinate> pageCoordinates = episodePageCoordinates(rootCoordinate, pageDetails);
+            episodePageState = contentViewerStateService.resolve(viewerId, pageCoordinates, Map.of());
+            viewerState = episodePageState.statesByCoordinate().get(rootCoordinate);
+            List<UUID> pageContentIds = episodePageState.existingContentIdsByCoordinate().values().stream()
+                    .distinct()
+                    .toList();
+            episodePageStats = contentPageStatsService.resolveStats(contentId, content.getType(), pageContentIds);
+        } else {
+            viewerState = contentViewerStateService.resolve(viewerId, List.of(rootCoordinate), Map.of())
+                    .statesByCoordinate()
+                    .get(rootCoordinate);
+        }
 
-        ContentDetailsDTO parentSeasonDetails = parentSeasonDetails(content, viewerId);
-        ContentPageMetadataDTO metadata = contentPageMetadataService.getMetadata(
-                content, viewer.getPreferredLanguage(), viewer.getPreferredRegion());
+        ContentPageMetadataDTO metadata = pageDetails.metadata() == null
+                ? contentPageMetadataService.getMetadata(
+                        content, viewer.getPreferredLanguage(), viewer.getPreferredRegion())
+                : pageDetails.metadata();
         if (content.getType() == ContentType.EPISODE) {
-            String presentationPosterPath = parentSeasonDetails != null
-                    && parentSeasonDetails.posterPath() != null
-                    ? parentSeasonDetails.posterPath()
-                    : details.posterPath();
+            String presentationPosterPath = details.posterPath() != null
+                    ? details.posterPath()
+                    : details.backdropPath();
             metadata = metadata.withPresentation(presentationPosterPath, details.crew(), true);
         }
         ContentPageSectionsDTO sections = content.getType() == ContentType.SEASON
@@ -93,32 +104,47 @@ public class ContentPageServiceImpl implements ContentPageService {
                 : contentChildCardAssembler.assembleSections(details, rootCoordinate, viewerId);
         ContentNavigationDTO navigation = content.getType() == ContentType.EPISODE && pageDetailsAvailable
                 ? contentChildCardAssembler.assembleNavigation(
-                        pageDetails.episodeNavigation(), rootCoordinate, viewerId)
-                : contentChildCardAssembler.assembleNavigation(details, parentSeasonDetails, rootCoordinate, viewerId);
+                        pageDetails.episodeNavigation(), rootCoordinate, viewerId,
+                        episodePageState, episodePageStats.statsByContentId())
+                : contentChildCardAssembler.assembleNavigation(details, null, rootCoordinate, viewerId);
+
+        ContentPageStatsDTO stats = episodePageStats == null
+                ? contentPageStatsService.getStats(contentId, content.getType())
+                : episodePageStats.pageStats();
 
         return new ContentPageDTO(
                 details,
                 metadata,
-                contentPageStatsService.getStats(contentId).withTmdbVoteAverage(details.tmdbVoteAverage()),
+                stats.withTmdbVoteAverage(details.tmdbVoteAverage()),
                 visibleReviewsCount(contentId, viewerId),
                 viewerState,
                 navigation,
                 sections);
     }
 
-    private ContentDetailsDTO parentSeasonDetails(Content content, UUID viewerId) {
-        if (content.getType() != ContentType.EPISODE) {
-            return null;
-        }
-        return contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
-                        content.getSeriesTmdbId(), content.getSeasonNumber(), null, ContentType.SEASON)
-                .map(parent -> contentDetailsService.getDetails(parent.getId(), viewerId))
-                .orElse(null);
+    private long visibleReviewsCount(UUID contentId, UUID viewerId) {
+        return diaryEntryRepository.countVisibleContentReviews(contentId, viewerId);
     }
 
-    private long visibleReviewsCount(UUID contentId, UUID viewerId) {
-        return diaryEntryRepository.findContentReviewKeys(
-                        contentId, viewerId, PageRequest.of(0, 1))
-                .getTotalElements();
+    private List<ContentCoordinate> episodePageCoordinates(
+            ContentCoordinate rootCoordinate, ContentPageDetails pageDetails) {
+        List<ContentCoordinate> coordinates = new ArrayList<>(3);
+        coordinates.add(rootCoordinate);
+        if (pageDetails.episodeNavigation() != null) {
+            addEpisodeCoordinate(coordinates, rootCoordinate.seriesTmdbId(),
+                    pageDetails.episodeNavigation().previousEpisode());
+            addEpisodeCoordinate(coordinates, rootCoordinate.seriesTmdbId(),
+                    pageDetails.episodeNavigation().nextEpisode());
+        }
+        return coordinates;
+    }
+
+    private void addEpisodeCoordinate(
+            List<ContentCoordinate> coordinates, String seriesTmdbId, EpisodeSummaryDTO episode) {
+        if (episode == null || episode.seasonNumber() == null || episode.episodeNumber() == null) {
+            return;
+        }
+        coordinates.add(new ContentCoordinate(
+                ContentType.EPISODE, null, seriesTmdbId, episode.seasonNumber(), episode.episodeNumber()));
     }
 }

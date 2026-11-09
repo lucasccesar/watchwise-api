@@ -322,6 +322,49 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId,
             @Param("sort") String sort, Pageable pageable);
 
+    @Query(value = """
+            SELECT COUNT(*)
+            FROM (
+                SELECT d.id
+                FROM diary_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
+                      SELECT 1 FROM followers f
+                      WHERE f.follower_id = :viewerId AND f.followed_id = u.id AND f.status = 'ACCEPTED'))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                      WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                         OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
+                UNION ALL
+                SELECT d.id
+                FROM dropped_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
+                      SELECT 1 FROM followers f
+                      WHERE f.follower_id = :viewerId AND f.followed_id = u.id AND f.status = 'ACCEPTED'))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                      WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                         OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
+                UNION ALL
+                SELECT r.id
+                FROM content_reviews r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.content_id = :contentId
+                  AND r.publication_kind = 'WRITTEN_REVIEW'
+                  AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
+                  AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
+                      SELECT 1 FROM followers f
+                      WHERE f.follower_id = :viewerId AND f.followed_id = u.id AND f.status = 'ACCEPTED'))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                      WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                         OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
+            ) visible_reviews
+            """, nativeQuery = true)
+    long countVisibleContentReviews(@Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId);
+
     @Query("""
             SELECT COALESCE(MAX(de.watchNumber), 0) FROM DiaryEntry de
             WHERE de.user.id = :userId

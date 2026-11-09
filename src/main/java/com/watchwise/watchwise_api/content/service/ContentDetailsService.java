@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.service;
 
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
+import com.watchwise.watchwise_api.content.entity.Content;
 
 import java.util.List;
 import java.util.UUID;
@@ -13,6 +14,9 @@ public interface ContentDetailsService {
 
     ContentPageDetails getPageDetails(
             UUID contentId, UUID requestingUserId, String preferredLanguage, String preferredRegion);
+
+    ContentPageDetails getPageDetails(
+            Content content, UUID requestingUserId, String preferredLanguage, String preferredRegion);
 
     List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId);
 

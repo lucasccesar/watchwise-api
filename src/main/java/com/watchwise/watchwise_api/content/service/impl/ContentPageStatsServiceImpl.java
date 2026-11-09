@@ -13,7 +13,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -30,13 +33,45 @@ public class ContentPageStatsServiceImpl implements ContentPageStatsService {
 
     @Override
     public ContentPageStatsDTO getStats(UUID contentId) {
-        ContentStatsResponseDTO existingStats = contentStatsService.getCommunityStats(contentId);
+        ContentType contentType = contentRepository.findById(contentId)
+                .map(content -> content.getType())
+                .orElse(null);
+        return getStats(contentId, contentType);
+    }
+
+    @Override
+    public ContentPageStatsDTO getStats(UUID contentId, ContentType contentType) {
+        return resolveStats(contentId, contentType, List.of(contentId)).pageStats();
+    }
+
+    @Override
+    public Resolution resolveStats(UUID contentId, ContentType contentType, Collection<UUID> contentIds) {
+        List<UUID> requestedIds = contentIds == null
+                ? List.of(contentId)
+                : contentIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (!requestedIds.contains(contentId)) {
+            requestedIds = new ArrayList<>(requestedIds);
+            requestedIds.add(contentId);
+        }
+        List<ContentStatsResponseDTO> batch = contentStatsService.getCommunityStatsBatch(requestedIds);
+        if (batch == null) {
+            batch = contentStatsService.getStatsBatch(requestedIds);
+        }
+        Map<UUID, ContentStatsResponseDTO> statsByContentId = new LinkedHashMap<>();
+        if (batch != null) {
+            batch.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .filter(stats -> stats.contentId() != null)
+                    .forEach(stats -> statsByContentId.putIfAbsent(stats.contentId(), stats));
+        }
+        ContentStatsResponseDTO existingStats = statsByContentId.get(contentId);
+        if (existingStats == null) {
+            existingStats = contentStatsService.getCommunityStats(contentId);
+        }
         if (existingStats == null) {
             existingStats = contentStatsService.getStats(contentId);
         }
-        boolean opinionContent = contentRepository.findById(contentId)
-                .map(content -> content.getType() == ContentType.SERIES || content.getType() == ContentType.SEASON)
-                .orElse(false);
+        boolean opinionContent = contentType == ContentType.SERIES || contentType == ContentType.SEASON;
         long[] countsByScore = new long[MAX_SCORE + 1];
         if (opinionContent) {
             for (ContentRatingRepository.PublicRatingDistribution row : ratingRepository.findPublicDistribution(contentId)) {
@@ -63,7 +98,7 @@ public class ContentPageStatsServiceImpl implements ContentPageStatsService {
             distribution.add(new RatingDistributionDTO(score, count));
         }
 
-        return new ContentPageStatsDTO(
+        ContentPageStatsDTO pageStats = new ContentPageStatsDTO(
                 existingStats.contentId(),
                 existingStats.averageScore(),
                 ratingsCount,
@@ -71,5 +106,6 @@ public class ContentPageStatsServiceImpl implements ContentPageStatsService {
                 existingStats.playsCount(),
                 existingStats.commentsCount(),
                 null);
+        return new Resolution(pageStats, Map.copyOf(statsByContentId));
     }
 }

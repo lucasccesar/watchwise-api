@@ -177,6 +177,12 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 .map(Content::getId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<UUID> watchlistAndDroppedContentIds = contentByCoordinate.values().stream()
+                .filter(content -> content.getType() == ContentType.MOVIE
+                        || content.getType() == ContentType.SERIES)
+                .map(Content::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<UUID> diaryEventContentIds = contentByCoordinate.values().stream()
                 .filter(content -> content.getType() == ContentType.MOVIE
                         || content.getType() == ContentType.EPISODE)
@@ -200,10 +206,14 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         List<DiaryEntry> diaryEntries = diaryEventContentIds.isEmpty()
                 ? List.of()
                 : diaryEntryRepository.findViewerStateEntriesByContentIdIn(viewerId, diaryEventContentIds);
-        List<WatchlistEntry> watchlistEntries = watchlistEntryRepository
-                .findByUserIdAndContentIdInWithContent(viewerId, contentIds);
-        List<DroppedEntry> droppedEntries = droppedEntryRepository
-                .findByUserIdAndContentIdInWithContent(viewerId, contentIds);
+        List<WatchlistEntry> watchlistEntries = watchlistAndDroppedContentIds.isEmpty()
+                ? List.of()
+                : watchlistEntryRepository.findByUserIdAndContentIdInWithContent(
+                        viewerId, watchlistAndDroppedContentIds);
+        List<DroppedEntry> droppedEntries = watchlistAndDroppedContentIds.isEmpty()
+                ? List.of()
+                : droppedEntryRepository.findByUserIdAndContentIdInWithContent(
+                        viewerId, watchlistAndDroppedContentIds);
         List<UserListItem> listItems = userListItemRepository
                 .findViewerMembershipsByContentIdIn(viewerId, contentIds);
 
