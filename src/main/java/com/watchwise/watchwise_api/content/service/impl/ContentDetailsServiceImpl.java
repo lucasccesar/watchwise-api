@@ -50,6 +50,7 @@ import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
 import com.watchwise.watchwise_api.content.dto.VideoDTO;
 import com.watchwise.watchwise_api.content.dto.WatchProviderDTO;
 import com.watchwise.watchwise_api.content.service.ContentPageDetails;
+import com.watchwise.watchwise_api.content.service.EpisodeNavigationContext;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -142,6 +143,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         if (content.getType() == ContentType.SEASON) {
             return buildSeasonPageDetails(
                     content, preferredLanguage, preferredRegion, customPosterUrl);
+        }
+        if (content.getType() == ContentType.EPISODE) {
+            return buildEpisodePageDetails(content, preferredLanguage, preferredRegion, customPosterUrl);
         }
         return new ContentPageDetails(
                 buildDetails(content, preferredLanguage, preferredRegion, customPosterUrl),
@@ -381,24 +385,37 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private ContentDetailsDTO buildEpisodeDetails(
             Content content, String language, String region, String customPosterUrl) {
+        return resolveEpisodeDetails(content, language, region, customPosterUrl).details();
+    }
+
+    private ContentPageDetails buildEpisodePageDetails(
+            Content content, String language, String region, String customPosterUrl) {
+        EpisodeDetailsData episodeDetails = resolveEpisodeDetails(content, language, region, customPosterUrl);
+        return new ContentPageDetails(
+                episodeDetails.details(),
+                List.of(),
+                episodeNavigationContext(content, episodeDetails.season(), episodeDetails.series(), language));
+    }
+
+    private EpisodeDetailsData resolveEpisodeDetails(
+            Content content, String language, String region, String customPosterUrl) {
         TmdbEpisodeFullDetails episode = tmdbClient.getEpisodeFullDetails(
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
-        String seasonPosterPath = tmdbClient
+        TmdbSeasonFullDetails season = tmdbClient
                 .getSeasonFullDetails(content.getSeriesTmdbId(), content.getSeasonNumber(), language)
                 .toOptional()
-                .map(TmdbSeasonFullDetails::posterPath)
                 .orElse(null);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
         persistUnitRuntime(content, episode.runtime());
 
-        return new ContentDetailsDTO(
+        ContentDetailsDTO details = new ContentDetailsDTO(
                 content.getId(),
                 ContentType.EPISODE,
                 episode.name(),
                 episode.overview(),
-                seasonPosterPath,
+                season == null ? null : season.posterPath(),
                 episode.stillPath(),
                 parseDate(episode.airDate()),
                 episode.runtime(),
@@ -427,6 +444,88 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 resolveTvTitle(series, region),
                 releaseYearOf(series.firstAirDate()),
                 episode.voteAverage());
+        return new EpisodeDetailsData(details, season, series);
+    }
+
+    private EpisodeNavigationContext episodeNavigationContext(
+            Content content,
+            TmdbSeasonFullDetails currentSeason,
+            TmdbTvFullDetails series,
+            String language) {
+        if (currentSeason == null || currentSeason.episodes() == null) {
+            return null;
+        }
+
+        List<EpisodeSummaryDTO> episodes = orderedEpisodeSummaries(content.getSeasonNumber(), currentSeason.episodes());
+        int currentEpisodeIndex = -1;
+        for (int index = 0; index < episodes.size(); index++) {
+            if (Objects.equals(episodes.get(index).episodeNumber(), content.getEpisodeNumber())) {
+                currentEpisodeIndex = index;
+                break;
+            }
+        }
+        if (currentEpisodeIndex < 0) {
+            return null;
+        }
+
+        EpisodeSummaryDTO previousEpisode = currentEpisodeIndex > 0
+                ? episodes.get(currentEpisodeIndex - 1)
+                : adjacentSeasonEpisode(
+                        content.getSeriesTmdbId(), content.getSeasonNumber(), series.seasons(), language, true);
+        EpisodeSummaryDTO nextEpisode = currentEpisodeIndex < episodes.size() - 1
+                ? episodes.get(currentEpisodeIndex + 1)
+                : adjacentSeasonEpisode(
+                        content.getSeriesTmdbId(), content.getSeasonNumber(), series.seasons(), language, false);
+        return new EpisodeNavigationContext(episodes.size(), previousEpisode, nextEpisode);
+    }
+
+    private EpisodeSummaryDTO adjacentSeasonEpisode(
+            String seriesTmdbId,
+            Integer currentSeasonNumber,
+            List<TmdbSeasonSummary> seasons,
+            String language,
+            boolean previous) {
+        if (currentSeasonNumber == null || currentSeasonNumber <= 0 || seasons == null) {
+            return null;
+        }
+
+        Comparator<TmdbSeasonSummary> seasonOrder = Comparator.comparing(TmdbSeasonSummary::seasonNumber);
+        if (previous) {
+            seasonOrder = seasonOrder.reversed();
+        }
+        TmdbSeasonSummary candidate = seasons.stream()
+                .filter(Objects::nonNull)
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .filter(season -> previous
+                        ? season.seasonNumber() < currentSeasonNumber
+                        : season.seasonNumber() > currentSeasonNumber)
+                .filter(season -> season.episodeCount() == null || season.episodeCount() > 0)
+                .sorted(seasonOrder)
+                .findFirst()
+                .orElse(null);
+        if (candidate == null) {
+            return null;
+        }
+
+        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
+                seriesTmdbId, candidate.seasonNumber(), language);
+        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)) {
+            return null;
+        }
+        List<EpisodeSummaryDTO> episodes = orderedEpisodeSummaries(
+                candidate.seasonNumber(), found.value().episodes());
+        if (episodes.isEmpty()) {
+            return null;
+        }
+        return previous ? episodes.get(episodes.size() - 1) : episodes.get(0);
+    }
+
+    private List<EpisodeSummaryDTO> orderedEpisodeSummaries(
+            Integer seasonNumber, List<TmdbEpisodeSummary> episodes) {
+        return episodeSummaries(seasonNumber, episodes).stream()
+                .filter(episode -> episode.episodeNumber() != null && episode.episodeNumber() > 0)
+                .sorted(Comparator.comparing(EpisodeSummaryDTO::episodeNumber))
+                .toList();
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {
@@ -971,6 +1070,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             this.name = name;
             this.profilePath = profilePath;
         }
+    }
+
+    private record EpisodeDetailsData(
+            ContentDetailsDTO details,
+            TmdbSeasonFullDetails season,
+            TmdbTvFullDetails series) {
     }
 
 }

@@ -48,10 +48,15 @@ public class ContentPageServiceImpl implements ContentPageService {
         User viewer = userRepository.findById(viewerId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        ContentPageDetails pageDetails = content.getType() == ContentType.SEASON
+        ContentPageDetails pageDetails = (content.getType() == ContentType.SEASON
+                        || content.getType() == ContentType.EPISODE)
                 ? contentDetailsService.getPageDetails(
                         contentId, viewerId, viewer.getPreferredLanguage(), viewer.getPreferredRegion())
                 : new ContentPageDetails(contentDetailsService.getDetails(contentId, viewerId), List.of());
+        boolean pageDetailsAvailable = pageDetails != null;
+        if (pageDetails == null) {
+            pageDetails = new ContentPageDetails(contentDetailsService.getDetails(contentId, viewerId), List.of());
+        }
         ContentDetailsDTO details = pageDetails.details();
         ContentCoordinate rootCoordinate = ContentCoordinate.from(content);
         ContentViewerStateDTO viewerState = contentViewerStateService.resolve(
@@ -86,8 +91,10 @@ public class ContentPageServiceImpl implements ContentPageService {
                                 viewer.getPreferredRegion(),
                                 viewer.getPreferredLanguage())
                 : contentChildCardAssembler.assembleSections(details, rootCoordinate, viewerId);
-        ContentNavigationDTO navigation = contentChildCardAssembler.assembleNavigation(
-                details, parentSeasonDetails, rootCoordinate, viewerId);
+        ContentNavigationDTO navigation = content.getType() == ContentType.EPISODE && pageDetailsAvailable
+                ? contentChildCardAssembler.assembleNavigation(
+                        pageDetails.episodeNavigation(), rootCoordinate, viewerId)
+                : contentChildCardAssembler.assembleNavigation(details, parentSeasonDetails, rootCoordinate, viewerId);
 
         return new ContentPageDTO(
                 details,

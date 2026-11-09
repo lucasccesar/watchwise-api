@@ -7,7 +7,12 @@ import java.util.List;
 
 public record ContentPageDetails(
         ContentDetailsDTO details,
-        List<SeasonSummaryDTO> siblingSeasons) {
+        List<SeasonSummaryDTO> siblingSeasons,
+        EpisodeNavigationContext episodeNavigation) {
+
+    public ContentPageDetails(ContentDetailsDTO details, List<SeasonSummaryDTO> siblingSeasons) {
+        this(details, siblingSeasons, null);
+    }
 
     public ContentPageDetails {
         siblingSeasons = siblingSeasons == null ? List.of() : List.copyOf(siblingSeasons);

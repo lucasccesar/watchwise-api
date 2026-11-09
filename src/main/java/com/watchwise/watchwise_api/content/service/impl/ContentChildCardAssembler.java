@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.EpisodeNavigationContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -138,6 +139,35 @@ public class ContentChildCardAssembler {
         }
         CardSpec previous = adjacentEpisode(boundary, rootCoordinate, -1);
         CardSpec next = adjacentEpisode(boundary, rootCoordinate, 1);
+        return assembleNavigationCards(rootCoordinate, boundary.episodeCount(), previous, next, viewerId);
+    }
+
+    public ContentNavigationDTO assembleNavigation(
+            EpisodeNavigationContext context, ContentCoordinate rootCoordinate, UUID viewerId) {
+        Objects.requireNonNull(rootCoordinate, "rootCoordinate is required");
+        Objects.requireNonNull(viewerId, "viewerId is required");
+        if (rootCoordinate.type() != ContentType.EPISODE || context == null) {
+            return null;
+        }
+
+        CardSpec previous = context.previousEpisode() == null
+                ? null
+                : episodeSpec(rootCoordinate.seriesTmdbId(),
+                        context.previousEpisode().seasonNumber(), context.previousEpisode());
+        CardSpec next = context.nextEpisode() == null
+                ? null
+                : episodeSpec(rootCoordinate.seriesTmdbId(),
+                        context.nextEpisode().seasonNumber(), context.nextEpisode());
+        return assembleNavigationCards(
+                rootCoordinate, context.seasonEpisodeCount(), previous, next, viewerId);
+    }
+
+    private ContentNavigationDTO assembleNavigationCards(
+            ContentCoordinate rootCoordinate,
+            Integer seasonEpisodeCount,
+            CardSpec previous,
+            CardSpec next,
+            UUID viewerId) {
         List<CardSpec> adjacent = new ArrayList<>();
         if (previous != null) {
             adjacent.add(previous);
@@ -150,7 +180,7 @@ public class ContentChildCardAssembler {
                 rootCoordinate.seriesTmdbId(),
                 rootCoordinate.seasonNumber(),
                 rootCoordinate.episodeNumber(),
-                boundary == null ? null : boundary.episodeCount(),
+                seasonEpisodeCount,
                 previous == null ? null : cards.get(previous.coordinate()),
                 next == null ? null : cards.get(next.coordinate()));
     }
