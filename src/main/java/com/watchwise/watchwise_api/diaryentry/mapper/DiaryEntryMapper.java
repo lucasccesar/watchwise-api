@@ -20,10 +20,12 @@ public interface DiaryEntryMapper {
     @Mapping(target = "withCommentsCount", ignore = true)
     @Mapping(target = "withCard", ignore = true)
     @Mapping(target = "withSeriesPosterPath", ignore = true)
+    @Mapping(target = "withSeriesCustomPosterUrl", ignore = true)
     @Mapping(target = "withSeriesTitle", ignore = true)
     @Mapping(target = "card", ignore = true)
     @Mapping(target = "seriesTitle", ignore = true)
     @Mapping(target = "seriesPosterPath", ignore = true)
+    @Mapping(target = "seriesCustomPosterUrl", ignore = true)
     @Mapping(target = "watchedWith", expression = "java(java.util.List.of())")
     DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry, boolean likedByMe);
 
@@ -34,10 +36,12 @@ public interface DiaryEntryMapper {
     @Mapping(target = "withCommentsCount", ignore = true)
     @Mapping(target = "withCard", ignore = true)
     @Mapping(target = "withSeriesPosterPath", ignore = true)
+    @Mapping(target = "withSeriesCustomPosterUrl", ignore = true)
     @Mapping(target = "withSeriesTitle", ignore = true)
     @Mapping(target = "card", ignore = true)
     @Mapping(target = "seriesTitle", ignore = true)
     @Mapping(target = "seriesPosterPath", ignore = true)
+    @Mapping(target = "seriesCustomPosterUrl", ignore = true)
     DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith);
 
 }

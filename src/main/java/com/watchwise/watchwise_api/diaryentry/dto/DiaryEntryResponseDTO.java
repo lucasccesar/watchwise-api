@@ -30,41 +30,59 @@ public record DiaryEntryResponseDTO(
         List<UserPreviewDTO> watchedWith,
         ContentCardDTO card,
         String seriesTitle,
-        String seriesPosterPath
+        String seriesPosterPath,
+        String seriesCustomPosterUrl
 ) {
     public DiaryEntryResponseDTO withCustomPosterUrl(String customPosterUrl) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
                 customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
-                seriesTitle, seriesPosterPath);
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
     }
 
     public DiaryEntryResponseDTO withCommentsCount(long commentsCount) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
                 customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
-                seriesTitle, seriesPosterPath);
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
     }
 
     public DiaryEntryResponseDTO withCard(ContentCardDTO card) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
                 customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
-                seriesTitle, seriesPosterPath);
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
     }
 
     public DiaryEntryResponseDTO withSeriesTitle(String seriesTitle) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
                 customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
-                seriesTitle, seriesPosterPath);
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
     }
 
     public DiaryEntryResponseDTO withSeriesPosterPath(String seriesPosterPath) {
         return new DiaryEntryResponseDTO(
                 id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
                 customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
-                seriesTitle, seriesPosterPath);
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
+    }
+
+    public DiaryEntryResponseDTO withSeriesCustomPosterUrl(String seriesCustomPosterUrl) {
+        return new DiaryEntryResponseDTO(
+                id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith, card,
+                seriesTitle, seriesPosterPath, seriesCustomPosterUrl);
+    }
+
+    public DiaryEntryResponseDTO(UUID id, UUID userId, ContentRefDTO content, String comment, Integer score,
+            LocalDate watchedDate, Instant watchedAt, Integer watchNumber, Boolean watchedInTheater,
+            String customPosterUrl, Boolean ignore, LocalDateTime createdAt, LocalDateTime updatedAt,
+            Integer likesCount, long commentsCount, Boolean likedByMe, List<UserPreviewDTO> watchedWith,
+            ContentCardDTO card, String seriesTitle, String seriesPosterPath) {
+        this(id, userId, content, comment, score, watchedDate, watchedAt, watchNumber, watchedInTheater,
+                customPosterUrl, ignore, createdAt, updatedAt, likesCount, commentsCount, likedByMe, watchedWith,
+                card, seriesTitle, seriesPosterPath, null);
     }
 
     public DiaryEntryResponseDTO(UUID id, UUID userId, ContentRefDTO content, String comment, Integer score,

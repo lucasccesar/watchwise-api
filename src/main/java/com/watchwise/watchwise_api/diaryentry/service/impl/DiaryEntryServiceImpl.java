@@ -285,7 +285,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 customPosterUrl(entry, cardsByCoordinate, fallbackPostersByContentId),
                 cardFor(entry.getContent(), cardsByCoordinate),
                 seriesTitleFor(entry.getContent(), cardsByCoordinate),
-                seriesPosterPathFor(entry.getContent(), cardsByCoordinate)));
+                seriesPosterPathFor(entry.getContent(), cardsByCoordinate),
+                seriesCustomPosterUrlFor(entry.getContent(), cardsByCoordinate)));
     }
 
     @Override
@@ -310,7 +311,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         return enrichDiaryEntryResponse(entry, likedEntryIds.contains(diaryEntryId), commentsCount,
                 watchedWith, customPosterUrl, card, seriesTitleFor(entry.getContent(), cardsByCoordinate),
-                seriesPosterPathFor(entry.getContent(), cardsByCoordinate));
+                seriesPosterPathFor(entry.getContent(), cardsByCoordinate),
+                seriesCustomPosterUrlFor(entry.getContent(), cardsByCoordinate));
     }
 
     @Override
@@ -1345,12 +1347,21 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             DiaryEntry entry, boolean likedByMe, long commentsCount,
             List<UserPreviewDTO> watchedWith, String customPosterUrl, ContentCardDTO card,
             String seriesTitle, String seriesPosterPath) {
+        return enrichDiaryEntryResponse(entry, likedByMe, commentsCount, watchedWith, customPosterUrl, card,
+                seriesTitle, seriesPosterPath, null);
+    }
+
+    private DiaryEntryResponseDTO enrichDiaryEntryResponse(
+            DiaryEntry entry, boolean likedByMe, long commentsCount,
+            List<UserPreviewDTO> watchedWith, String customPosterUrl, ContentCardDTO card,
+            String seriesTitle, String seriesPosterPath, String seriesCustomPosterUrl) {
         return diaryEntryMapper.diaryEntryToResponseDto(entry, likedByMe, watchedWith)
                 .withCommentsCount(commentsCount)
                 .withCustomPosterUrl(customPosterUrl)
                 .withCard(card)
                 .withSeriesTitle(seriesTitle)
-                .withSeriesPosterPath(seriesPosterPath);
+                .withSeriesPosterPath(seriesPosterPath)
+                .withSeriesCustomPosterUrl(seriesCustomPosterUrl);
     }
 
     private DiaryEntryResponseDTO enrichDiaryEntryResponse(
@@ -1414,6 +1425,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private String seriesPosterPathFor(Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
         ContentCardDTO seriesCard = seriesCardFor(content, cardsByCoordinate);
         return seriesCard == null ? null : seriesCard.posterPath();
+    }
+
+    private String seriesCustomPosterUrlFor(
+            Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
+        ContentCardDTO seriesCard = seriesCardFor(content, cardsByCoordinate);
+        return seriesCard == null ? null : seriesCard.customPosterUrl();
     }
 
     private String seriesTitleFor(Content content, Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
