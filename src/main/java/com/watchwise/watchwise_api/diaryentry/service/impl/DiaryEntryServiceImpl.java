@@ -469,13 +469,16 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private SeriesInProgressResponseDTO omitFullyWatchedSeasonProgress(SeriesInProgressResponseDTO series) {
+        List<SeasonProgressDTO> completedSeasons = series.seasonProgress().stream()
+                .filter(season -> seriesProgressAssembler.isAtFullProgress(
+                        season.watchedEpisodeCount(), season.totalEpisodeCount()))
+                .toList();
         List<SeasonProgressDTO> inProgressSeasons = series.seasonProgress().stream()
                 .filter(season -> !seriesProgressAssembler.isAtFullProgress(
                         season.watchedEpisodeCount(), season.totalEpisodeCount()))
                 .toList();
-        return inProgressSeasons.size() == series.seasonProgress().size()
-                ? series
-                : series.withSeasonProgress(inProgressSeasons);
+        return series.withSeasonProgress(inProgressSeasons)
+                .withCompletedSeasonProgress(completedSeasons);
     }
 
     private List<SeriesInProgressResponseDTO> assembleSeriesProgressRows(
