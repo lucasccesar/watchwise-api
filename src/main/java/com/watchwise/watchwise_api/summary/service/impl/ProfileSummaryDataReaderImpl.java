@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewSource;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -59,10 +61,11 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     private final WatchCompanionRepository watchCompanionRepository;
     private final UserMapper userMapper;
     private final ContentReviewRepository contentReviewRepository;
+    private final LikeRepository likeRepository;
 
     @Override
     @Transactional(readOnly = true)
-    public Snapshot read(UUID userId, ContentType type) {
+    public Snapshot read(UUID viewerId, UUID userId, ContentType type) {
         ContentType watchedContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.EPISODE;
         ContentType ratingContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
         LocalDate windowEnd = LocalDate.now();
@@ -101,10 +104,12 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toMap(DiaryEntry::getId, Function.identity(), (first, ignored) -> first))
                 .values().stream().toList();
+        PreviewLikeMetadata likeMetadata = loadLikeMetadata(viewerId, allPreviewEntries, recentContentReviews);
         Map<UUID, List<UserPreviewDTO>> previewCompanions = loadCompanions(allPreviewEntries);
-        List<ProfileDiaryPreviewDTO> recentEpisodes = toPreviews(recentEpisodeEntries, previewCompanions);
+        List<ProfileDiaryPreviewDTO> recentEpisodes = toPreviews(
+                recentEpisodeEntries, previewCompanions, likeMetadata);
         List<ProfileDiaryPreviewDTO> recentReviews = mergeRecentReviews(
-                recentReviewEntries, recentContentReviews, previewCompanions);
+                recentReviewEntries, recentContentReviews, previewCompanions, likeMetadata);
 
         List<DiaryEntry> completedEntries = type == ContentType.MOVIE
                 ? queryRepository.findRecentTopLevelEntries(userId, ContentType.MOVIE,
@@ -139,7 +144,9 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     }
 
     private List<ProfileDiaryPreviewDTO> toPreviews(
-            List<DiaryEntry> entries, Map<UUID, List<UserPreviewDTO>> companions) {
+            List<DiaryEntry> entries,
+            Map<UUID, List<UserPreviewDTO>> companions,
+            PreviewLikeMetadata likeMetadata) {
         if (entries == null || entries.isEmpty()) {
             return List.of();
         }
@@ -154,17 +161,20 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                         entry.getWatchNumber(),
                         null,
                         companions.getOrDefault(entry.getId(), List.of()),
-                        null))
+                        null,
+                        entry.getLikesCount() == null ? 0 : entry.getLikesCount(),
+                        likeMetadata.likedDiaryEntryIds().contains(entry.getId())))
                 .toList();
     }
 
     private List<ProfileDiaryPreviewDTO> mergeRecentReviews(
             List<DiaryEntry> diaryReviews,
             List<ContentReview> contentReviews,
-            Map<UUID, List<UserPreviewDTO>> companions) {
+            Map<UUID, List<UserPreviewDTO>> companions,
+            PreviewLikeMetadata likeMetadata) {
         List<ReviewPreviewCandidate> candidates = new ArrayList<>();
         for (DiaryEntry entry : Optional.ofNullable(diaryReviews).orElse(List.of())) {
-            ProfileDiaryPreviewDTO preview = toPreviews(List.of(entry), companions).getFirst();
+            ProfileDiaryPreviewDTO preview = toPreviews(List.of(entry), companions, likeMetadata).getFirst();
             Instant orderAt = entry.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant();
             candidates.add(new ReviewPreviewCandidate(preview, orderAt));
         }
@@ -194,7 +204,9 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                         review.getWatchNumber(),
                         null,
                         List.of(),
-                        null);
+                        null,
+                        likeMetadata.contentReviewLikesCount().getOrDefault(review.getId(), 0),
+                        likeMetadata.likedContentReviewIds().contains(review.getId()));
                 candidates.add(new ReviewPreviewCandidate(preview, orderAt));
             }
         }
@@ -205,6 +217,38 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 .limit(RECENT_REVIEWS_LIMIT)
                 .map(ReviewPreviewCandidate::preview)
                 .toList();
+    }
+
+    private PreviewLikeMetadata loadLikeMetadata(
+            UUID viewerId, List<DiaryEntry> diaryEntries, List<ContentReview> contentReviews) {
+        List<UUID> diaryEntryIds = Optional.ofNullable(diaryEntries).orElse(List.of()).stream()
+                .map(DiaryEntry::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        List<UUID> contentReviewIds = Optional.ofNullable(contentReviews).orElse(List.of()).stream()
+                .map(ContentReview::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        Set<UUID> likedDiaryEntryIds = viewerId == null || diaryEntryIds.isEmpty()
+                ? Set.of()
+                : Optional.ofNullable(likeRepository.findLikedDiaryEntryIds(viewerId, diaryEntryIds))
+                        .orElse(Set.of());
+        Set<UUID> likedContentReviewIds = viewerId == null || contentReviewIds.isEmpty()
+                ? Set.of()
+                : Optional.ofNullable(likeRepository.findLikedContentReviewIds(viewerId, contentReviewIds))
+                        .orElse(Set.of());
+        Map<UUID, Integer> contentReviewLikesCount = contentReviewIds.isEmpty()
+                ? Map.of()
+                : Optional.ofNullable(likeRepository.countByContentReviewIdIn(contentReviewIds)).orElse(List.of())
+                        .stream()
+                        .collect(Collectors.toMap(
+                                LikeRepository.ContentReviewLikeCount::getReviewId,
+                                row -> row.getCount() == null ? 0 : Math.toIntExact(row.getCount())));
+
+        return new PreviewLikeMetadata(likedDiaryEntryIds, likedContentReviewIds, contentReviewLikesCount);
     }
 
     private Instant reviewOrderAt(ContentReview review) {
@@ -352,5 +396,11 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     }
 
     private record ReviewPreviewCandidate(ProfileDiaryPreviewDTO preview, Instant orderAt) {
+    }
+
+    private record PreviewLikeMetadata(
+            Set<UUID> likedDiaryEntryIds,
+            Set<UUID> likedContentReviewIds,
+            Map<UUID, Integer> contentReviewLikesCount) {
     }
 }

@@ -14,7 +14,7 @@ import java.util.UUID;
 
 public interface ProfileSummaryDataReader {
 
-    Snapshot read(UUID userId, ContentType type);
+    Snapshot read(UUID viewerId, UUID userId, ContentType type);
 
     record Snapshot(
             WatchTimeDTO watchTime,

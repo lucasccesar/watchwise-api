@@ -18,7 +18,9 @@ public record ProfileDiaryPreviewDTO(
         Integer watchNumber,
         String customPosterUrl,
         List<UserPreviewDTO> watchedWith,
-        ContentCardDTO card
+        ContentCardDTO card,
+        int likesCount,
+        boolean likedByMe
 ) {
     public ProfileDiaryPreviewDTO {
         source = source == null ? ProfileDiaryPreviewSource.DIARY_ENTRY : source;
@@ -28,17 +30,24 @@ public record ProfileDiaryPreviewDTO(
     public ProfileDiaryPreviewDTO(UUID id, ContentRefDTO content, Integer score, LocalDate watchedDate,
             Integer watchNumber, String customPosterUrl, List<UserPreviewDTO> watchedWith) {
         this(id, ProfileDiaryPreviewSource.DIARY_ENTRY, content, score, watchedDate, watchedDate,
-                watchNumber, customPosterUrl, watchedWith, null);
+                watchNumber, customPosterUrl, watchedWith, null, 0, false);
     }
 
     public ProfileDiaryPreviewDTO(UUID id, ContentRefDTO content, Integer score, LocalDate watchedDate,
             Integer watchNumber, String customPosterUrl, List<UserPreviewDTO> watchedWith, ContentCardDTO card) {
         this(id, ProfileDiaryPreviewSource.DIARY_ENTRY, content, score, watchedDate, watchedDate,
-                watchNumber, customPosterUrl, watchedWith, card);
+                watchNumber, customPosterUrl, watchedWith, card, 0, false);
+    }
+
+    public ProfileDiaryPreviewDTO(UUID id, ProfileDiaryPreviewSource source, ContentRefDTO content, Integer score,
+            LocalDate watchedDate, LocalDate activityDate, Integer watchNumber, String customPosterUrl,
+            List<UserPreviewDTO> watchedWith, ContentCardDTO card) {
+        this(id, source, content, score, watchedDate, activityDate, watchNumber, customPosterUrl,
+                watchedWith, card, 0, false);
     }
 
     public ProfileDiaryPreviewDTO withCard(ContentCardDTO card) {
         return new ProfileDiaryPreviewDTO(id, source, content, score, watchedDate, activityDate,
-                watchNumber, customPosterUrl, watchedWith, card);
+                watchNumber, customPosterUrl, watchedWith, card, likesCount, likedByMe);
     }
 }

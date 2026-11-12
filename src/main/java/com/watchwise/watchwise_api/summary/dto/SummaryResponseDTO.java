@@ -38,9 +38,13 @@ public record SummaryResponseDTO(
                 previews.add(preview);
             } else if (entry instanceof DiaryEntryResponseDTO diaryEntry) {
                 previews.add(new ProfileDiaryPreviewDTO(
-                        diaryEntry.id(), diaryEntry.content(), diaryEntry.score(), diaryEntry.watchedDate(),
+                        diaryEntry.id(), ProfileDiaryPreviewSource.DIARY_ENTRY, diaryEntry.content(),
+                        diaryEntry.score(), diaryEntry.watchedDate(), diaryEntry.watchedDate(),
                         diaryEntry.watchNumber(), diaryEntry.customPosterUrl(),
-                        diaryEntry.watchedWith() == null ? List.<UserPreviewDTO>of() : diaryEntry.watchedWith()));
+                        diaryEntry.watchedWith() == null ? List.<UserPreviewDTO>of() : diaryEntry.watchedWith(),
+                        null,
+                        diaryEntry.likesCount() == null ? 0 : diaryEntry.likesCount(),
+                        Boolean.TRUE.equals(diaryEntry.likedByMe())));
             } else {
                 throw new IllegalArgumentException("Unsupported profile diary preview type: "
                         + entry.getClass().getName());

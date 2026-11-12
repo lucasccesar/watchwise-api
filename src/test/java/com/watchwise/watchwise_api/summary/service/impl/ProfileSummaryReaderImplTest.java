@@ -94,7 +94,7 @@ class ProfileSummaryReaderImplTest {
                 List.of(), List.of(), List.of(),
                 new ProfileSummaryDataReader.RewatchData(ProfileRewatchKind.MOST_REWATCHED, movie, 3L),
                 null);
-        when(dataReader.read(userId, ContentType.MOVIE)).thenReturn(snapshot);
+        when(dataReader.read(viewerId, userId, ContentType.MOVIE)).thenReturn(snapshot);
         ProfileHighlightContentDTO highlight = new ProfileHighlightContentDTO(
                 ContentType.MOVIE, movie.getId(), "550", null, "Fight Club", 1999, "/poster.jpg", null);
         when(displayMetadataResolver.resolveStoredContent(userId, movie)).thenReturn(highlight);
@@ -118,7 +118,7 @@ class ProfileSummaryReaderImplTest {
         ProfileSummaryDataReader.Snapshot snapshot = new ProfileSummaryDataReader.Snapshot(
                 new WatchTimeDTO(0L, 0L, 0L, 0L), List.of(), List.of(),
                 List.of(preview), List.of(), List.of(), null, null);
-        when(dataReader.read(userId, ContentType.MOVIE)).thenReturn(snapshot);
+        when(dataReader.read(viewerId, userId, ContentType.MOVIE)).thenReturn(snapshot);
         ContentCoordinate coordinate = new ContentCoordinate(ContentType.MOVIE, "550", null, null, null);
         ContentCardDTO card = new ContentCardDTO(
                 content.id(), ContentType.MOVIE, "550", null, null, null, "Fight Club", "/fight-club.jpg",
@@ -162,7 +162,7 @@ class ProfileSummaryReaderImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
-        verify(dataReader, never()).read(any(), any());
+        verify(dataReader, never()).read(any(), any(), any());
     }
 
     @Test
@@ -171,7 +171,7 @@ class ProfileSummaryReaderImplTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("type must be one of: MOVIE, SERIES");
 
-        verify(dataReader, never()).read(any(), any());
+        verify(dataReader, never()).read(any(), any(), any());
     }
 
     @Test
@@ -182,6 +182,6 @@ class ProfileSummaryReaderImplTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
-        verify(dataReader, never()).read(any(), any());
+        verify(dataReader, never()).read(any(), any(), any());
     }
 }

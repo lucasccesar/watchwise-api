@@ -56,7 +56,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
         assertCanView(viewerId, userId, target);
         validateType(type);
 
-        ProfileSummaryDataReader.Snapshot snapshot = dataReader.read(userId, type);
+        ProfileSummaryDataReader.Snapshot snapshot = dataReader.read(viewerId, userId, type);
         snapshot = enrichVisualCards(userId, target, snapshot);
         ProfileHighlightsDTO highlights = resolveHighlights(userId, snapshot);
         RatingsSummaryDTO ratingsSummary = buildRatingsSummary(snapshot.ratingsDistribution());
@@ -105,7 +105,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                             preview.id(), preview.source(), preview.content(), preview.score(),
                             preview.watchedDate(), preview.activityDate(), preview.watchNumber(),
                             card == null ? preview.customPosterUrl() : card.customPosterUrl(),
-                            preview.watchedWith(), card);
+                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe());
                 })
                 .toList();
     }

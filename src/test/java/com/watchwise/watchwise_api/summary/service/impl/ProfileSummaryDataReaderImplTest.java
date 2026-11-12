@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryDataReader;
@@ -63,13 +64,16 @@ class ProfileSummaryDataReaderImplTest {
     @Mock
     private ContentReviewRepository contentReviewRepository;
 
+    @Mock
+    private LikeRepository likeRepository;
+
     private ProfileSummaryDataReaderImpl reader;
     private UUID userId;
 
     @BeforeEach
     void setUp() {
         reader = new ProfileSummaryDataReaderImpl(queryRepository, droppedEntryRepository, contentRepository,
-                contentMapper, watchCompanionRepository, userMapper, contentReviewRepository);
+                contentMapper, watchCompanionRepository, userMapper, contentReviewRepository, likeRepository);
         userId = UUID.randomUUID();
         org.mockito.Mockito.lenient().when(queryRepository.findRecentReviews(any(), any(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.findRecentTopLevelEntries(any(), any(), any())).thenReturn(List.of());
@@ -111,7 +115,7 @@ class ProfileSummaryDataReaderImplTest {
         when(watchCount.getCount()).thenReturn(2L);
         when(contentMapper.contentToContentRefDto(movie)).thenReturn(contentRef);
 
-        ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.MOVIE);
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.MOVIE);
 
         assertThat(result.recentActivity()).hasSize(2);
         assertThat(result.recentActivity()).extracting("timesWatched").containsOnly(2L);
@@ -139,7 +143,7 @@ class ProfileSummaryDataReaderImplTest {
         when(contentRepository.findAllById(List.of(contentId))).thenReturn(List.of(series));
         when(contentMapper.contentToContentRefDto(series)).thenReturn(contentRef);
 
-        ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.SERIES);
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
         assertThat(result.recentActivity()).singleElement().satisfies(item -> {
             assertThat(item.content()).isEqualTo(contentRef);
@@ -179,7 +183,7 @@ class ProfileSummaryDataReaderImplTest {
         when(contentRepository.findAllById(List.of(contentId))).thenReturn(List.of(series));
         when(contentMapper.contentToContentRefDto(series)).thenReturn(contentRef);
 
-        ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.SERIES);
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
         assertThat(result.recentReviews()).singleElement().satisfies(preview -> {
             assertThat(preview.id()).isEqualTo(reviewId);
@@ -228,7 +232,7 @@ class ProfileSummaryDataReaderImplTest {
             when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(diaryReview.getId())))
                     .thenReturn(List.of());
 
-            ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.SERIES);
+            ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
             assertThat(result.recentReviews()).extracting(ProfileDiaryPreviewDTO::id)
                     .containsExactly(diaryReview.getId(), dateOnlyReview.getId());
@@ -240,7 +244,7 @@ class ProfileSummaryDataReaderImplTest {
 
     @Test
     void shouldReturnEmptyRecentReviewsWhenProfileReviewQueryReturnsNoRows() {
-        ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.SERIES);
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
         assertThat(result.recentReviews()).isEmpty();
         assertThat(result.recentEpisodes()).isEmpty();
@@ -254,7 +258,7 @@ class ProfileSummaryDataReaderImplTest {
 
     @Test
     void shouldUseCurrentSeriesRatingsInsteadOfEpisodeDiaryScores() {
-        reader.read(userId, ContentType.SERIES);
+        reader.read(userId, userId, ContentType.SERIES);
 
         verify(queryRepository).countLatestScoresByUserIdAndContentType(userId, ContentType.SERIES.name());
         org.mockito.Mockito.verify(queryRepository, org.mockito.Mockito.never())
@@ -276,7 +280,7 @@ class ProfileSummaryDataReaderImplTest {
         when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(episode.getId())))
                 .thenReturn(List.of());
 
-        ProfileSummaryDataReader.Snapshot result = reader.read(userId, ContentType.SERIES);
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
         assertThat(result.recentEpisodes()).hasSize(1);
         assertThat(result.recentReviews()).hasSize(1);

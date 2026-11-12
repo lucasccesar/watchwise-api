@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProfileSummaryContractTest {
 
     @Test
-    void profileDiaryPreviewDoesNotExposeReviewTextOrSocialCounters() {
+    void profileDiaryPreviewExposesLikeStateWithoutReviewTextOrComments() {
         ContentRefDTO content = content(ContentType.MOVIE);
 
         ProfileDiaryPreviewDTO preview = new ProfileDiaryPreviewDTO(
@@ -25,7 +25,8 @@ class ProfileSummaryContractTest {
         assertThat(preview.activityDate()).isEqualTo(preview.watchedDate());
         assertThat(List.of(ProfileDiaryPreviewDTO.class.getRecordComponents()))
                 .extracting(component -> component.getName())
-                .doesNotContain("comment", "likesCount", "commentsCount");
+                .contains("likesCount", "likedByMe")
+                .doesNotContain("comment", "commentsCount");
     }
 
     @Test
