@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -20,6 +21,7 @@ import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.top5entry.service.Top5EntryReader;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
@@ -76,6 +78,9 @@ class Top5EntryServiceImplTest {
     @Mock
     private UserBlockAccessService userBlockAccessService;
 
+    @Mock
+    private Top5EntryReader top5EntryReader;
+
     @InjectMocks
     private Top5EntryServiceImpl top5EntryService;
 
@@ -113,6 +118,7 @@ class Top5EntryServiceImplTest {
 
         lenient().when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
                 .thenReturn(List.of());
+        lenient().when(top5EntryReader.read(any(), any())).thenReturn(List.of());
         lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
     }
 
@@ -126,10 +132,9 @@ class Top5EntryServiceImplTest {
         Top5EntryResponseDTO dto1 = buildResponseDto(entry1);
         Top5EntryResponseDTO dto2 = buildResponseDto(entry2);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(entry1, entry2));
-        when(top5EntryMapper.top5EntryToResponseDto(entry1)).thenReturn(dto1);
-        when(top5EntryMapper.top5EntryToResponseDto(entry2)).thenReturn(dto2);
+        when(top5EntryReader.read(lucasId, ContentType.MOVIE)).thenReturn(List.of(dto1, dto2));
+        when(userContentPosterService.findByUserAndContentIds(lucasId,
+                List.of(fightClub.getId(), pulpFiction.getId()))).thenReturn(Map.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
@@ -141,24 +146,10 @@ class Top5EntryServiceImplTest {
     void shouldIncludeLatestPersonalScoreWhenDiaryScoreExists() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         Top5EntryResponseDTO mapped = buildResponseDto(entry);
-        ProfileSummaryQueryRepository.LatestContentScore score = new ProfileSummaryQueryRepository.LatestContentScore() {
-            @Override
-            public UUID getContentId() {
-                return fightClub.getId();
-            }
-
-            @Override
-            public Integer getScore() {
-                return 9;
-            }
-        };
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(entry));
-        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
-        when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
-                lucasId, List.of(fightClub.getId()), ContentType.MOVIE.name()))
-                .thenReturn(List.of(score));
+        when(top5EntryReader.read(lucasId, ContentType.MOVIE)).thenReturn(List.of(mapped.withScore(9)));
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
@@ -170,24 +161,10 @@ class Top5EntryServiceImplTest {
     void shouldKeepScoreNullWhenLatestDiaryPassHasNoScore() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         Top5EntryResponseDTO mapped = buildResponseDto(entry);
-        ProfileSummaryQueryRepository.LatestContentScore score = new ProfileSummaryQueryRepository.LatestContentScore() {
-            @Override
-            public UUID getContentId() {
-                return fightClub.getId();
-            }
-
-            @Override
-            public Integer getScore() {
-                return null;
-            }
-        };
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(entry));
-        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
-        when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
-                lucasId, List.of(fightClub.getId()), ContentType.MOVIE.name()))
-                .thenReturn(List.of(score));
+        when(top5EntryReader.read(lucasId, ContentType.MOVIE)).thenReturn(List.of(mapped.withScore(null)));
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
@@ -201,9 +178,7 @@ class Top5EntryServiceImplTest {
         Top5EntryResponseDTO mapped = buildResponseDto(entry);
         String canonicalPoster = "/from-diary.png";
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(entry));
-        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
+        when(top5EntryReader.read(lucasId, ContentType.MOVIE)).thenReturn(List.of(mapped));
         when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
                 .thenReturn(Map.of(fightClub.getId(), canonicalPoster));
 
@@ -218,13 +193,12 @@ class Top5EntryServiceImplTest {
     @DisplayName("[getTop5] Should Return Empty List - When User Has No Entries Of That Type")
     void shouldReturnEmptyListWhenUserHasNoEntriesOfThatType() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(top5EntryReader.read(lucasId, ContentType.MOVIE)).thenReturn(List.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
         assertThat(result).isEmpty();
-        verify(top5EntryMapper, never()).top5EntryToResponseDto(any());
+        verify(userContentPosterService, never()).findByUserAndContentIds(any(), any());
     }
 
     @Test
@@ -263,9 +237,6 @@ class Top5EntryServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         lucas.setIsProfilePublic(true);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
-
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(viewerId, lucasId, ContentType.MOVIE);
 
         assertThat(result).isEmpty();
@@ -280,9 +251,6 @@ class Top5EntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
-
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(viewerId, lucasId, ContentType.MOVIE);
 
         assertThat(result).isEmpty();
@@ -857,8 +825,12 @@ class Top5EntryServiceImplTest {
     }
 
     private Top5EntryResponseDTO buildResponseDto(Top5Entry entry) {
+        Content content = entry.getContent();
+        ContentRefDTO contentRef = content == null ? null : new ContentRefDTO(
+                content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                null, null, null, null);
         return new Top5EntryResponseDTO(
-                entry.getId(), entry.getType(), null, entry.getPosition(), entry.getCreatedAt(), entry.getUpdatedAt());
+                entry.getId(), entry.getType(), contentRef, entry.getPosition(), entry.getCreatedAt(), entry.getUpdatedAt());
     }
 
     private Content buildContent(String tmdbId, ContentType type) {

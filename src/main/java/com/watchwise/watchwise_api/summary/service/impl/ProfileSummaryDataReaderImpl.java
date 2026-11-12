@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewSource;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
+import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivitySource;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
@@ -22,6 +23,8 @@ import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryDataReader;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
+import com.watchwise.watchwise_api.top5entry.service.Top5EntryReader;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -63,6 +66,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     private final UserMapper userMapper;
     private final ContentReviewRepository contentReviewRepository;
     private final LikeRepository likeRepository;
+    private final Top5EntryReader top5EntryReader;
 
     @Override
     @Transactional(readOnly = true)
@@ -122,14 +126,36 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         List<DroppedEntry> droppedEntries = droppedEntryRepository
                 .findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, PageRequest.of(0, RECENT_ACTIVITY_LIMIT))
                 .getContent();
+        List<Top5EntryResponseDTO> top5Entries = top5EntryReader.read(userId, type);
+        List<UUID> activityContentIds = Stream.of(
+                        completedEntries.stream().map(DiaryEntry::getContent)
+                                .filter(Objects::nonNull).map(Content::getId),
+                        seriesCompletions.stream().map(ProfileSummaryQueryRepository.SeriesCompletionActivity::getContentId),
+                        droppedEntries.stream().map(DroppedEntry::getContent)
+                                .filter(Objects::nonNull).map(Content::getId))
+                .flatMap(Function.identity())
+                .filter(Objects::nonNull)
+                .toList();
+        List<UUID> watchCountContentIds = Stream.concat(
+                        activityContentIds.stream(),
+                        top5Entries.stream().map(Top5EntryResponseDTO::content)
+                                .filter(Objects::nonNull).map(content -> content.id()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<UUID, Long> timesWatched = loadWatchCounts(userId, type, watchCountContentIds);
         List<RecentActivityItemDTO> recentActivity = toRecentActivity(
-                userId, type, completedEntries, seriesCompletions, droppedEntries);
+                type, completedEntries, seriesCompletions, droppedEntries, timesWatched);
+        List<ProfileTop5EntryDTO> top5 = top5Entries.stream()
+                .map(entry -> ProfileTop5EntryDTO.from(entry, entry.content() != null
+                        && timesWatched.getOrDefault(entry.content().id(), 0L) > 0, null))
+                .toList();
 
         RewatchData rewatch = readRewatch(userId, type);
         LongestWatchData longestWatch = readLongestWatch(userId, type);
 
         return new Snapshot(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                recentActivity, rewatch, longestWatch);
+                recentActivity, rewatch, longestWatch, top5);
     }
 
     private List<GenreCountDTO> toGenreCounts(List<ProfileSummaryQueryRepository.GenreCount> rows) {
@@ -275,11 +301,11 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     }
 
     private List<RecentActivityItemDTO> toRecentActivity(
-            UUID userId,
             ContentType type,
             List<DiaryEntry> completedEntries,
             List<ProfileSummaryQueryRepository.SeriesCompletionActivity> seriesCompletions,
-            List<DroppedEntry> droppedEntries) {
+            List<DroppedEntry> droppedEntries,
+            Map<UUID, Long> timesWatched) {
         List<UUID> seriesContentIds = seriesCompletions.stream()
                 .map(ProfileSummaryQueryRepository.SeriesCompletionActivity::getContentId)
                 .filter(Objects::nonNull)
@@ -289,25 +315,6 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 ? Map.of()
                 : contentRepository.findAllById(seriesContentIds).stream()
                         .collect(Collectors.toMap(Content::getId, Function.identity()));
-
-        List<UUID> contentIds = Stream.of(
-                        completedEntries.stream().map(DiaryEntry::getContent),
-                        seriesContentById.values().stream(),
-                        droppedEntries.stream().map(DroppedEntry::getContent))
-                .flatMap(Function.identity())
-                .filter(Objects::nonNull)
-                .map(Content::getId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-
-        Map<UUID, Long> timesWatched = contentIds.isEmpty()
-                ? Map.of()
-                : Optional.ofNullable(queryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
-                                userId, contentIds, type.name()))
-                        .orElse(List.of()).stream()
-                        .collect(Collectors.toMap(ProfileSummaryQueryRepository.ContentWatchCount::getContentId,
-                                ProfileSummaryQueryRepository.ContentWatchCount::getCount));
 
         List<ActivityCandidate> candidates = Stream.of(
                         completedEntries.stream().map(entry -> new ActivityCandidate(
@@ -353,6 +360,17 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 .limit(RECENT_ACTIVITY_LIMIT)
                 .toList();
         return candidates.stream().map(ActivityCandidate::item).toList();
+    }
+
+    private Map<UUID, Long> loadWatchCounts(UUID userId, ContentType type, List<UUID> contentIds) {
+        if (contentIds.isEmpty()) {
+            return Map.of();
+        }
+        return Optional.ofNullable(queryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                        userId, contentIds, type.name()))
+                .orElse(List.of()).stream()
+                .collect(Collectors.toMap(ProfileSummaryQueryRepository.ContentWatchCount::getContentId,
+                        ProfileSummaryQueryRepository.ContentWatchCount::getCount));
     }
 
     private RewatchData readRewatch(UUID userId, ContentType type) {

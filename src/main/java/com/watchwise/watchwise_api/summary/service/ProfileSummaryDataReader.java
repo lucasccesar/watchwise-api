@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.summary.service;
 
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
@@ -24,7 +25,20 @@ public interface ProfileSummaryDataReader {
             List<ProfileDiaryPreviewDTO> recentReviews,
             List<RecentActivityItemDTO> recentActivity,
             RewatchData rewatch,
-            LongestWatchData longestWatch) {
+            LongestWatchData longestWatch,
+            List<ProfileTop5EntryDTO> top5) {
+        public Snapshot(
+                WatchTimeDTO watchTime,
+                List<GenreCountDTO> genreCounts,
+                List<RatingCountDTO> ratingsDistribution,
+                List<ProfileDiaryPreviewDTO> recentEpisodes,
+                List<ProfileDiaryPreviewDTO> recentReviews,
+                List<RecentActivityItemDTO> recentActivity,
+                RewatchData rewatch,
+                LongestWatchData longestWatch) {
+            this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
+                    recentActivity, rewatch, longestWatch, List.of());
+        }
     }
 
     record RewatchData(ProfileRewatchKind kind, Content content, long count) {

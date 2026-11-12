@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.summary.dto.ProfileHighlightsDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileLongestWatchDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchHighlightDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingsSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
@@ -75,7 +76,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
 
         return new SummaryResponseDTO(snapshot.watchTime(), highlights, snapshot.genreCounts(), ratingsSummary,
                 snapshot.ratingsDistribution(), snapshot.recentEpisodes(), snapshot.recentReviews(),
-                snapshot.recentActivity());
+                snapshot.recentActivity(), snapshot.top5());
     }
 
     private ProfileSummaryDataReader.Snapshot enrichVisualCards(
@@ -83,7 +84,8 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
         List<ContentRefDTO> contentRefs = Stream.of(
                         snapshot.recentEpisodes().stream().map(ProfileDiaryPreviewDTO::content),
                         snapshot.recentReviews().stream().map(ProfileDiaryPreviewDTO::content),
-                        snapshot.recentActivity().stream().map(item -> item.content()))
+                        snapshot.recentActivity().stream().map(item -> item.content()),
+                        snapshot.top5().stream().map(ProfileTop5EntryDTO::content))
                 .flatMap(stream -> stream)
                 .filter(content -> content != null && content.type() != null)
                 .toList();
@@ -102,18 +104,19 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                 .map(coordinate -> new ContentCardSpec(coordinate, null, null, null, null))
                 .toList();
         List<ContentCardSpec> specs = Stream.concat(contentSpecs.stream(), reviewSeriesSpecs.stream()).toList();
-        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+        Map<ContentCoordinate, ContentCardDTO> assembledCards = contentCardAssembler.assemble(
                 specs,
                 new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), ownerId, null),
                 PROFILE_CARD_FIELDS);
-        cards = cards == null ? Map.of() : cards;
+        Map<ContentCoordinate, ContentCardDTO> cards = assembledCards == null ? Map.of() : assembledCards;
 
         return new ProfileSummaryDataReader.Snapshot(
                 snapshot.watchTime(), snapshot.genreCounts(), snapshot.ratingsDistribution(),
                 addCardsToPreviews(snapshot.recentEpisodes(), cards),
                 addCardsToReviewPreviews(snapshot.recentReviews(), cards),
                 addCardsToActivity(snapshot.recentActivity(), cards),
-                snapshot.rewatch(), snapshot.longestWatch());
+                snapshot.rewatch(), snapshot.longestWatch(),
+                snapshot.top5().stream().map(item -> item.withCard(cardFor(item.content(), cards))).toList());
     }
 
     private ContentCoordinate seriesCoordinateForReview(ContentRefDTO content) {

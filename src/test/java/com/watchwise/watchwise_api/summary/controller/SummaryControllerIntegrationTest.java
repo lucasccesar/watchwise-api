@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.summary.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.DemoDataSeedApplication;
+import com.watchwise.watchwise_api.WatchwiseApiApplication;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
@@ -29,6 +31,8 @@ import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadata
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
 import com.watchwise.watchwise_api.summary.service.impl.EpisodeRatingsReleasedEpisodes;
+import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
+import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -36,12 +40,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -69,10 +80,26 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(classes = SummaryControllerIntegrationTest.SummaryTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class SummaryControllerIntegrationTest {
+
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = WatchwiseApiApplication.class)
+    @EnableJpaRepositories(basePackageClasses = WatchwiseApiApplication.class)
+    @ComponentScan(
+            basePackages = "com.watchwise.watchwise_api",
+            excludeFilters = {
+                    @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                            classes = {WatchwiseApiApplication.class, DemoDataSeedApplication.class}),
+                    @ComponentScan.Filter(type = FilterType.REGEX,
+                            pattern = "com\\.watchwise\\.watchwise_api\\..*Test\\$.*"),
+                    @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = TestConfiguration.class)
+            })
+    static class SummaryTestApplication {
+    }
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -102,6 +129,9 @@ class SummaryControllerIntegrationTest {
 
     @Autowired
     private ContentRatingRepository contentRatingRepository;
+
+    @Autowired
+    private Top5EntryRepository top5EntryRepository;
 
     @Autowired
     private FollowerRepository followerRepository;
@@ -134,6 +164,7 @@ class SummaryControllerIntegrationTest {
     void setUp() {
         diaryEntryRepository.deleteAll();
         contentRatingRepository.deleteAll();
+        top5EntryRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -144,6 +175,7 @@ class SummaryControllerIntegrationTest {
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
         when(tmdbClient.getTvFullDetails(anyString(), anyString()))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(userContentPosterService.findByUserAndContentIds(any(), any())).thenReturn(Map.of());
         when(calendarService.getUpcoming(any(), eq(6))).thenReturn(java.util.List.of());
     }
 
@@ -399,6 +431,40 @@ class SummaryControllerIntegrationTest {
         mockMvc.perform(getSummaryRequest(user, user.id()).param("type", "MOVIE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.watchTime.totalMinutesWatched").value(139));
+    }
+
+    @Test
+    @DisplayName("[getSummary] Should Return Empty Top 5 - When User Has No Entries")
+    void shouldReturnEmptyTop5WhenUserHasNoEntries() throws Exception {
+        RegisteredUser user = registerUser("summaryemptytop5");
+
+        mockMvc.perform(getSummaryRequest(user, user.id()).param("type", "MOVIE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.top5").isArray())
+                .andExpect(jsonPath("$.top5").isEmpty());
+    }
+
+    @Test
+    @DisplayName("[getSummary] Should Return Top 5 Card And Watched State - When Top 5 Movie Has Diary Event")
+    void shouldReturnTopFiveCardAndWatchedStateWhenMovieHasDiaryEvent() throws Exception {
+        RegisteredUser user = registerUser("summarytop5watched");
+        User owner = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE, 139);
+        persistEntry(owner, movie);
+        LocalDateTime now = LocalDateTime.now();
+        top5EntryRepository.saveAndFlush(Top5Entry.builder()
+                .user(owner).content(movie).type(ContentType.MOVIE).position(1)
+                .createdAt(now).updatedAt(now).build());
+
+        mockMvc.perform(getSummaryRequest(user, user.id()).param("type", "MOVIE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.top5").isArray())
+                .andExpect(jsonPath("$.top5.length()").value(1))
+                .andExpect(jsonPath("$.top5[0].type").value("MOVIE"))
+                .andExpect(jsonPath("$.top5[0].hasWatched").value(true))
+                .andExpect(jsonPath("$.top5[0].score").value(nullValue()))
+                .andExpect(jsonPath("$.top5[0].card").isMap())
+                .andExpect(jsonPath("$.top5[0].card.contentId").value(movie.getId().toString()));
     }
 
     @Test

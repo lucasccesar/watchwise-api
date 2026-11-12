@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.diaryentry.repository;
 
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.WatchwiseApiApplication;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -39,6 +40,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ContextConfiguration;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -58,6 +60,7 @@ import static org.assertj.core.api.Assertions.tuple;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @Import(DiaryEntryReadRepositoryImpl.class)
+@ContextConfiguration(classes = WatchwiseApiApplication.class)
 class DiaryEntryRepositoryTest {
 
     @Container

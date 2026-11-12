@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -20,6 +21,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileHighlightContentDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
+import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
@@ -142,6 +144,38 @@ class ProfileSummaryReaderImplTest {
         assertThat(context.getValue().viewerId()).isNull();
         assertThat(fields.getValue()).containsExactlyInAnyOrder(
                 ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.SOCIAL_METADATA);
+    }
+
+    @Test
+    void shouldResolveTopFiveCardsInTheSharedProfileCardBatch() {
+        ContentRefDTO content = new ContentRefDTO(
+                UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null,
+                false, false, null, null);
+        ProfileTop5EntryDTO top5Entry = new ProfileTop5EntryDTO(
+                UUID.randomUUID(), ContentType.MOVIE, content, 1,
+                java.time.LocalDateTime.now(), java.time.LocalDateTime.now(), null, 9, true, null);
+        ProfileSummaryDataReader.Snapshot snapshot = new ProfileSummaryDataReader.Snapshot(
+                new WatchTimeDTO(0L, 0L, 0L, 0L), List.of(), List.of(),
+                List.of(), List.of(), List.of(), null, null, List.of(top5Entry));
+        when(dataReader.read(viewerId, userId, ContentType.MOVIE)).thenReturn(snapshot);
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.MOVIE, "550", null, null, null);
+        ContentCardDTO card = new ContentCardDTO(
+                content.id(), ContentType.MOVIE, "550", null, null, null, "Fight Club", "/fight-club.jpg",
+                "/owner-poster.jpg", java.time.LocalDate.of(1999, 10, 15), 1999, 139,
+                null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(java.util.Map.of(coordinate, card));
+        ArgumentCaptor<java.util.Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(java.util.Collection.class);
+
+        SummaryResponseDTO result = reader.read(viewerId, userId, ContentType.MOVIE);
+
+        assertThat(result.top5()).singleElement().satisfies(item -> {
+            assertThat(item.hasWatched()).isTrue();
+            assertThat(item.card()).isEqualTo(card);
+            assertThat(item.customPosterUrl()).isEqualTo("/owner-poster.jpg");
+        });
+        verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), anySet());
+        assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).contains(coordinate);
     }
 
     private JsonNode serialize(Object value) {

@@ -19,8 +19,8 @@ import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.top5entry.service.Top5EntryReader;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
-import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
@@ -46,7 +46,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final Top5EntryMapper top5EntryMapper;
-    private final ProfileSummaryQueryRepository profileSummaryQueryRepository;
+    private final Top5EntryReader top5EntryReader;
     private final UserBlockAccessService userBlockAccessService;
 
     static final int MAX_ENTRIES = 5;
@@ -60,13 +60,18 @@ public class Top5EntryServiceImpl implements Top5EntryService {
 
         assertCanViewTop5(viewerId, userId, target);
 
-        List<Top5Entry> entries = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, type);
-        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries);
-        Map<UUID, Integer> scoreByContentId = loadLatestScores(userId, type, entries);
+        List<Top5EntryResponseDTO> entries = top5EntryReader.read(userId, type);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries.stream()
+                .map(Top5EntryResponseDTO::content)
+                .filter(java.util.Objects::nonNull)
+                .map(ContentRefDTO::id)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList());
 
         return entries.stream()
-                .map(entry -> enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId()),
-                        scoreByContentId.get(entry.getContent().getId())))
+                .map(entry -> entry.withCustomPosterUrl(entry.content() == null
+                        ? null : customPosterByContentId.get(entry.content().id())))
                 .toList();
     }
 
@@ -119,7 +124,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
             if (customPosterUrl != null) {
                 userContentPosterService.upsert(userId, contentRef.id(), customPosterUrl);
             }
-            Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, List.of(saved));
+            Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, contentIds(List.of(saved)));
             return enrichTop5EntryResponse(saved, customPosterByContentId.get(contentRef.id()));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
@@ -161,7 +166,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
             userContentPosterService.upsert(userId, entry.getContent().getId(), customPosterUrl);
         }
 
-        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, List.of(entry));
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, contentIds(List.of(entry)));
         return enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId()));
     }
 
@@ -175,31 +180,17 @@ public class Top5EntryServiceImpl implements Top5EntryService {
                 .withScore(score);
     }
 
-    private Map<UUID, Integer> loadLatestScores(UUID userId, ContentType type, List<Top5Entry> entries) {
+    private List<UUID> contentIds(List<Top5Entry> entries) {
         List<UUID> contentIds = entries.stream()
                 .map(Top5Entry::getContent)
                 .filter(java.util.Objects::nonNull)
                 .map(Content::getId)
                 .distinct()
                 .toList();
-        if (contentIds.isEmpty()) {
-            return Map.of();
-        }
-        return profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
-                        userId, contentIds, type.name()).stream()
-                .filter(score -> score.getScore() != null)
-                .collect(java.util.stream.Collectors.toMap(
-                         ProfileSummaryQueryRepository.LatestContentScore::getContentId,
-                         ProfileSummaryQueryRepository.LatestContentScore::getScore));
+        return contentIds;
     }
 
-    private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<Top5Entry> entries) {
-        List<UUID> contentIds = entries.stream()
-                .map(Top5Entry::getContent)
-                .filter(java.util.Objects::nonNull)
-                .map(Content::getId)
-                .distinct()
-                .toList();
+    private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<UUID> contentIds) {
         return contentIds.isEmpty()
                 ? Map.of()
                 : userContentPosterService.findByUserAndContentIds(ownerId, contentIds);

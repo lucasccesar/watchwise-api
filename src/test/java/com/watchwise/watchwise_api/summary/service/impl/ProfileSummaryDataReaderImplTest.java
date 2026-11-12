@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
+import com.watchwise.watchwise_api.top5entry.service.Top5EntryReader;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryDataReader;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,13 +69,17 @@ class ProfileSummaryDataReaderImplTest {
     @Mock
     private LikeRepository likeRepository;
 
+    @Mock
+    private Top5EntryReader top5EntryReader;
+
     private ProfileSummaryDataReaderImpl reader;
     private UUID userId;
 
     @BeforeEach
     void setUp() {
         reader = new ProfileSummaryDataReaderImpl(queryRepository, droppedEntryRepository, contentRepository,
-                contentMapper, watchCompanionRepository, userMapper, contentReviewRepository, likeRepository);
+                contentMapper, watchCompanionRepository, userMapper, contentReviewRepository, likeRepository,
+                top5EntryReader);
         userId = UUID.randomUUID();
         org.mockito.Mockito.lenient().when(queryRepository.findRecentReviews(any(), any(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.findRecentTopLevelEntries(any(), any(), any())).thenReturn(List.of());
@@ -88,6 +94,7 @@ class ProfileSummaryDataReaderImplTest {
         org.mockito.Mockito.lenient().when(queryRepository.countDiaryEntriesGroupByContentType(any(), anyString(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.findLongestMovieContentByUserId(any(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbId(any(), any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(top5EntryReader.read(any(), any())).thenReturn(List.of());
     }
 
     @Test
@@ -106,6 +113,9 @@ class ProfileSummaryDataReaderImplTest {
 
         when(queryRepository.findRecentTopLevelEntries(org.mockito.ArgumentMatchers.eq(userId),
                 org.mockito.ArgumentMatchers.eq(ContentType.MOVIE), any())).thenReturn(List.of(completed));
+        Top5EntryResponseDTO top5Entry = new Top5EntryResponseDTO(
+                UUID.randomUUID(), ContentType.MOVIE, contentRef, 1, LocalDateTime.now(), LocalDateTime.now());
+        when(top5EntryReader.read(userId, ContentType.MOVIE)).thenReturn(List.of(top5Entry));
         when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(
                 org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.eq(ContentType.MOVIE), any()))
                 .thenReturn(new PageImpl<>(List.of(dropped)));
@@ -119,8 +129,54 @@ class ProfileSummaryDataReaderImplTest {
 
         assertThat(result.recentActivity()).hasSize(2);
         assertThat(result.recentActivity()).extracting("timesWatched").containsOnly(2L);
+        assertThat(result.top5()).singleElement().satisfies(item -> {
+            assertThat(item.content()).isEqualTo(contentRef);
+            assertThat(item.hasWatched()).isTrue();
+            assertThat(item.score()).isNull();
+        });
         verify(queryRepository).countDiaryEntriesByUserIdAndContentIdsAndContentType(
                 userId, List.of(movie.getId()), ContentType.MOVIE.name());
+    }
+
+    @Test
+    void shouldCountTopFiveWhenRecentActivityIsEmpty() {
+        Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
+        ContentRefDTO contentRef = new ContentRefDTO(movie.getId(), "550", ContentType.MOVIE,
+                null, null, null, null, null, null, null);
+        Top5EntryResponseDTO top5Entry = new Top5EntryResponseDTO(
+                UUID.randomUUID(), ContentType.MOVIE, contentRef, 1, LocalDateTime.now(), LocalDateTime.now());
+        ProfileSummaryQueryRepository.ContentWatchCount watchCount =
+                org.mockito.Mockito.mock(ProfileSummaryQueryRepository.ContentWatchCount.class);
+        when(top5EntryReader.read(userId, ContentType.MOVIE)).thenReturn(List.of(top5Entry));
+        when(queryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                userId, List.of(movie.getId()), ContentType.MOVIE.name())).thenReturn(List.of(watchCount));
+        when(watchCount.getContentId()).thenReturn(movie.getId());
+        when(watchCount.getCount()).thenReturn(1L);
+
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.MOVIE);
+
+        assertThat(result.recentActivity()).isEmpty();
+        assertThat(result.top5()).singleElement().satisfies(item -> assertThat(item.hasWatched()).isTrue());
+        verify(queryRepository).countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                userId, List.of(movie.getId()), ContentType.MOVIE.name());
+    }
+
+    @Test
+    void shouldNotMarkSeriesTopFiveWatchedWithoutACompleteSeriesProjection() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        ContentRefDTO contentRef = new ContentRefDTO(series.getId(), "1399", ContentType.SERIES,
+                null, null, null, null, null, null, null);
+        Top5EntryResponseDTO top5Entry = new Top5EntryResponseDTO(
+                UUID.randomUUID(), ContentType.SERIES, contentRef, 1, LocalDateTime.now(), LocalDateTime.now());
+        when(top5EntryReader.read(userId, ContentType.SERIES)).thenReturn(List.of(top5Entry));
+        when(queryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                userId, List.of(series.getId()), ContentType.SERIES.name())).thenReturn(List.of());
+
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
+
+        assertThat(result.top5()).singleElement().satisfies(item -> assertThat(item.hasWatched()).isFalse());
+        verify(queryRepository).countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                userId, List.of(series.getId()), ContentType.SERIES.name());
     }
 
     @Test
