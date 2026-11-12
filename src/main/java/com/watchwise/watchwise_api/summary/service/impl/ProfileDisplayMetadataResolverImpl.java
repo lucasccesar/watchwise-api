@@ -43,7 +43,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
                 return new ProfileHighlightContentDTO(
                         ContentType.MOVIE, content.getId(), content.getTmdbId(), null,
                         details.title(), releaseYearOf(details.releaseDate()),
-                        TmdbImagePathBuilder.posterPath(details.posterPath()), customPosterUrl);
+                        TmdbImagePathBuilder.backdropPath(details.backdropPath()), customPosterUrl);
             } catch (TmdbUnavailableException exception) {
                 return null;
             }
@@ -60,7 +60,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
                 return new ProfileHighlightContentDTO(
                         ContentType.SERIES, content.getId(), content.getTmdbId(), null,
                         details.name(), releaseYearOf(details.firstAirDate()),
-                        TmdbImagePathBuilder.posterPath(details.posterPath()), customPosterUrl);
+                        TmdbImagePathBuilder.backdropPath(details.backdropPath()), customPosterUrl);
             } catch (TmdbUnavailableException exception) {
                 return null;
             }
@@ -85,7 +85,7 @@ public class ProfileDisplayMetadataResolverImpl implements ProfileDisplayMetadat
             return new ProfileHighlightContentDTO(
                     ContentType.SERIES, null, null, seriesTmdbId,
                     details.name(), releaseYearOf(details.firstAirDate()),
-                    TmdbImagePathBuilder.posterPath(details.posterPath()),
+                    TmdbImagePathBuilder.backdropPath(details.backdropPath()),
                     posters == null ? null : posters.get(seriesTmdbId));
         } catch (TmdbUnavailableException exception) {
             return null;

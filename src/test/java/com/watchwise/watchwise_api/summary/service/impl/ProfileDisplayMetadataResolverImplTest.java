@@ -35,7 +35,7 @@ class ProfileDisplayMetadataResolverImplTest {
         TmdbTvFullDetails details = mock(TmdbTvFullDetails.class);
         when(details.name()).thenReturn("Severance");
         when(details.firstAirDate()).thenReturn("2022-02-18");
-        when(details.posterPath()).thenReturn("/tmdb-poster.jpg");
+        when(details.backdropPath()).thenReturn("/tmdb-backdrop.jpg");
         when(tmdbClient.getTvFullDetails("95396", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(details));
         when(userContentPosterService.findSeriesPosters(ownerId, List.of("95396")))

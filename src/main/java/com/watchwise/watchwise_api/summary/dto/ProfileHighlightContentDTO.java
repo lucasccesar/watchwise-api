@@ -11,7 +11,7 @@ public record ProfileHighlightContentDTO(
         String seriesTmdbId,
         String title,
         Integer releaseYear,
-        String posterPath,
+        String backdropPath,
         String customPosterUrl
 ) {
 }
