@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
@@ -34,6 +35,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -89,9 +91,17 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
             return snapshot;
         }
 
-        List<ContentCardSpec> specs = contentRefs.stream()
+        List<ContentCardSpec> contentSpecs = contentRefs.stream()
                 .map(content -> new ContentCardSpec(toCoordinate(content), null, null, null, null))
                 .toList();
+        List<ContentCardSpec> reviewSeriesSpecs = snapshot.recentReviews().stream()
+                .map(ProfileDiaryPreviewDTO::content)
+                .map(this::seriesCoordinateForReview)
+                .filter(Objects::nonNull)
+                .distinct()
+                .map(coordinate -> new ContentCardSpec(coordinate, null, null, null, null))
+                .toList();
+        List<ContentCardSpec> specs = Stream.concat(contentSpecs.stream(), reviewSeriesSpecs.stream()).toList();
         Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
                 specs,
                 new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), ownerId, null),
@@ -101,9 +111,17 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
         return new ProfileSummaryDataReader.Snapshot(
                 snapshot.watchTime(), snapshot.genreCounts(), snapshot.ratingsDistribution(),
                 addCardsToPreviews(snapshot.recentEpisodes(), cards),
-                addCardsToPreviews(snapshot.recentReviews(), cards),
+                addCardsToReviewPreviews(snapshot.recentReviews(), cards),
                 addCardsToActivity(snapshot.recentActivity(), cards),
                 snapshot.rewatch(), snapshot.longestWatch());
+    }
+
+    private ContentCoordinate seriesCoordinateForReview(ContentRefDTO content) {
+        if (content == null || (content.type() != ContentType.EPISODE && content.type() != ContentType.SEASON)
+                || content.seriesTmdbId() == null || content.seriesTmdbId().isBlank()) {
+            return null;
+        }
+        return new ContentCoordinate(ContentType.SERIES, content.seriesTmdbId(), null, null, null);
     }
 
     private List<ProfileDiaryPreviewDTO> addCardsToPreviews(
@@ -118,6 +136,38 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                             preview.watchedWith(), card, preview.likesCount(), preview.likedByMe());
                 })
                 .toList();
+    }
+
+    private List<ProfileDiaryPreviewDTO> addCardsToReviewPreviews(
+            List<ProfileDiaryPreviewDTO> previews, Map<ContentCoordinate, ContentCardDTO> cards) {
+        return previews.stream()
+                .map(preview -> {
+                    ContentCardDTO card = cardFor(preview.content(), cards);
+                    ContentCoordinate seriesCoordinate = seriesCoordinateForReview(preview.content());
+                    ContentCardDTO seriesCard = seriesCoordinate == null ? null : cards.get(seriesCoordinate);
+                    if (card != null && seriesCoordinate != null) {
+                        card = withPosterPath(card, seriesCard == null ? null : seriesCard.posterPath());
+                    }
+                    return new ProfileDiaryPreviewDTO(
+                            preview.id(), preview.source(), preview.content(), preview.score(),
+                            preview.watchedDate(), preview.activityDate(), preview.watchNumber(),
+                            card == null ? preview.customPosterUrl() : card.customPosterUrl(),
+                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe());
+                })
+                .toList();
+    }
+
+    private ContentCardDTO withPosterPath(ContentCardDTO card, String posterPath) {
+        ContentPreviewStatus previewStatus = card.previewStatus();
+        if (posterPath == null && previewStatus == ContentPreviewStatus.AVAILABLE) {
+            previewStatus = ContentPreviewStatus.PARTIAL;
+        }
+        return new ContentCardDTO(
+                card.contentId(), card.type(), card.tmdbId(), card.seriesTmdbId(),
+                card.seasonNumber(), card.episodeNumber(), card.title(), posterPath, card.backdropPath(),
+                card.customPosterUrl(), card.releaseDate(), card.releaseYear(), card.tmdbVoteAverage(),
+                card.runtimeMinutes(), card.totalRuntimeMinutes(), card.numberOfSeasons(),
+                card.numberOfEpisodes(), card.genres(), card.stats(), card.viewerState(), previewStatus);
     }
 
     private List<RecentActivityItemDTO> addCardsToActivity(
