@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewSource;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
+import com.watchwise.watchwise_api.summary.dto.RecentActivitySource;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
@@ -311,12 +312,13 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         List<ActivityCandidate> candidates = Stream.of(
                         completedEntries.stream().map(entry -> new ActivityCandidate(
                                 entry.getId(), new RecentActivityItemDTO(
+                                        entry.getId(), RecentActivitySource.DIARY_ENTRY,
                                         contentMapper.contentToContentRefDto(entry.getContent()),
                                         RecentActivityStatus.COMPLETED,
                                         entry.getScore(),
                                         timesWatched.getOrDefault(entry.getContent().getId(), 0L),
                                         entry.getComment(),
-                                        entry.getCreatedAt()))),
+                                        entry.getCreatedAt(), null))),
                         seriesCompletions.stream()
                                 .map(activity -> {
                                     Content content = seriesContentById.get(activity.getContentId());
@@ -326,22 +328,24 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                                     LocalDateTime activityDate = LocalDateTime.ofInstant(
                                             activity.getOrderedAt(), ZoneId.systemDefault());
                                     return new ActivityCandidate(activity.getProjectionId(), new RecentActivityItemDTO(
+                                            activity.getProjectionId(), RecentActivitySource.SERIES_COMPLETION,
                                             contentMapper.contentToContentRefDto(content),
                                             RecentActivityStatus.COMPLETED,
                                             activity.getScore(),
                                             Optional.ofNullable(activity.getTimesWatched()).orElse(0L),
                                             activity.getComment(),
-                                            activityDate));
+                                            activityDate, null));
                                 })
                                 .filter(Objects::nonNull),
                         droppedEntries.stream().map(entry -> new ActivityCandidate(
                                 entry.getId(), new RecentActivityItemDTO(
+                                        entry.getId(), RecentActivitySource.DROPPED_ENTRY,
                                         contentMapper.contentToContentRefDto(entry.getContent()),
                                         RecentActivityStatus.DROPPED,
                                         null,
                                         timesWatched.getOrDefault(entry.getContent().getId(), 0L),
                                         entry.getComment(),
-                                        entry.getCreatedAt()))))
+                                        entry.getCreatedAt(), null))))
                 .flatMap(Function.identity())
                 .sorted(Comparator.comparing((ActivityCandidate candidate) -> candidate.item().activityDate())
                         .reversed()

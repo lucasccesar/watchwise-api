@@ -173,7 +173,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
     private List<RecentActivityItemDTO> addCardsToActivity(
             List<RecentActivityItemDTO> activity, Map<ContentCoordinate, ContentCardDTO> cards) {
         return activity.stream()
-                .map(item -> new RecentActivityItemDTO(item.content(), item.status(), item.score(),
+                .map(item -> new RecentActivityItemDTO(item.id(), item.source(), item.content(), item.status(), item.score(),
                         item.timesWatched(), item.comment(), item.activityDate(), cardFor(item.content(), cards)))
                 .toList();
     }

@@ -4,8 +4,11 @@ import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public record RecentActivityItemDTO(
+        UUID id,
+        RecentActivitySource source,
         ContentRefDTO content,
         RecentActivityStatus status,
         Integer score,
@@ -16,11 +19,16 @@ public record RecentActivityItemDTO(
 
     public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status, Integer score,
             Long timesWatched, String comment, LocalDateTime activityDate) {
-        this(content, status, score, timesWatched, comment, activityDate, null);
+        this(null, null, content, status, score, timesWatched, comment, activityDate, null);
+    }
+
+    public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status, Integer score,
+            Long timesWatched, String comment, LocalDateTime activityDate, ContentCardDTO card) {
+        this(null, null, content, status, score, timesWatched, comment, activityDate, card);
     }
 
     public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status,
             String comment, LocalDateTime activityDate) {
-        this(content, status, null, null, comment, activityDate, null);
+        this(null, null, content, status, null, null, comment, activityDate, null);
     }
 }
