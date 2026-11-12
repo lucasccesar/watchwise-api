@@ -47,6 +47,7 @@ import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
@@ -105,6 +106,9 @@ class ContentDetailsServiceImplTest {
     private ContentTrackingService contentTrackingService;
 
     @Mock
+    private ContentPageMetadataService contentPageMetadataService;
+
+    @Mock
     private SeriesRuntimeAggregateService seriesRuntimeAggregateService;
 
     @Mock
@@ -136,7 +140,7 @@ class ContentDetailsServiceImplTest {
         seasonFetchExecutor = Executors.newSingleThreadExecutor();
         contentDetailsService = new ContentDetailsServiceImpl(
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
-                refreshGenerationSequence, seriesRuntimeAggregateService, calendarScheduleSynchronizer,
+                contentPageMetadataService, refreshGenerationSequence, seriesRuntimeAggregateService, calendarScheduleSynchronizer,
                 userContentPosterService, userVisibilityService,
                 new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock));
         requestingUserId = UUID.randomUUID();
