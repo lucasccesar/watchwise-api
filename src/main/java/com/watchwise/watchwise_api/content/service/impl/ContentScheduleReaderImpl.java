@@ -129,20 +129,29 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
 
     @Override
     public ContentScheduleLookup readSeries(String seriesTmdbId, String region, String language) {
-        return readSeries(seriesTmdbId, region, language, tmdbClient::getSeasonFullDetails);
+        return readSeries(seriesTmdbId, region, language,
+                tmdbClient::getTvFullDetails, tmdbClient::getSeasonFullDetails);
     }
 
     @Override
     public ContentScheduleLookup readCalendarSeries(String seriesTmdbId, String region, String language) {
-        return readSeries(seriesTmdbId, region, language, tmdbClient::getCalendarSeasonDetails);
+        return readSeries(seriesTmdbId, region, language,
+                tmdbClient::getTvFullDetails, tmdbClient::getCalendarSeasonDetails);
+    }
+
+    @Override
+    public ContentScheduleLookup readCalendarSeriesFresh(String seriesTmdbId, String region, String language) {
+        return readSeries(seriesTmdbId, region, language,
+                tmdbClient::refreshTvFullDetails, tmdbClient::refreshCalendarSeasonDetails);
     }
 
     private ContentScheduleLookup readSeries(
             String seriesTmdbId,
             String region,
             String language,
+            TvDetailsReader tvDetailsReader,
             SeasonDetailsReader seasonDetailsReader) {
-        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tvDetailsReader.read(seriesTmdbId, language);
         if (!(seriesLookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> series)
                 || series.value() == null) {
             return mapFailure(seriesLookup);
@@ -332,5 +341,11 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
     private interface SeasonDetailsReader {
 
         TmdbLookupResult<TmdbSeasonFullDetails> read(String seriesTmdbId, Integer seasonNumber, String language);
+    }
+
+    @FunctionalInterface
+    private interface TvDetailsReader {
+
+        TmdbLookupResult<TmdbTvFullDetails> read(String seriesTmdbId, String language);
     }
 }

@@ -53,6 +53,15 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         return mapSeries(scheduleReader.readCalendarSeries(seriesTmdbId, region, language), seriesTmdbId, region, language);
     }
 
+    @Override
+    public CalendarScheduleLookup loadSeriesFresh(String seriesTmdbId, String region, String language) {
+        return mapSeries(
+                scheduleReader.readCalendarSeriesFresh(seriesTmdbId, region, language),
+                seriesTmdbId,
+                region,
+                language);
+    }
+
     private CalendarScheduleLookup mapMovie(
             ContentScheduleLookup lookup,
             String tmdbId,

@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileHighlightsDTO;
@@ -27,8 +28,10 @@ import com.watchwise.watchwise_api.summary.service.ProfileSummaryReader;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,12 +52,19 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
     private final ProfileDisplayMetadataResolver displayMetadataResolver;
     private final ContentCardAssembler contentCardAssembler;
 
+    @Autowired
+    private DiaryCompletionService diaryCompletionService;
+
     @Override
     public SummaryResponseDTO read(UUID viewerId, UUID userId, ContentType type) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanView(viewerId, userId, target);
         validateType(type);
+
+        if (diaryCompletionService != null) {
+            diaryCompletionService.refreshStaleScopes(userId, Instant.now());
+        }
 
         ProfileSummaryDataReader.Snapshot snapshot = dataReader.read(viewerId, userId, type);
         snapshot = enrichVisualCards(userId, target, snapshot);

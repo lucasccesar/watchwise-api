@@ -15,6 +15,26 @@ public interface DiaryCompletionProjectionRepository extends JpaRepository<Diary
             UUID userId, UUID contentId, Integer watchNumber);
 
     @Query(value = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id AND c.type = 'SERIES'
+                JOIN user_series_history_states state
+                  ON state.user_id = p.user_id AND state.series_tmdb_id = c.tmdb_id
+                WHERE p.user_id = :userId
+                  AND c.tmdb_id = :seriesTmdbId
+                  AND p.content_type = 'SERIES'
+                  AND p.history_revision = state.history_revision
+                  AND p.history_revision = state.computed_revision
+                  AND p.schedule_version = state.schedule_version
+                  AND p.valid_until > CURRENT_TIMESTAMP
+                  AND state.valid_until > CURRENT_TIMESTAMP
+            )
+            """, nativeQuery = true)
+    boolean existsCurrentSeriesProjection(
+            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
+
+    @Query(value = """
             SELECT p.* FROM diary_completion_projections p
             JOIN contents c ON c.id = p.content_id
             JOIN users owner ON owner.id = p.user_id

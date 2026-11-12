@@ -49,6 +49,10 @@ public class CalendarScheduleRefreshService {
             .maximumSize(10_000)
             .expireAfterWrite(SEASON_REFRESH_RETRY_DELAY)
             .build();
+    private final Cache<RefreshKey, Boolean> failedSeriesRefreshes = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(SEASON_REFRESH_RETRY_DELAY)
+            .build();
 
     public CalendarScheduleRefreshService(
             WatchlistEntryRepository watchlistEntryRepository,
@@ -126,6 +130,39 @@ public class CalendarScheduleRefreshService {
             refreshesInFlight.remove(refreshKey);
             failedSeasonRefreshes.put(refreshKey, true);
             log.warn("Calendar season refresh was rejected for {}", refreshKey, exception);
+        }
+    }
+
+    public boolean refreshSeriesNow(String seriesTmdbId, String region, String language) {
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region);
+        RefreshKey refreshKey = new RefreshKey(key, null, true);
+        if (failedSeriesRefreshes.getIfPresent(refreshKey) != null
+                || !refreshesInFlight.add(refreshKey)) {
+            return false;
+        }
+
+        boolean refreshed = false;
+        try {
+            CalendarScheduleLookup lookup = scheduleProvider.loadSeriesFresh(seriesTmdbId, region, language);
+            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
+                    && foundSeries.schedule().hasRemoteResults()) {
+                scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), clock.instant());
+                refreshed = true;
+                return true;
+            }
+            if (lookup instanceof CalendarScheduleLookup.NotFound notFound
+                    && notFound.seasonNumber() == null) {
+                snapshotStore.invalidate(key, clock.instant(), true);
+            }
+            return false;
+        } catch (RuntimeException exception) {
+            log.warn("Current calendar series refresh failed for {}", refreshKey, exception);
+            return false;
+        } finally {
+            refreshesInFlight.remove(refreshKey);
+            if (!refreshed) {
+                failedSeriesRefreshes.put(refreshKey, true);
+            }
         }
     }
 

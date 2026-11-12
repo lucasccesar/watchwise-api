@@ -564,6 +564,11 @@ public class TmdbClient {
         return cacheCardMetadata(key, language, result, this::tvCardMetadata);
     }
 
+    public TmdbLookupResult<TmdbTvFullDetails> refreshTvFullDetails(String tmdbId, String language) {
+        tmdbTvFullDetailsCache.invalidate(tmdbId + "|" + language);
+        return getTvFullDetails(tmdbId, language);
+    }
+
     public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
         TmdbCardMetadataKey key = new TmdbCardMetadataKey(
                 TmdbCardMetadataKey.Type.SEASON, null, seriesTmdbId, seasonNumber, null);
@@ -604,6 +609,12 @@ public class TmdbClient {
                                 .body(TmdbSeasonFullDetails.class),
                         "calendar season details " + seriesTmdbId + "/" + seasonNumber));
         return cacheCardMetadata(key, language, result, this::seasonCardMetadata);
+    }
+
+    public TmdbLookupResult<TmdbSeasonFullDetails> refreshCalendarSeasonDetails(
+            String seriesTmdbId, Integer seasonNumber, String language) {
+        tmdbCalendarSeasonDetailsCache.invalidate(seriesTmdbId + "|" + seasonNumber + "|" + language);
+        return getCalendarSeasonDetails(seriesTmdbId, seasonNumber, language);
     }
 
     public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonEpisodeDetails(

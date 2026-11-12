@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.diarycompletion.service.impl;
 
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
+import com.watchwise.watchwise_api.calendar.service.impl.CalendarScheduleRefreshService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
@@ -26,10 +27,13 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.StaleObjectStateException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -46,6 +50,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DiaryCompletionServiceImpl implements DiaryCompletionService {
 
+    private static final Duration SERIES_MARKER_REFRESH_COOLDOWN = Duration.ofHours(1);
+
     private final CompletionScopeLoader scopeLoader;
     private final CompletionCalculator completionCalculator;
     private final UserSeriesHistoryStateRepository historyStateRepository;
@@ -56,6 +62,9 @@ public class DiaryCompletionServiceImpl implements DiaryCompletionService {
     private final UserRepository userRepository;
     private final UserContentMutationLock userContentMutationLock;
     private final NewTransactionExecutor newTransactionExecutor;
+
+    @Autowired
+    private CalendarScheduleRefreshService calendarScheduleRefreshService;
 
     @Override
     public void refreshStaleScopes(UUID ownerId, Instant now) {
@@ -93,11 +102,48 @@ public class DiaryCompletionServiceImpl implements DiaryCompletionService {
             UserSeriesHistoryState state = states.get(seriesId);
             long historyRevision = state == null ? 0L : state.getHistoryRevision();
             long seriesScheduleVersion = scopeVersion(seriesMarkers.get(seriesId));
-            if (!isStale(state, historyRevision, seriesScheduleVersion, now)
-                    && !seasonProjectionSeriesIds.contains(seriesId)) {
-                continue;
+            if (isStale(state, historyRevision, seriesScheduleVersion, now)
+                    || seasonProjectionSeriesIds.contains(seriesId)) {
+                refreshSeriesWithRetry(
+                        ownerId, seriesId, owner.getPreferredRegion(), owner.getPreferredLanguage(), now);
             }
-            refreshSeriesWithRetry(ownerId, seriesId, owner.getPreferredRegion(), owner.getPreferredLanguage(), now);
+            refreshSeriesMarkerIfNeeded(
+                    ownerId, seriesId, owner.getPreferredRegion(), owner.getPreferredLanguage(), now);
+        }
+    }
+
+    private void refreshSeriesMarkerIfNeeded(
+            UUID ownerId, String seriesId, String region, String language, Instant now) {
+        CalendarScheduleCompleteness marker = completenessRepository
+                .findSeriesIdentity(seriesId, region, language).orElse(null);
+        if (marker != null && Boolean.TRUE.equals(marker.getComplete())) {
+            return;
+        }
+        if (marker != null && marker.getLastCheckedAt() != null
+                && marker.getLastCheckedAt().toInstant(ZoneOffset.UTC)
+                        .isAfter(now.minus(SERIES_MARKER_REFRESH_COOLDOWN))) {
+            return;
+        }
+        if (calendarScheduleRefreshService == null
+                || !projectionRepository.existsCurrentSeriesProjection(ownerId, seriesId)
+                || !calendarScheduleRefreshService.refreshSeriesNow(seriesId, region, language)) {
+            return;
+        }
+
+        UserSeriesHistoryState state = historyStateRepository.findById(
+                new UserSeriesHistoryState.Key(ownerId, seriesId)).orElse(null);
+        if (state == null) {
+            return;
+        }
+        CalendarScheduleCompleteness refreshedMarker = completenessRepository
+                .findSeriesIdentity(seriesId, region, language).orElse(null);
+        List<CalendarScheduleCompleteness> seasonMarkers = completenessRepository
+                .findByGroupTypeAndSeriesTmdbIdInAndRegionAndLanguage(
+                        CalendarScheduleCompleteness.GroupType.SEASON,
+                        List.of(seriesId), region, language);
+        if (isStale(state, state.getHistoryRevision(), scopeVersion(refreshedMarker), now)
+                || hasStaleSeasonProjection(ownerId, seriesId, seasonMarkers)) {
+            refreshSeriesWithRetry(ownerId, seriesId, region, language, now);
         }
     }
 
