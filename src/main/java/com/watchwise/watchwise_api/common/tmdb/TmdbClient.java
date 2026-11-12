@@ -661,21 +661,47 @@ public class TmdbClient {
     }
 
     public TmdbLookupResult<TmdbContentImages> getMovieImages(String tmdbId) {
-        return cachedLookup(tmdbContentImagesCache, "movie|" + tmdbId,
+        return getMovieImages(tmdbId, null);
+    }
+
+    public TmdbLookupResult<TmdbContentImages> getMovieImages(String tmdbId, String includeImageLanguage) {
+        String languageFilter = normalizeImageLanguageFilter(includeImageLanguage);
+        return cachedLookup(tmdbContentImagesCache, imageCacheKey("movie", tmdbId, languageFilter),
                 () -> callWithRetry(() -> requireContentImagesBody(tmdbRestClient.get()
-                                .uri("/movie/{id}/images", tmdbId)
+                                .uri(uriBuilder -> uriBuilder.path("/movie/{id}/images")
+                                        .queryParamIfPresent("include_image_language", Optional.ofNullable(languageFilter))
+                                        .build(tmdbId))
                                 .retrieve()
                                 .body(TmdbContentImages.class)),
                         "movie images " + tmdbId));
     }
 
     public TmdbLookupResult<TmdbContentImages> getTvImages(String tmdbId) {
-        return cachedLookup(tmdbContentImagesCache, "tv|" + tmdbId,
+        return getTvImages(tmdbId, null);
+    }
+
+    public TmdbLookupResult<TmdbContentImages> getTvImages(String tmdbId, String includeImageLanguage) {
+        String languageFilter = normalizeImageLanguageFilter(includeImageLanguage);
+        return cachedLookup(tmdbContentImagesCache, imageCacheKey("tv", tmdbId, languageFilter),
                 () -> callWithRetry(() -> requireContentImagesBody(tmdbRestClient.get()
-                                .uri("/tv/{id}/images", tmdbId)
+                                .uri(uriBuilder -> uriBuilder.path("/tv/{id}/images")
+                                        .queryParamIfPresent("include_image_language", Optional.ofNullable(languageFilter))
+                                        .build(tmdbId))
                                 .retrieve()
                                 .body(TmdbContentImages.class)),
                         "tv images " + tmdbId));
+    }
+
+    private String imageCacheKey(String type, String tmdbId, String includeImageLanguage) {
+        return includeImageLanguage == null
+                ? type + "|" + tmdbId
+                : type + "|" + tmdbId + "|" + includeImageLanguage;
+    }
+
+    private String normalizeImageLanguageFilter(String includeImageLanguage) {
+        return includeImageLanguage == null || includeImageLanguage.isBlank()
+                ? null
+                : includeImageLanguage.trim();
     }
 
     private TmdbContentImages requireContentImagesBody(TmdbContentImages images) {

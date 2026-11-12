@@ -29,17 +29,30 @@ public class ContentImagesServiceImpl implements ContentImagesService {
 
     @Override
     public List<ContentImageDTO> listPosters(MovieOrSeriesType type, String tmdbId) {
-        return listImages(type, tmdbId, TmdbContentImages::posters, true);
+        return listPosters(type, tmdbId, null);
+    }
+
+    @Override
+    public List<ContentImageDTO> listPosters(
+            MovieOrSeriesType type, String tmdbId, String includeImageLanguage) {
+        return listImages(type, tmdbId, includeImageLanguage, TmdbContentImages::posters, true);
     }
 
     @Override
     public List<ContentImageDTO> listBackdrops(MovieOrSeriesType type, String tmdbId) {
-        return listImages(type, tmdbId, TmdbContentImages::backdrops, false);
+        return listBackdrops(type, tmdbId, null);
+    }
+
+    @Override
+    public List<ContentImageDTO> listBackdrops(
+            MovieOrSeriesType type, String tmdbId, String includeImageLanguage) {
+        return listImages(type, tmdbId, includeImageLanguage, TmdbContentImages::backdrops, false);
     }
 
     private List<ContentImageDTO> listImages(
             MovieOrSeriesType type,
             String tmdbId,
+            String includeImageLanguage,
             Function<TmdbContentImages, List<TmdbContentImage>> imageList,
             boolean poster) {
         String id = validateTmdbId(tmdbId);
@@ -48,8 +61,8 @@ public class ContentImagesServiceImpl implements ContentImagesService {
         }
 
         TmdbLookupResult<TmdbContentImages> lookup = switch (type) {
-            case MOVIE -> tmdbClient.getMovieImages(id);
-            case SERIES -> tmdbClient.getTvImages(id);
+            case MOVIE -> tmdbClient.getMovieImages(id, includeImageLanguage);
+            case SERIES -> tmdbClient.getTvImages(id, includeImageLanguage);
         };
         TmdbContentImages contentImages = requireFound(lookup, type);
         List<TmdbContentImage> images = imageList.apply(contentImages);

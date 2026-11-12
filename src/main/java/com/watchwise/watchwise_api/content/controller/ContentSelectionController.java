@@ -57,19 +57,27 @@ public class ContentSelectionController {
     @GetMapping("/contents/selection/{type}/{tmdbId}/posters")
     public ResponseEntity<List<ContentImageDTO>> listPosters(
             @PathVariable MovieOrSeriesType type,
-            @PathVariable String tmdbId) {
+            @PathVariable String tmdbId,
+            @RequestParam(name = "include_image_language", required = false) String includeImageLanguage) {
         UUID viewerId = getCurrentUserId();
         checkRateLimit(viewerId);
-        return ResponseEntity.ok(contentImagesService.listPosters(type, tmdbId));
+        List<ContentImageDTO> posters = includeImageLanguage == null
+                ? contentImagesService.listPosters(type, tmdbId)
+                : contentImagesService.listPosters(type, tmdbId, includeImageLanguage);
+        return ResponseEntity.ok(posters);
     }
 
     @GetMapping("/contents/selection/{type}/{tmdbId}/backdrops")
     public ResponseEntity<List<ContentImageDTO>> listBackdrops(
             @PathVariable MovieOrSeriesType type,
-            @PathVariable String tmdbId) {
+            @PathVariable String tmdbId,
+            @RequestParam(name = "include_image_language", required = false) String includeImageLanguage) {
         UUID viewerId = getCurrentUserId();
         checkRateLimit(viewerId);
-        return ResponseEntity.ok(contentImagesService.listBackdrops(type, tmdbId));
+        List<ContentImageDTO> backdrops = includeImageLanguage == null
+                ? contentImagesService.listBackdrops(type, tmdbId)
+                : contentImagesService.listBackdrops(type, tmdbId, includeImageLanguage);
+        return ResponseEntity.ok(backdrops);
     }
 
     private void checkRateLimit(UUID viewerId) {
