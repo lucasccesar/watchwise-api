@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public interface ProfileSummaryDataReader {
@@ -26,7 +27,12 @@ public interface ProfileSummaryDataReader {
             List<RecentActivityItemDTO> recentActivity,
             RewatchData rewatch,
             LongestWatchData longestWatch,
-            List<ProfileTop5EntryDTO> top5) {
+            List<ProfileTop5EntryDTO> top5,
+            Map<UUID, SeriesRating> seriesRatings) {
+        public Snapshot {
+            seriesRatings = seriesRatings == null ? Map.of() : Map.copyOf(seriesRatings);
+        }
+
         public Snapshot(
                 WatchTimeDTO watchTime,
                 List<GenreCountDTO> genreCounts,
@@ -37,8 +43,25 @@ public interface ProfileSummaryDataReader {
                 RewatchData rewatch,
                 LongestWatchData longestWatch) {
             this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                    recentActivity, rewatch, longestWatch, List.of());
+                    recentActivity, rewatch, longestWatch, List.of(), Map.of());
         }
+
+        public Snapshot(
+                WatchTimeDTO watchTime,
+                List<GenreCountDTO> genreCounts,
+                List<RatingCountDTO> ratingsDistribution,
+                List<ProfileDiaryPreviewDTO> recentEpisodes,
+                List<ProfileDiaryPreviewDTO> recentReviews,
+                List<RecentActivityItemDTO> recentActivity,
+                RewatchData rewatch,
+                LongestWatchData longestWatch,
+                List<ProfileTop5EntryDTO> top5) {
+            this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
+                    recentActivity, rewatch, longestWatch, top5, Map.of());
+        }
+    }
+
+    record SeriesRating(Integer score, Long version) {
     }
 
     record RewatchData(ProfileRewatchKind kind, Content content, long count) {

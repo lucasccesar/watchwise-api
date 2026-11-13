@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
@@ -16,6 +17,8 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.summary.dto.RecentActivitySource;
+import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryReader;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryDataReader;
@@ -38,6 +41,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,6 +51,9 @@ class ProfileSummaryDataReaderImplTest {
 
     @Mock
     private ProfileSummaryQueryRepository queryRepository;
+
+    @Mock
+    private ContentRatingRepository contentRatingRepository;
 
     @Mock
     private DroppedEntryRepository droppedEntryRepository;
@@ -77,13 +84,15 @@ class ProfileSummaryDataReaderImplTest {
 
     @BeforeEach
     void setUp() {
-        reader = new ProfileSummaryDataReaderImpl(queryRepository, droppedEntryRepository, contentRepository,
+        reader = new ProfileSummaryDataReaderImpl(queryRepository, contentRatingRepository,
+                droppedEntryRepository, contentRepository,
                 contentMapper, watchCompanionRepository, userMapper, contentReviewRepository, likeRepository,
                 top5EntryReader);
         userId = UUID.randomUUID();
         org.mockito.Mockito.lenient().when(queryRepository.findRecentReviews(any(), any(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.findRecentTopLevelEntries(any(), any(), any())).thenReturn(List.of());
-        org.mockito.Mockito.lenient().when(queryRepository.findRecentSeriesCompletionActivities(any(), any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(queryRepository.findRecentSeriesCompletionActivities(
+                any(), anyBoolean(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(contentReviewRepository.findRecentWrittenReviewsByUserIdAndContentTypeIn(any(), any(), any()))
                 .thenReturn(List.of());
         org.mockito.Mockito.lenient().when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(any(), any(), any()))
@@ -168,7 +177,7 @@ class ProfileSummaryDataReaderImplTest {
                 null, null, null, null, null, null, null);
         Top5EntryResponseDTO top5Entry = new Top5EntryResponseDTO(
                 UUID.randomUUID(), ContentType.SERIES, contentRef, 1, LocalDateTime.now(), LocalDateTime.now());
-        when(top5EntryReader.read(userId, ContentType.SERIES)).thenReturn(List.of(top5Entry));
+        when(top5EntryReader.readEntries(userId, ContentType.SERIES)).thenReturn(List.of(top5Entry));
         when(queryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
                 userId, List.of(series.getId()), ContentType.SERIES.name())).thenReturn(List.of());
 
@@ -185,31 +194,59 @@ class ProfileSummaryDataReaderImplTest {
         Content series = Content.builder().id(contentId).tmdbId("1399").type(ContentType.SERIES).build();
         ContentRefDTO contentRef = new ContentRefDTO(contentId, "1399", ContentType.SERIES,
                 null, null, null, null, null, null, null);
+        Top5EntryResponseDTO top5Entry = new Top5EntryResponseDTO(
+                UUID.randomUUID(), ContentType.SERIES, contentRef, 1, LocalDateTime.now(), LocalDateTime.now());
+        when(top5EntryReader.readEntries(userId, ContentType.SERIES)).thenReturn(List.of(top5Entry));
         Instant orderedAt = Instant.parse("2026-10-02T12:00:00Z");
+        DroppedEntry dropped = DroppedEntry.builder()
+                .id(UUID.randomUUID()).content(series).type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).build();
+        when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(eq(userId),
+                eq(ContentType.SERIES), any())).thenReturn(new PageImpl<>(List.of(dropped)));
         ProfileSummaryQueryRepository.SeriesCompletionActivity activity =
                 org.mockito.Mockito.mock(ProfileSummaryQueryRepository.SeriesCompletionActivity.class);
-        when(queryRepository.findRecentSeriesCompletionActivities(eq(userId), any()))
+        when(queryRepository.findRecentSeriesCompletionActivities(eq(userId), eq(false), any()))
                 .thenReturn(List.of(activity));
         when(activity.getProjectionId()).thenReturn(UUID.randomUUID());
         when(activity.getContentId()).thenReturn(contentId);
         when(activity.getOrderedAt()).thenReturn(orderedAt);
-        when(activity.getScore()).thenReturn(8);
+        when(activity.getScore()).thenReturn(null);
         when(activity.getComment()).thenReturn("review at completion");
         when(activity.getTimesWatched()).thenReturn(1L);
         when(contentRepository.findAllById(List.of(contentId))).thenReturn(List.of(series));
         when(contentMapper.contentToContentRefDto(series)).thenReturn(contentRef);
+        ContentRatingRepository.RatingState rating = org.mockito.Mockito.mock(ContentRatingRepository.RatingState.class);
+        when(rating.getContentId()).thenReturn(contentId);
+        when(rating.getScore()).thenReturn(8);
+        when(rating.getVersion()).thenReturn(2L);
+        when(contentRatingRepository.findRatingStates(userId, ContentType.SERIES, List.of(contentId)))
+                .thenReturn(List.of(rating));
 
         ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
-        assertThat(result.recentActivity()).singleElement().satisfies(item -> {
-            assertThat(item.content()).isEqualTo(contentRef);
-            assertThat(item.status()).isEqualTo(com.watchwise.watchwise_api.summary.dto.RecentActivityStatus.COMPLETED);
-            assertThat(item.score()).isEqualTo(8);
-            assertThat(item.comment()).isEqualTo("review at completion");
-            assertThat(item.timesWatched()).isEqualTo(1L);
-            assertThat(item.activityDate()).isEqualTo(LocalDateTime.ofInstant(
-                    orderedAt, java.time.ZoneId.systemDefault()));
-        });
+        assertThat(result.recentActivity())
+                .filteredOn(item -> item.source()
+                        == RecentActivitySource.SERIES_COMPLETION)
+                .singleElement().satisfies(item -> {
+                    assertThat(item.content()).isEqualTo(contentRef);
+                    assertThat(item.status()).isEqualTo(RecentActivityStatus.COMPLETED);
+                    assertThat(item.score()).isEqualTo(8);
+                    assertThat(item.comment()).isEqualTo("review at completion");
+                    assertThat(item.timesWatched()).isEqualTo(1L);
+                    assertThat(item.activityDate()).isEqualTo(LocalDateTime.ofInstant(
+                            orderedAt, java.time.ZoneId.systemDefault()));
+                });
+        assertThat(result.recentActivity()).filteredOn(item -> item.source()
+                == RecentActivitySource.DROPPED_ENTRY)
+                .singleElement().satisfies(item -> {
+                    assertThat(item.score()).isNull();
+                    assertThat(item.content()).isEqualTo(contentRef);
+                });
+        assertThat(result.seriesRatings()).containsEntry(contentId,
+                new ProfileSummaryDataReader.SeriesRating(8, 2L));
+        assertThat(result.top5()).singleElement().satisfies(item -> assertThat(item.score()).isEqualTo(8));
+        verify(queryRepository).findRecentSeriesCompletionActivities(eq(userId), eq(false), any());
+        verify(contentRatingRepository).findRatingStates(userId, ContentType.SERIES, List.of(contentId));
     }
 
     @Test

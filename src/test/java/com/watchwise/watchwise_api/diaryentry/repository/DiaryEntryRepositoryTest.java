@@ -763,7 +763,7 @@ class DiaryEntryRepositoryTest {
 
         List<ProfileSummaryQueryRepository.SeriesCompletionActivity> activities =
                 profileSummaryQueryRepository.findRecentSeriesCompletionActivities(
-                        lucas.getId(), PageRequest.of(0, 10));
+                        lucas.getId(), true, PageRequest.of(0, 10));
 
         assertThat(activities).singleElement().satisfies(activity -> {
             assertThat(activity.getContentId()).isEqualTo(currentSeries.getId());

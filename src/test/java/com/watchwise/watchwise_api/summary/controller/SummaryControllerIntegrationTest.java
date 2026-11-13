@@ -468,6 +468,48 @@ class SummaryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getSummary] Should Return Series Rating Version Only On Owner Cards - When Series Ratings Exist")
+    void shouldReturnSeriesRatingVersionOnlyOnOwnerCardsWhenSeriesRatingsExist() throws Exception {
+        RegisteredUser ownerUser = registerUser("summaryseriesratingowner");
+        RegisteredUser visitor = registerUser("summaryseriesratingvisitor");
+        User owner = userRepository.findById(ownerUser.id()).orElseThrow();
+        User visitorEntity = userRepository.findById(visitor.id()).orElseThrow();
+        Content ratedSeries = persistSeries("1399");
+        Content unratedSeries = persistSeries("1400");
+        var rating = contentRatingRepository.saveAndFlush(com.watchwise.watchwise_api.contentrating.entity.ContentRating
+                .builder().userId(ownerUser.id()).contentId(ratedSeries.getId()).contentType(ContentType.SERIES)
+                .score(8).createdAt(java.time.Instant.now()).updatedAt(java.time.Instant.now()).build());
+        contentRatingRepository.saveAndFlush(com.watchwise.watchwise_api.contentrating.entity.ContentRating
+                .builder().userId(visitor.id()).contentId(ratedSeries.getId()).contentType(ContentType.SERIES)
+                .score(4).createdAt(java.time.Instant.now()).updatedAt(java.time.Instant.now()).build());
+        assertThat(rating.getVersion()).isZero();
+        LocalDateTime now = LocalDateTime.now();
+        top5EntryRepository.saveAllAndFlush(java.util.List.of(
+                Top5Entry.builder().user(owner).content(ratedSeries).type(ContentType.SERIES)
+                        .position(1).createdAt(now).updatedAt(now).build(),
+                Top5Entry.builder().user(owner).content(unratedSeries).type(ContentType.SERIES)
+                        .position(2).createdAt(now).updatedAt(now).build()));
+
+        mockMvc.perform(getSummaryRequest(ownerUser, ownerUser.id()).param("type", "SERIES"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.top5[0].score").value(8))
+                .andExpect(jsonPath("$.top5[0].hasWatched").value(false))
+                .andExpect(jsonPath("$.top5[0].card.viewerState.myRating").value(8))
+                .andExpect(jsonPath("$.top5[0].card.viewerState.currentRatingVersion")
+                        .value(0))
+                .andExpect(jsonPath("$.top5[0].card.viewerState.reviewsCount").value(nullValue()))
+                .andExpect(jsonPath("$.top5[0].card.viewerState.reviewIds").value(nullValue()))
+                .andExpect(jsonPath("$.top5[1].score").value(nullValue()))
+                .andExpect(jsonPath("$.top5[1].card.viewerState.myRating").value(nullValue()))
+                .andExpect(jsonPath("$.top5[1].card.viewerState.currentRatingVersion").value(nullValue()));
+
+        mockMvc.perform(getSummaryRequest(visitor, ownerUser.id()).param("type", "SERIES"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.top5[0].score").value(8))
+                .andExpect(jsonPath("$.top5[0].card.viewerState").value(nullValue()));
+    }
+
+    @Test
     @DisplayName("[getSummary] Should Return BadRequest - When Type Is Missing")
     void shouldReturnBadRequestWhenTypeIsMissing() throws Exception {
         RegisteredUser user = registerUser("summarynotype");

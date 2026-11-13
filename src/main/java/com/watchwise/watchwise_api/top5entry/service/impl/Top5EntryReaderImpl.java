@@ -1,6 +1,5 @@
 package com.watchwise.watchwise_api.top5entry.service.impl;
 
-import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
@@ -29,16 +28,16 @@ public class Top5EntryReaderImpl implements Top5EntryReader {
     @Override
     @Transactional(readOnly = true)
     public List<Top5EntryResponseDTO> read(UUID ownerId, ContentType type) {
-        List<Top5Entry> entries = top5EntryRepository
-                .findByUserIdAndTypeWithContentOrderByPositionAsc(ownerId, type);
+        List<Top5EntryResponseDTO> entries = readEntries(ownerId, type);
         if (entries.isEmpty()) {
-            return List.of();
+            return entries;
         }
 
         List<UUID> contentIds = entries.stream()
-                .map(Top5Entry::getContent)
+                .map(Top5EntryResponseDTO::content)
                 .filter(java.util.Objects::nonNull)
-                .map(Content::getId)
+                .map(content -> content.id())
+                .filter(java.util.Objects::nonNull)
                 .distinct()
                 .toList();
         Map<UUID, Integer> latestScores = profileSummaryQueryRepository
@@ -49,11 +48,17 @@ public class Top5EntryReaderImpl implements Top5EntryReader {
                         ProfileSummaryQueryRepository.LatestContentScore::getScore));
 
         return entries.stream()
-                .map(entry -> {
-                    Content content = entry.getContent();
-                    Integer score = content == null ? null : latestScores.get(content.getId());
-                    return top5EntryMapper.top5EntryToResponseDto(entry).withScore(score);
-                })
+                .map(entry -> entry.withScore(entry.content() == null
+                        ? null
+                        : latestScores.get(entry.content().id())))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Top5EntryResponseDTO> readEntries(UUID ownerId, ContentType type) {
+        List<Top5Entry> entries = top5EntryRepository
+                .findByUserIdAndTypeWithContentOrderByPositionAsc(ownerId, type);
+        return entries.stream().map(top5EntryMapper::top5EntryToResponseDto).toList();
     }
 }

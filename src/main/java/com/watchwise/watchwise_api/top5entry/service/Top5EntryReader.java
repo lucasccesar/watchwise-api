@@ -9,4 +9,6 @@ import java.util.UUID;
 public interface Top5EntryReader {
 
     List<Top5EntryResponseDTO> read(UUID ownerId, ContentType type);
+
+    List<Top5EntryResponseDTO> readEntries(UUID ownerId, ContentType type);
 }

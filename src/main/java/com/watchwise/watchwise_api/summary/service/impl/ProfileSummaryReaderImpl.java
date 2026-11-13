@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentCardViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -35,10 +36,12 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -108,7 +111,29 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                 specs,
                 new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), ownerId, null),
                 PROFILE_CARD_FIELDS);
-        Map<ContentCoordinate, ContentCardDTO> cards = assembledCards == null ? Map.of() : assembledCards;
+        Map<ContentCoordinate, ContentCardDTO> cards = assembledCards == null
+                ? Map.of()
+                : new LinkedHashMap<>(assembledCards);
+        if (!snapshot.seriesRatings().isEmpty()) {
+            Map<ContentCoordinate, UUID> ratingContentIdsByCoordinate = Stream.of(
+                            snapshot.recentReviews().stream().map(ProfileDiaryPreviewDTO::content),
+                            snapshot.recentActivity().stream().map(RecentActivityItemDTO::content),
+                            snapshot.top5().stream().map(ProfileTop5EntryDTO::content))
+                    .flatMap(stream -> stream)
+                    .filter(content -> content != null && content.type() == ContentType.SERIES
+                            && content.id() != null && snapshot.seriesRatings().containsKey(content.id()))
+                    .collect(Collectors.toMap(this::toCoordinate, ContentRefDTO::id,
+                            (first, ignored) -> first, LinkedHashMap::new));
+            ratingContentIdsByCoordinate.forEach((coordinate, contentId) -> {
+                ContentCardDTO card = cards.get(coordinate);
+                if (card != null) {
+                    var rating = snapshot.seriesRatings().get(contentId);
+                    cards.put(coordinate, card.withViewerState(new ContentCardViewerStateDTO(
+                            null, rating.score(), null, null, null, null, null, null, null, null,
+                            rating.version(), null, null)));
+                }
+            });
+        }
 
         return new ProfileSummaryDataReader.Snapshot(
                 snapshot.watchTime(), snapshot.genreCounts(), snapshot.ratingsDistribution(),
@@ -116,7 +141,8 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                 addCardsToReviewPreviews(snapshot.recentReviews(), cards),
                 addCardsToActivity(snapshot.recentActivity(), cards),
                 snapshot.rewatch(), snapshot.longestWatch(),
-                snapshot.top5().stream().map(item -> item.withCard(cardFor(item.content(), cards))).toList());
+                snapshot.top5().stream().map(item -> item.withCard(cardFor(item.content(), cards))).toList(),
+                snapshot.seriesRatings());
     }
 
     private ContentCoordinate seriesCoordinateForReview(ContentRefDTO content) {

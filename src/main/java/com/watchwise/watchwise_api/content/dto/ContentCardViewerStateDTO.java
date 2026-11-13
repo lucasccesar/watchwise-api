@@ -20,7 +20,7 @@ public record ContentCardViewerStateDTO(
         List<UUID> reviewIds) {
 
     public ContentCardViewerStateDTO {
-        reviewIds = reviewIds == null ? List.of() : List.copyOf(reviewIds);
+        reviewIds = reviewIds == null ? null : List.copyOf(reviewIds);
     }
 
     public ContentCardViewerStateDTO(WatchStatus watchStatus, Integer myRating,

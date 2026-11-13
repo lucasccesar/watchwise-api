@@ -111,6 +111,7 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
              AND marker.complete = TRUE
             LEFT JOIN content_ratings rating
               ON rating.user_id = p.user_id AND rating.content_id = p.content_id
+             AND :includeRatingScore = TRUE
             LEFT JOIN LATERAL (
                 SELECT candidate.comment
                 FROM content_reviews candidate
@@ -133,7 +134,9 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             ORDER BY p.ordered_at DESC, p.id DESC
             """, nativeQuery = true)
     List<SeriesCompletionActivity> findRecentSeriesCompletionActivities(
-            @Param("userId") UUID userId, Pageable pageable);
+            @Param("userId") UUID userId,
+            @Param("includeRatingScore") boolean includeRatingScore,
+            Pageable pageable);
 
     interface SeriesCompletionActivity {
         UUID getProjectionId();

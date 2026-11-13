@@ -6,15 +6,27 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import java.util.Optional;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ContentRatingRepository extends JpaRepository<ContentRating, UUID> {
     Optional<ContentRating> findByUserIdAndContentId(UUID userId, UUID contentId);
 
     List<ContentRating> findByUserIdAndContentIdIn(UUID userId, Collection<UUID> contentIds);
+
+    @Query("""
+            SELECT rating.contentId AS contentId, rating.score AS score, rating.version AS version
+            FROM ContentRating rating
+            WHERE rating.userId = :userId
+              AND rating.contentType = :contentType
+              AND rating.contentId IN :contentIds
+            """)
+    List<RatingState> findRatingStates(
+            @Param("userId") UUID userId,
+            @Param("contentType") ContentType contentType,
+            @Param("contentIds") Collection<UUID> contentIds);
 
     List<ContentRating> findByUserIdAndContentTypeInOrderByScoreDescContentIdAsc(
             UUID userId, Collection<ContentType> contentTypes, Pageable pageable);
@@ -43,6 +55,12 @@ public interface ContentRatingRepository extends JpaRepository<ContentRating, UU
         UUID getContentId();
         Double getAverageScore();
         Long getVoteCount();
+    }
+
+    interface RatingState {
+        UUID getContentId();
+        Integer getScore();
+        Long getVersion();
     }
 
     interface PublicRatingDistribution {

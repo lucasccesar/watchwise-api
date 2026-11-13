@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -23,6 +24,9 @@ import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
+import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
+import com.watchwise.watchwise_api.summary.dto.RecentActivitySource;
+import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
 import com.watchwise.watchwise_api.summary.service.ProfileDisplayMetadataResolver;
@@ -37,6 +41,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -176,6 +181,52 @@ class ProfileSummaryReaderImplTest {
         });
         verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), anySet());
         assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).contains(coordinate);
+    }
+
+    @Test
+    void shouldIncludeCurrentSeriesRatingAndVersionOnlyOnOwnersProfile() {
+        ContentRefDTO content = new ContentRefDTO(
+                UUID.randomUUID(), "1399", ContentType.SERIES, null, null, null,
+                false, false, null, null);
+        ProfileTop5EntryDTO top5Entry = new ProfileTop5EntryDTO(
+                UUID.randomUUID(), ContentType.SERIES, content, 1,
+                java.time.LocalDateTime.now(), java.time.LocalDateTime.now(), null, 8, true, null);
+        ProfileDiaryPreviewDTO reviewPreview = new ProfileDiaryPreviewDTO(
+                UUID.randomUUID(), content, 7, java.time.LocalDate.now(), 1, null, List.of());
+        ProfileSummaryDataReader.Snapshot snapshot = new ProfileSummaryDataReader.Snapshot(
+                new WatchTimeDTO(0L, 0L, 0L, 0L), List.of(), List.of(), List.of(), List.of(reviewPreview),
+                List.of(new RecentActivityItemDTO(UUID.randomUUID(), RecentActivitySource.SERIES_COMPLETION,
+                        content, RecentActivityStatus.COMPLETED, 8, 1L, null,
+                        java.time.LocalDateTime.now(), null)), null, null, List.of(top5Entry),
+                Map.of(content.id(), new ProfileSummaryDataReader.SeriesRating(8, 3L)));
+        when(dataReader.read(userId, userId, ContentType.SERIES)).thenReturn(snapshot);
+        when(dataReader.read(viewerId, userId, ContentType.SERIES)).thenReturn(
+                new ProfileSummaryDataReader.Snapshot(
+                        new WatchTimeDTO(0L, 0L, 0L, 0L), List.of(), List.of(), List.of(), List.of(),
+                        List.of(new RecentActivityItemDTO(UUID.randomUUID(), RecentActivitySource.SERIES_COMPLETION,
+                                content, RecentActivityStatus.COMPLETED, 8, 1L, null,
+                                java.time.LocalDateTime.now(), null)), null, null, List.of(top5Entry)));
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.SERIES, "1399", null, null, null);
+        ContentCardDTO card = new ContentCardDTO(
+                content.id(), ContentType.SERIES, "1399", null, null, null, "Example Series", "/poster.jpg",
+                null, null, null, null, null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(java.util.Map.of(coordinate, card));
+
+        SummaryResponseDTO ownerResult = reader.read(userId, userId, ContentType.SERIES);
+        SummaryResponseDTO visitorResult = reader.read(viewerId, userId, ContentType.SERIES);
+
+        JsonNode ownerState = serialize(ownerResult).get("top5").get(0).get("card").get("viewerState");
+        assertThat(ownerState.get("myRating").asInt()).isEqualTo(8);
+        assertThat(ownerState.get("currentRatingVersion").asLong()).isEqualTo(3L);
+        JsonNode activityState = serialize(ownerResult).get("recentActivity").get(0).get("card").get("viewerState");
+        assertThat(activityState.get("myRating").asInt()).isEqualTo(8);
+        assertThat(activityState.get("currentRatingVersion").asLong()).isEqualTo(3L);
+        JsonNode reviewState = serialize(ownerResult).get("recentReviews").get(0).get("card").get("viewerState");
+        assertThat(reviewState.get("myRating").asInt()).isEqualTo(8);
+        assertThat(reviewState.get("currentRatingVersion").asLong()).isEqualTo(3L);
+        JsonNode visitorState = serialize(visitorResult).get("top5").get(0).get("card").get("viewerState");
+        assertThat(visitorState.isNull()).isTrue();
     }
 
     private JsonNode serialize(Object value) {

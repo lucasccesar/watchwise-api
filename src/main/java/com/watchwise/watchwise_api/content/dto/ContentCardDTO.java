@@ -33,6 +33,13 @@ public record ContentCardDTO(
         genres = genres == null ? null : List.copyOf(genres);
     }
 
+    public ContentCardDTO withViewerState(ContentCardViewerStateDTO viewerState) {
+        return new ContentCardDTO(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber,
+                title, posterPath, backdropPath, customPosterUrl, releaseDate, releaseYear, tmdbVoteAverage,
+                runtimeMinutes, totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, stats,
+                viewerState, previewStatus);
+    }
+
     public ContentCardDTO(
             UUID contentId,
             ContentType type,

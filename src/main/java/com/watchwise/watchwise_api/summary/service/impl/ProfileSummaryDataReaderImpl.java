@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -39,6 +40,7 @@ import java.time.ZoneOffset;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,6 +61,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     private static final int WATCH_TIME_WINDOW_DAYS = 30;
 
     private final ProfileSummaryQueryRepository queryRepository;
+    private final ContentRatingRepository contentRatingRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final ContentRepository contentRepository;
     private final ContentMapper contentMapper;
@@ -71,6 +74,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     @Override
     @Transactional(readOnly = true)
     public Snapshot read(UUID viewerId, UUID userId, ContentType type) {
+        boolean includeSeriesRatings = type == ContentType.SERIES && userId.equals(viewerId);
         ContentType watchedContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.EPISODE;
         ContentType ratingContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
         LocalDate windowEnd = LocalDate.now();
@@ -121,12 +125,15 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                         PageRequest.of(0, RECENT_ACTIVITY_LIMIT))
                 : List.of();
         List<ProfileSummaryQueryRepository.SeriesCompletionActivity> seriesCompletions = type == ContentType.SERIES
-                ? queryRepository.findRecentSeriesCompletionActivities(userId, PageRequest.of(0, RECENT_ACTIVITY_LIMIT))
+                ? queryRepository.findRecentSeriesCompletionActivities(
+                        userId, !includeSeriesRatings, PageRequest.of(0, RECENT_ACTIVITY_LIMIT))
                 : List.of();
         List<DroppedEntry> droppedEntries = droppedEntryRepository
                 .findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, PageRequest.of(0, RECENT_ACTIVITY_LIMIT))
                 .getContent();
-        List<Top5EntryResponseDTO> top5Entries = top5EntryReader.read(userId, type);
+        List<Top5EntryResponseDTO> top5Entries = includeSeriesRatings
+                ? top5EntryReader.readEntries(userId, type)
+                : top5EntryReader.read(userId, type);
         List<UUID> activityContentIds = Stream.of(
                         completedEntries.stream().map(DiaryEntry::getContent)
                                 .filter(Objects::nonNull).map(Content::getId),
@@ -146,6 +153,20 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         Map<UUID, Long> timesWatched = loadWatchCounts(userId, type, watchCountContentIds);
         List<RecentActivityItemDTO> recentActivity = toRecentActivity(
                 type, completedEntries, seriesCompletions, droppedEntries, timesWatched);
+        Map<UUID, ProfileSummaryDataReader.SeriesRating> seriesRatings = includeSeriesRatings
+                ? readSeriesRatings(userId, top5Entries, recentActivity, recentReviews)
+                : Map.of();
+        if (!seriesRatings.isEmpty()) {
+            top5Entries = top5Entries.stream()
+                    .map(entry -> {
+                        ProfileSummaryDataReader.SeriesRating rating = entry.content() == null
+                                ? null
+                                : seriesRatings.get(entry.content().id());
+                        return entry.withScore(rating == null ? null : rating.score());
+                    })
+                    .toList();
+            recentActivity = applyCurrentSeriesScores(recentActivity, seriesRatings);
+        }
         List<ProfileTop5EntryDTO> top5 = top5Entries.stream()
                 .map(entry -> ProfileTop5EntryDTO.from(entry, entry.content() != null
                         && timesWatched.getOrDefault(entry.content().id(), 0L) > 0, null))
@@ -155,7 +176,56 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         LongestWatchData longestWatch = readLongestWatch(userId, type);
 
         return new Snapshot(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                recentActivity, rewatch, longestWatch, top5);
+                recentActivity, rewatch, longestWatch, top5, seriesRatings);
+    }
+
+    private Map<UUID, ProfileSummaryDataReader.SeriesRating> readSeriesRatings(
+            UUID userId,
+            List<Top5EntryResponseDTO> top5Entries,
+            List<RecentActivityItemDTO> recentActivity,
+            List<ProfileDiaryPreviewDTO> recentReviews) {
+        List<UUID> contentIds = Stream.of(
+                        top5Entries.stream().map(Top5EntryResponseDTO::content),
+                        recentActivity.stream().map(RecentActivityItemDTO::content),
+                        recentReviews.stream().map(ProfileDiaryPreviewDTO::content))
+                .flatMap(stream -> stream)
+                .filter(content -> content != null && content.type() == ContentType.SERIES
+                        && content.id() != null)
+                .map(com.watchwise.watchwise_api.content.dto.ContentRefDTO::id)
+                .distinct()
+                .toList();
+        if (contentIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, ProfileSummaryDataReader.SeriesRating> ratingsByContentId = contentIds.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        ignored -> new ProfileSummaryDataReader.SeriesRating(null, null),
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+        Optional.ofNullable(contentRatingRepository.findRatingStates(userId, ContentType.SERIES, contentIds))
+                .orElse(List.of())
+                .forEach(rating -> ratingsByContentId.put(rating.getContentId(),
+                        new ProfileSummaryDataReader.SeriesRating(rating.getScore(), rating.getVersion())));
+        return Map.copyOf(ratingsByContentId);
+    }
+
+    private List<RecentActivityItemDTO> applyCurrentSeriesScores(
+            List<RecentActivityItemDTO> activity,
+            Map<UUID, ProfileSummaryDataReader.SeriesRating> seriesRatings) {
+        return activity.stream()
+                .map(item -> {
+                    if (item.source() != RecentActivitySource.SERIES_COMPLETION
+                            || item.content() == null
+                            || !seriesRatings.containsKey(item.content().id())) {
+                        return item;
+                    }
+                    ProfileSummaryDataReader.SeriesRating rating = seriesRatings.get(item.content().id());
+                    return new RecentActivityItemDTO(item.id(), item.source(), item.content(), item.status(),
+                            rating.score(), item.timesWatched(), item.comment(), item.activityDate(), item.card());
+                })
+                .toList();
     }
 
     private List<GenreCountDTO> toGenreCounts(List<ProfileSummaryQueryRepository.GenreCount> rows) {
