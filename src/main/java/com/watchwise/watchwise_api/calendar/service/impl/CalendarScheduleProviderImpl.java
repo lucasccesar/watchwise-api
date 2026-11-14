@@ -9,6 +9,9 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentSchedule;
 import com.watchwise.watchwise_api.content.service.ContentScheduleEpisode;
@@ -16,6 +19,7 @@ import com.watchwise.watchwise_api.content.service.ContentScheduleLookup;
 import com.watchwise.watchwise_api.content.service.ContentScheduleReader;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,8 +53,36 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
     }
 
     @Override
+    public CalendarScheduleLookup prepareSeason(
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup) {
+        if (seasonNumber == null || seasonNumber <= 0) {
+            return new CalendarScheduleLookup.NotFound(seasonNumber);
+        }
+        return mapSeason(scheduleReader.readCalendarSeason(
+                seriesTmdbId, seasonNumber, region, language, seasonLookup, seriesLookup),
+                seriesTmdbId, seasonNumber, region, language, Instant.now());
+    }
+
+    @Override
     public CalendarScheduleLookup loadSeries(String seriesTmdbId, String region, String language) {
         return mapSeries(scheduleReader.readCalendarSeries(seriesTmdbId, region, language), seriesTmdbId, region, language);
+    }
+
+    @Override
+    public CalendarScheduleLookup loadSeriesPrepared(
+            String seriesTmdbId,
+            String region,
+            String language,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup,
+            Map<Integer, TmdbLookupResult<TmdbSeasonFullDetails>> preparedSeasonLookups) {
+        return mapSeries(scheduleReader.readCalendarSeries(
+                seriesTmdbId, region, language, seriesLookup, preparedSeasonLookups),
+                seriesTmdbId, region, language);
     }
 
     @Override
@@ -98,6 +130,16 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
             Integer seasonNumber,
             String region,
             String language) {
+        return mapSeason(lookup, seriesTmdbId, seasonNumber, region, language, Instant.now());
+    }
+
+    private CalendarScheduleLookup mapSeason(
+            ContentScheduleLookup lookup,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            Instant loadedAt) {
         if (lookup instanceof ContentScheduleLookup.NotFound notFound) {
             return new CalendarScheduleLookup.NotFound(
                     notFound.seasonNumber() == null ? seasonNumber : notFound.seasonNumber());
@@ -115,11 +157,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 schedule.posterPath(),
                 schedule.network(),
                 schedule.episodes().stream().map(this::toCalendarEpisode).toList());
-        return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
+        return new CalendarScheduleLookup.Found(new CalendarScheduleBatch(
                 new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region),
-                found.origin(),
-                season,
-                expectedSeasonEpisodeCount(schedule, seasonNumber)));
+                found.origin(), loadedAt, null, season, expectedSeasonEpisodeCount(schedule, seasonNumber)));
     }
 
     private Integer expectedSeasonEpisodeCount(ContentSchedule schedule, Integer seasonNumber) {

@@ -66,6 +66,40 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         };
     }
 
+    @Override
+    public VersionedCompletionScope loadPrepared(
+            MediaReference reference,
+            String region,
+            String language,
+            Instant now,
+            CalendarScheduleBatch preparedSeason) {
+        Objects.requireNonNull(reference, "reference is required");
+        Objects.requireNonNull(now, "now is required");
+        if (reference.type() != com.watchwise.watchwise_api.content.entity.ContentType.SEASON
+                || reference.seasonNumber() == null || reference.seasonNumber() <= 0) {
+            throw new BadRequestException("Prepared completion scopes require a regular season reference");
+        }
+        return scopeForSeason(reference, region, language, now,
+                requireDirectSeason(new CalendarScheduleLookup.Found(preparedSeason), reference, region, language));
+    }
+
+    @Override
+    public VersionedCompletionScope loadPreparedSeries(
+            MediaReference reference,
+            String region,
+            String language,
+            Instant now,
+            CalendarSeriesSchedule preparedSeries) {
+        Objects.requireNonNull(reference, "reference is required");
+        Objects.requireNonNull(now, "now is required");
+        if (reference.type() != com.watchwise.watchwise_api.content.entity.ContentType.SERIES) {
+            throw new BadRequestException("Prepared series completion scopes require a series reference");
+        }
+        return scopeForSeries(reference, region, language, now,
+                requireSeriesSchedule(new CalendarScheduleLookup.FoundSeries(preparedSeries),
+                        reference.tmdbId(), region, language));
+    }
+
     private VersionedCompletionScope loadSeries(
             MediaReference reference,
             String region,
@@ -74,9 +108,18 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         CalendarSeriesSchedule schedule = requireSeriesSchedule(
                 scheduleProvider.loadSeries(reference.tmdbId(), region, language),
                 reference.tmdbId(), region, language);
+        return scopeForSeries(reference, region, language, now, schedule);
+    }
+
+    private VersionedCompletionScope scopeForSeries(
+            MediaReference reference,
+            String region,
+            String language,
+            Instant now,
+            CalendarSeriesSchedule schedule) {
         LocalDate today = LocalDate.ofInstant(now, ZoneId.systemDefault());
         Set<EpisodeCoordinate> episodes = new LinkedHashSet<>();
-        boolean releaseComplete = isCompleteSeriesCalendar(schedule);
+        boolean releaseComplete = schedule.completeSchedule() && isCompleteSeriesCalendar(schedule);
         boolean hasLaunchedRegularEpisode = false;
 
         for (CalendarSeriesSchedule.Season season : sortedSeasons(schedule.seasons())) {
@@ -127,10 +170,20 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         CalendarScheduleBatch batch = requireDirectSeason(
                 scheduleProvider.loadSeason(reference.seriesTmdbId(), reference.seasonNumber(), region, language),
                 reference, region, language);
+        return scopeForSeason(reference, region, language, now, batch);
+    }
+
+    private VersionedCompletionScope scopeForSeason(
+            MediaReference reference,
+            String region,
+            String language,
+            Instant now,
+            CalendarScheduleBatch batch) {
         CalendarSeasonSchedule season = batch.season();
         Integer expectedEpisodeCount = batch.expectedEpisodeCount();
         LocalDate today = LocalDate.ofInstant(now, ZoneId.systemDefault());
-        boolean releaseComplete = seasonReleaseComplete(season, expectedEpisodeCount, today);
+        boolean releaseComplete = batch.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
+                && seasonReleaseComplete(season, expectedEpisodeCount, today);
 
         return new VersionedCompletionScope(
                 new CompletionScope(reference, toCoordinates(season), releaseComplete),

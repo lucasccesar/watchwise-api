@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.HashSet;
 
 @Service
 public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchronizer {
@@ -52,6 +53,18 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
 
         CalendarSeasonSchedule season = batch.season().withCheckTimes(
                 checkedAt, releaseDate -> CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
+        if (batch.expectedEpisodeCount() == null
+                || batch.expectedEpisodeCount() != season.episodes().size()
+                || batch.key().type() != com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                || !batch.key().tmdbId().equals(season.seriesTmdbId())
+                || !batch.key().preferredRegion().equals(season.region())
+                || !batch.key().preferredLanguage().equals(season.language())
+                || season.seasonNumber() == null || season.seasonNumber() <= 0
+                || season.episodes().stream().anyMatch(episode -> episode.episodeNumber() == null
+                        || episode.episodeNumber() <= 0)
+                || new HashSet<>(season.episodeCoordinates()).size() != season.episodes().size()) {
+            return;
+        }
         if (snapshotStore.reconcileSeason(season, checkedAt)) {
             seasonScheduleCache.invalidate(
                     batch.season().seriesTmdbId() + "|" + batch.season().seasonNumber() + "|" + batch.season().language());

@@ -375,6 +375,9 @@ public class CalendarScheduleSnapshotStore {
             boolean completePayload,
             Instant checkedAt) {
         List<CalendarScheduleSnapshot> existingSnapshots = snapshotsForSeason(schedule);
+        Map<Integer, CalendarScheduleSnapshot> snapshotsByEpisodeNumber = new LinkedHashMap<>();
+        existingSnapshots.forEach(snapshot -> snapshotsByEpisodeNumber.putIfAbsent(
+                snapshot.getEpisodeNumber(), snapshot));
         LocalDateTime incomingCheckedAt = toLocalDateTime(checkedAt);
         if (incomingCheckedAt != null && existingSnapshots.stream()
                 .map(CalendarScheduleSnapshot::getLastCheckedAt)
@@ -400,31 +403,39 @@ public class CalendarScheduleSnapshotStore {
             changed = !removed.isEmpty();
         }
 
+        List<CalendarScheduleSnapshot> snapshotsToSave = new java.util.ArrayList<>();
         for (CalendarEpisodeSchedule episode : schedule.episodes()) {
             if (episode.episodeNumber() == null || episode.episodeNumber() <= 0) {
                 continue;
             }
-            Optional<CalendarScheduleSnapshot> existing = snapshotRepository.findByEpisodeIdentity(
-                    schedule.seriesTmdbId(), schedule.seasonNumber(), episode.episodeNumber(),
-                    schedule.region(), schedule.language());
-            if (existing.isPresent()) {
-                boolean factsChanged = episodeFactsChanged(existing.get(), schedule, episode);
-                CalendarScheduleSnapshot merged = mergeEpisode(existing.get(), schedule, episode);
-                snapshotRepository.saveAndFlush(merged);
+            CalendarScheduleSnapshot existing = snapshotsByEpisodeNumber.get(episode.episodeNumber());
+            if (existing != null) {
+                boolean factsChanged = episodeFactsChanged(existing, schedule, episode);
+                boolean refreshDueSnapshot = episode.lastCheckedAt() != null
+                        && (existing.getNextCheckAt() == null
+                        || !existing.getNextCheckAt().isAfter(toLocalDateTime(episode.lastCheckedAt())));
+                if (factsChanged || refreshDueSnapshot) {
+                    snapshotsToSave.add(mergeEpisode(existing, schedule, episode));
+                }
                 changed |= factsChanged;
                 continue;
             }
-            snapshotRepository.saveAndFlush(newEpisode(schedule, episode));
+            snapshotsToSave.add(newEpisode(schedule, episode));
             changed = true;
+        }
+        if (!snapshotsToSave.isEmpty()) {
+            snapshotRepository.saveAllAndFlush(snapshotsToSave);
         }
         if (invalidateCompleteness) {
             boolean scopeChanged = changed;
             changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SEASON,
                     schedule.seriesTmdbId(), schedule.seasonNumber(), schedule.region(), schedule.language(),
                     schedule.episodes().size(), true, checkedAt, scopeChanged);
-            changed |= markSeriesIncomplete(
-                    schedule.seriesTmdbId(), schedule.region(), schedule.language(), checkedAt,
-                    schedule.episodes().size(), scopeChanged);
+            if (scopeChanged) {
+                changed |= markSeriesIncomplete(
+                        schedule.seriesTmdbId(), schedule.region(), schedule.language(), checkedAt,
+                        schedule.episodes().size(), true);
+            }
         }
         return changed;
     }

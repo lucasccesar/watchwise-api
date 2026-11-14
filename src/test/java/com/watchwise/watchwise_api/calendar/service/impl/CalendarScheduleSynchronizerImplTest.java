@@ -34,6 +34,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.IntStream;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -111,6 +112,20 @@ class CalendarScheduleSynchronizerImplTest {
         ArgumentCaptor<CalendarSeasonSchedule> schedule = ArgumentCaptor.forClass(CalendarSeasonSchedule.class);
         verify(store).reconcileSeason(schedule.capture(), eq(CHECKED_AT));
         assertThat(schedule.getValue().episodes().getFirst().nextCheckAt()).isEqualTo(Instant.MAX);
+    }
+
+    @Test
+    @DisplayName("[synchronize] Should Preserve The Last Trusted Schedule - When A Remote Season Is Partial")
+    void shouldPreserveTheLastTrustedScheduleWhenARemoteSeasonIsPartial() {
+        CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
+        CalendarScheduleSynchronizerImpl synchronizer = synchronizer(store);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarScheduleBatch partial = new CalendarScheduleBatch(key, TmdbLookupOrigin.REMOTE, CHECKED_AT,
+                null, seasonSchedule(LocalDate.of(2026, 9, 1), null), 2);
+
+        synchronizer.synchronize(partial, CHECKED_AT);
+
+        verifyNoInteractions(store);
     }
 
     @Test
@@ -266,13 +281,10 @@ class CalendarScheduleSynchronizerImplTest {
     @DisplayName("[reconcileSeason] Should Retry The Full Season - When A Concurrent First Insert Wins")
     void shouldRetryTheFullSeasonWhenAConcurrentFirstInsertWins() {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
-        CalendarScheduleSnapshot winner = episodeSnapshot(1, LocalDate.of(2026, 9, 20));
         when(repository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
                 CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR"))
                 .thenReturn(List.of());
-        when(repository.findByEpisodeIdentity("1396", 2, 1, "BR", "pt-BR"))
-                .thenReturn(Optional.empty(), Optional.of(winner));
-        when(repository.saveAndFlush(any()))
+        when(repository.saveAllAndFlush(any()))
                 .thenThrow(new DataIntegrityViolationException("duplicate episode identity"))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         CalendarScheduleSnapshotStore store = store(repository);
@@ -280,7 +292,31 @@ class CalendarScheduleSynchronizerImplTest {
         boolean changed = store.reconcileSeason(seasonSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
 
         assertThat(changed).isTrue();
-        verify(repository, times(2)).saveAndFlush(any());
+        verify(repository, times(2)).saveAllAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[reconcileSeason] Should Read And Persist A Season In Batches - When It Contains Twenty-Four Episodes")
+    void shouldReadAndPersistASeasonInBatchesWhenItContainsTwentyFourEpisodes() {
+        CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
+        when(repository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR"))
+                .thenReturn(List.of());
+        CalendarSeasonSchedule season = new CalendarSeasonSchedule("1396", 2, "BR", "pt-BR", "Series", null,
+                IntStream.rangeClosed(1, 24)
+                        .mapToObj(number -> new CalendarEpisodeSchedule(
+                                number, "Episode " + number, LocalDate.of(2026, 9, 1), null, CHECKED_AT, null))
+                        .toList());
+        CalendarScheduleSnapshotStore store = store(repository);
+
+        store.reconcileSeason(season, CHECKED_AT);
+
+        ArgumentCaptor<List<CalendarScheduleSnapshot>> snapshots = ArgumentCaptor.forClass(List.class);
+        verify(repository).saveAllAndFlush(snapshots.capture());
+        assertThat(snapshots.getValue()).hasSize(24);
+        verify(repository).findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR");
+        verify(repository, never()).findByEpisodeIdentity(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -320,7 +356,7 @@ class CalendarScheduleSynchronizerImplTest {
 
     private static CalendarScheduleBatch seasonBatch(TmdbLookupOrigin origin, LocalDate releaseDate) {
         CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
-        return CalendarScheduleBatch.season(key, origin, seasonSchedule(releaseDate, null));
+        return CalendarScheduleBatch.season(key, origin, seasonSchedule(releaseDate, null), 1);
     }
 
     private static CalendarMovieSchedule movieSchedule(LocalDate releaseDate, Instant checkedAt) {

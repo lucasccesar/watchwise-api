@@ -26,6 +26,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -45,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 @DataJpaTest
+@ContextConfiguration(classes = com.watchwise.watchwise_api.WatchwiseApiApplication.class)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @Import({NewTransactionExecutor.class, PostgresAdvisoryLock.class})
@@ -241,6 +243,74 @@ class CalendarScheduleCompletenessRepositoryTest {
         assertThat(firstVersion).isEqualTo(1L);
         assertThat(checkedAtOnlyVersion).isEqualTo(firstVersion);
         assertThat(changedVersion).isEqualTo(firstVersion + 1);
+    }
+
+    @Test
+    @DisplayName("[reconcileSeason] Should Preserve A Complete Series Marker - When A Season Is Reconciled Without Fact Changes")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void shouldPreserveACompleteSeriesMarkerWhenSeasonFactsDoNotChange() {
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
+        Instant checkedAt = Instant.parse("2026-09-12T10:00:00Z");
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule complete = new CalendarSeriesSchedule(
+                key, List.of(remoteSeason(1, "Stable title")), Map.of(1, 1), 1, true);
+        store.reconcileSeries(complete, checkedAt);
+        CalendarScheduleCompleteness seriesMarker = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow();
+        long version = seriesMarker.getScopeVersion();
+
+        store.reconcileSeason(remoteSeason(1, "Stable title").schedule(), checkedAt.plusSeconds(3600));
+        entityManager.clear();
+
+        CalendarScheduleCompleteness refreshedMarker = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow();
+        assertThat(refreshedMarker.getComplete()).isTrue();
+        assertThat(refreshedMarker.getScopeVersion()).isEqualTo(version);
+    }
+
+    @Test
+    @DisplayName("[reconcileSeason] Should Refresh A Due Snapshot Without Bumping Scope Versions")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void shouldRefreshDueSnapshotWithoutBumpingScopeVersions() {
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
+        Instant firstCheck = Instant.parse("2026-09-12T10:00:00Z");
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        store.reconcileSeries(new CalendarSeriesSchedule(
+                key, List.of(remoteSeason(1, "Stable title")), Map.of(1, 1), 1, true), firstCheck);
+        CalendarScheduleCompleteness seasonBefore = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow();
+        CalendarScheduleCompleteness seriesBefore = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow();
+        CalendarScheduleSnapshot existing = snapshotRepository
+                .findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                        CalendarScheduleSnapshot.EventType.EPISODE, "1396", 1, "BR", "pt-BR")
+                .getFirst();
+        snapshotRepository.saveAndFlush(existing.toBuilder()
+                .nextCheckAt(LocalDateTime.of(2026, 9, 12, 9, 59))
+                .build());
+        Instant refreshedAt = firstCheck.plusSeconds(3600);
+        CalendarSeasonSchedule refreshed = new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                List.of(new CalendarEpisodeSchedule(1, "Stable title", LocalDate.of(2026, 9, 1), null,
+                        refreshedAt, null)));
+
+        store.reconcileSeason(refreshed, refreshedAt);
+        entityManager.clear();
+
+        CalendarScheduleSnapshot reloaded = snapshotRepository
+                .findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                        CalendarScheduleSnapshot.EventType.EPISODE, "1396", 1, "BR", "pt-BR")
+                .getFirst();
+        CalendarScheduleCompleteness seasonAfter = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow();
+        CalendarScheduleCompleteness seriesAfter = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow();
+        assertThat(reloaded.getLastCheckedAt()).isEqualTo(LocalDateTime.of(2026, 9, 12, 11, 0));
+        assertThat(reloaded.getNextCheckAt()).isEqualTo(CalendarScheduleCadence.PERSISTED_NO_RECHECK_AT);
+        assertThat(seasonAfter.getScopeVersion()).isEqualTo(seasonBefore.getScopeVersion());
+        assertThat(seriesAfter.getComplete()).isTrue();
+        assertThat(seriesAfter.getScopeVersion()).isEqualTo(seriesBefore.getScopeVersion());
     }
 
     @Test

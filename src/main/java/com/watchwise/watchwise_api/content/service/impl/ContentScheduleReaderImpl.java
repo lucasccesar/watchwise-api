@@ -98,6 +98,34 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         }
 
         TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        return mapSeasonLookups(seriesTmdbId, seasonNumber, region, language, seasonLookup, seriesLookup);
+    }
+
+    @Override
+    public ContentScheduleLookup readCalendarSeason(
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup) {
+        if (seasonNumber == null || seasonNumber <= 0) {
+            return new ContentScheduleLookup.NotFound(seasonNumber);
+        }
+        return mapSeasonLookups(seriesTmdbId, seasonNumber, region, language, seasonLookup, seriesLookup);
+    }
+
+    private ContentScheduleLookup mapSeasonLookups(
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup) {
+        if (!(seasonLookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> season)
+                || season.value() == null) {
+            return mapFailure(seasonLookup, seasonNumber);
+        }
         if (!(seriesLookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> series)
                 || series.value() == null) {
             return mapFailure(seriesLookup);
@@ -140,6 +168,18 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
     }
 
     @Override
+    public ContentScheduleLookup readCalendarSeries(
+            String seriesTmdbId,
+            String region,
+            String language,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup,
+            Map<Integer, TmdbLookupResult<TmdbSeasonFullDetails>> preparedSeasonLookups) {
+        return readSeries(seriesTmdbId, region, language,
+                tmdbClient::getTvFullDetails, tmdbClient::getCalendarSeasonDetails,
+                seriesLookup, preparedSeasonLookups == null ? Map.of() : preparedSeasonLookups);
+    }
+
+    @Override
     public ContentScheduleLookup readCalendarSeriesFresh(String seriesTmdbId, String region, String language) {
         return readSeries(seriesTmdbId, region, language,
                 tmdbClient::refreshTvFullDetails, tmdbClient::refreshCalendarSeasonDetails);
@@ -151,7 +191,20 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
             String language,
             TvDetailsReader tvDetailsReader,
             SeasonDetailsReader seasonDetailsReader) {
-        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tvDetailsReader.read(seriesTmdbId, language);
+        return readSeries(seriesTmdbId, region, language, tvDetailsReader, seasonDetailsReader, null, Map.of());
+    }
+
+    private ContentScheduleLookup readSeries(
+            String seriesTmdbId,
+            String region,
+            String language,
+            TvDetailsReader tvDetailsReader,
+            SeasonDetailsReader seasonDetailsReader,
+            TmdbLookupResult<TmdbTvFullDetails> preparedSeriesLookup,
+            Map<Integer, TmdbLookupResult<TmdbSeasonFullDetails>> preparedSeasonLookups) {
+        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = preparedSeriesLookup == null
+                ? tvDetailsReader.read(seriesTmdbId, language)
+                : preparedSeriesLookup;
         if (!(seriesLookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> series)
                 || series.value() == null) {
             return mapFailure(seriesLookup);
@@ -162,9 +215,11 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         boolean complete = details.seasons() != null
                 && regularSeasonSummariesAreTrustworthy(details);
         List<CompletableFuture<TmdbLookupResult<TmdbSeasonFullDetails>>> seasonFutures = expectedCounts.entrySet().stream()
-                .map(entry -> CompletableFuture.supplyAsync(
-                        () -> seasonDetailsReader.read(seriesTmdbId, entry.getKey(), language),
-                        tmdbSeasonFetchExecutor))
+                .map(entry -> preparedSeasonLookups.containsKey(entry.getKey())
+                        ? CompletableFuture.completedFuture(preparedSeasonLookups.get(entry.getKey()))
+                        : CompletableFuture.supplyAsync(
+                                () -> seasonDetailsReader.read(seriesTmdbId, entry.getKey(), language),
+                                tmdbSeasonFetchExecutor))
                 .toList();
         List<TmdbLookupResult<TmdbSeasonFullDetails>> seasonLookups = seasonFutures.stream()
                 .map(CompletableFuture::join)

@@ -17,6 +17,11 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.calendar.service.impl.CalendarScheduleProviderImpl;
+import com.watchwise.watchwise_api.content.service.impl.ContentScheduleReaderImpl;
+import com.watchwise.watchwise_api.diarycompletion.service.impl.CalendarCompletionScopeLoader;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
@@ -232,6 +237,12 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private CompletionScopeLoader completionScopeLoader;
+
+    @Mock
+    private CalendarScheduleProvider calendarScheduleProvider;
+
+    @Mock
+    private CalendarScheduleSynchronizer calendarScheduleSynchronizer;
 
     @Spy
     private CompletionCalculator completionCalculator = new CompletionCalculator();
@@ -3746,6 +3757,77 @@ class DiaryEntryServiceImplTest {
                 .isInstanceOf(TmdbUnavailableException.class);
 
         verify(contentService, never()).getOrCreateReference(any());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Reuse The Season Detail - When Loading A Completion Scope")
+    void shouldReuseTheSeasonDetailWhenLoadingACompletionScope() {
+        Map<Integer, Content> episodes = new HashMap<>();
+        for (int episodeNumber = 1; episodeNumber <= 24; episodeNumber++) {
+            episodes.put(episodeNumber, buildEpisode("900", 1, episodeNumber));
+        }
+        TmdbSeasonFullDetails details = new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                IntStream.rangeClosed(1, 24)
+                        .mapToObj(episodeNumber -> new TmdbEpisodeSummary(
+                                episodeNumber, "Episode " + episodeNumber, null, "2026-09-20", 45, null, null))
+                        .toList(), null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(details));
+        when(tmdbClient.getCalendarSeasonDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(details));
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        "900", "Series", null, null, null, null, null, "2020-01-01", List.of(), List.of(),
+                        List.of(), List.of(), List.of(new TmdbSeasonSummary(
+                                1, "Season 1", null, "2020-01-01", 24, null)), null, null, null, null,
+                        1, 24, List.of(), null, "Ended", null, List.of(), null)));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO ref = invocation.getArgument(0);
+                    Content episode = episodes.get(ref.episodeNumber());
+                    return new ContentRefDTO(episode.getId(), episode.getTmdbId(), ContentType.EPISODE,
+                            "900", 1, ref.episodeNumber(), null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(invocation -> episodes.values().stream()
+                        .filter(episode -> episode.getId().equals(invocation.getArgument(0)))
+                        .findFirst().orElseThrow());
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        CalendarScheduleProviderImpl actualScheduleProvider =
+                new CalendarScheduleProviderImpl(new ContentScheduleReaderImpl(tmdbClient, Runnable::run));
+        ReflectionTestUtils.setField(diaryEntryService, "calendarScheduleProvider", actualScheduleProvider);
+        ReflectionTestUtils.setField(diaryEntryService, "completionScopeLoader",
+                new CalendarCompletionScopeLoader(actualScheduleProvider));
+        UserActionExecutor.ActionResult[] receipt = new UserActionExecutor.ActionResult[1];
+        when(userActionExecutor.execute(eq(lucasId), eq(UserActionOperation.DIARY_BULK),
+                eq("season-detail-idempotency-key"), any(), any()))
+                .thenAnswer(invocation -> {
+                    if (receipt[0] == null) {
+                        receipt[0] = ((Supplier<UserActionExecutor.ActionResult>) invocation.getArgument(4)).get();
+                    }
+                    return receipt[0];
+                });
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, new DiaryEntryBulkCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
+                LocalDate.of(2026, 9, 21), 24, null, null), "season-detail-idempotency-key").events().stream()
+                .map(DiaryEntryCreationResultDTO.EventResult::entry).toList();
+        List<DiaryEntryResponseDTO> replay = diaryEntryService.createDiaryEntriesInBulk(lucasId, new DiaryEntryBulkCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
+                LocalDate.of(2026, 9, 21), 24, null, null), "season-detail-idempotency-key").events().stream()
+                .map(DiaryEntryCreationResultDTO.EventResult::entry).toList();
+
+        assertThat(result).hasSize(24);
+        assertThat(replay).hasSize(24);
+        verify(tmdbClient, times(1)).getSeasonFullDetails("900", 1, lucas.getPreferredLanguage());
+        verify(tmdbClient, never()).getCalendarSeasonDetails("900", 1, lucas.getPreferredLanguage());
+        verify(calendarScheduleSynchronizer, times(1)).synchronize(any(), any(Instant.class));
+        verify(diaryWatchCommandService, times(24)).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test

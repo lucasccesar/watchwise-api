@@ -144,6 +144,23 @@ class CalendarCompletionScopeLoaderTest {
     }
 
     @Test
+    @DisplayName("[load] Should Not Certify A Season From Cache - Until Its Schedule Is Persisted")
+    void shouldNotCertifyASeasonFromCacheUntilItsScheduleIsPersisted() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")),
+                episode(2, LocalDate.parse("2026-10-08")));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2, TmdbLookupOrigin.CACHE));
+
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2));
+        assertThat(result.scope().releaseComplete()).isFalse();
+    }
+
+    @Test
     @DisplayName("[load] Should Produce Stable Finite Target Metadata - When Season Data Is Unchanged")
     void shouldProduceStableFiniteTargetMetadataWhenSeasonDataIsUnchanged() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
@@ -428,8 +445,8 @@ class CalendarCompletionScopeLoaderTest {
     }
 
     @Test
-    @DisplayName("[load] Should Trust Complete Expected Coverage - When Series Data Came From Cache")
-    void shouldTrustCompleteExpectedCoverageWhenSeriesDataCameFromCache() {
+    @DisplayName("[load] Should Not Certify A Series From Cache - Until Its Schedule Is Persisted")
+    void shouldNotCertifyASeriesFromCacheUntilItsScheduleIsPersisted() {
         CalendarSeriesSchedule schedule = seriesSchedule(false,
                 season(1, 1, episode(3, LocalDate.parse("2026-10-01"))));
         when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
@@ -438,7 +455,7 @@ class CalendarCompletionScopeLoaderTest {
         VersionedCompletionScope result = loader.load(MediaReference.series(SERIES_ID), REGION, LANGUAGE, NOW);
 
         assertThat(result.scope().episodes()).containsExactly(new EpisodeCoordinate(1, 3));
-        assertThat(result.scope().releaseComplete()).isTrue();
+        assertThat(result.scope().releaseComplete()).isFalse();
     }
 
     @Test
@@ -549,9 +566,16 @@ class CalendarCompletionScopeLoaderTest {
     private static CalendarScheduleLookup.Found foundSeason(
             CalendarSeasonSchedule schedule,
             Integer expectedEpisodeCount) {
+        return foundSeason(schedule, expectedEpisodeCount, TmdbLookupOrigin.REMOTE);
+    }
+
+    private static CalendarScheduleLookup.Found foundSeason(
+            CalendarSeasonSchedule schedule,
+            Integer expectedEpisodeCount,
+            TmdbLookupOrigin origin) {
         return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
                 new CalendarScheduleKey(ContentType.SERIES, SERIES_ID, LANGUAGE, REGION),
-                TmdbLookupOrigin.REMOTE,
+                origin,
                 schedule,
                 expectedEpisodeCount));
     }

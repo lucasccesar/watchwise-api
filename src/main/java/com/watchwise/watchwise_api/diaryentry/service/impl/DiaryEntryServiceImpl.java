@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
@@ -30,6 +31,11 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
@@ -165,6 +171,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final DiaryWatchCommandService diaryWatchCommandService;
     private final UserActionExecutor userActionExecutor;
     private final CompletionScopeLoader completionScopeLoader;
+    private final CalendarScheduleProvider calendarScheduleProvider;
+    private final CalendarScheduleSynchronizer calendarScheduleSynchronizer;
     private final CompletionCalculator completionCalculator;
     private final ImportedWatchAssertionRepository importedWatchAssertionRepository;
     private final ImportLedger importLedger;
@@ -1721,11 +1729,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
     }
 
+    private record SeriesFinaleLookup(
+            int finaleSeasonNumber,
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup) {
+    }
+
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, LocalDate cutoff,
             List<WatchMutationResult> created, List<DiaryEntryCreationResultDTO.CompletionDescriptor> completions,
             ContentType requestedType, List<UUID> companionIds, String region, String language) {
-        TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
+        TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup = fetchSeasonLookup(seriesTmdbId, seasonNumber, language);
+        TmdbSeasonFullDetails seasonDetails = seasonLookup.toOptional().orElseThrow(this::tmdbUnavailable);
         int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber,
                 seasonDetails, cutoff);
         if (finaleEpisodeNumber > MAX_BULK_EPISODES && finaleEpisodeNumber > realSeasonEpisodeCount(seasonDetails)) {
@@ -1748,17 +1762,46 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         List<VersionedCompletionScope> completionScopes = new ArrayList<>();
         if (seasonNumber > 0) {
-            completionScopes.add(completionScopeLoader.load(
-                    MediaReference.season(seriesTmdbId, seasonNumber), region, language, Instant.now()));
+            TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+            Instant loadedAt = Instant.now();
             boolean isSeriesFinaleSeason = Boolean.TRUE.equals(isSeriesFinale)
                     || contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(
                             seriesTmdbId, ContentType.SEASON)
                             .map(Content::getSeasonNumber)
                             .filter(seasonNumber::equals)
                             .isPresent();
-            if (isSeriesFinaleSeason) {
+            CalendarScheduleLookup preparedLookup = calendarScheduleProvider.prepareSeason(
+                    seriesTmdbId, seasonNumber, region, language, seasonLookup, seriesLookup);
+            CalendarScheduleBatch preparedSeason = null;
+            if (preparedLookup == null) {
                 completionScopes.add(completionScopeLoader.load(
-                        MediaReference.series(seriesTmdbId), region, language, Instant.now()));
+                        MediaReference.season(seriesTmdbId, seasonNumber), region, language, loadedAt));
+            } else {
+                if (!(preparedLookup instanceof CalendarScheduleLookup.Found found)
+                        || found.batch() == null) {
+                    throw tmdbUnavailable();
+                }
+                preparedSeason = found.batch();
+                completionScopes.add(completionScopeLoader.loadPrepared(
+                        MediaReference.season(seriesTmdbId, seasonNumber), region, language, loadedAt, preparedSeason));
+                if (preparedSeason.origin() == TmdbLookupOrigin.REMOTE) {
+                    calendarScheduleSynchronizer.synchronize(preparedSeason, loadedAt);
+                }
+            }
+            if (isSeriesFinaleSeason) {
+                CalendarScheduleLookup preparedSeriesLookup = preparedSeason == null ? null
+                        : calendarScheduleProvider.loadSeriesPrepared(
+                                seriesTmdbId, region, language, seriesLookup, Map.of(seasonNumber, seasonLookup));
+                if (preparedSeriesLookup instanceof CalendarScheduleLookup.FoundSeries foundSeries) {
+                    completionScopes.add(completionScopeLoader.loadPreparedSeries(
+                            MediaReference.series(seriesTmdbId), region, language, loadedAt, foundSeries.schedule()));
+                    calendarScheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), loadedAt);
+                } else if (preparedSeriesLookup == null) {
+                    completionScopes.add(completionScopeLoader.load(
+                            MediaReference.series(seriesTmdbId), region, language, loadedAt));
+                } else {
+                    throw tmdbUnavailable();
+                }
             }
         }
 
@@ -1804,7 +1847,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private TmdbSeasonFullDetails fetchSeasonDetails(String seriesTmdbId, Integer seasonNumber, String language) {
-        return tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).toOptional().orElseThrow(this::tmdbUnavailable);
+        return fetchSeasonLookup(seriesTmdbId, seasonNumber, language).toOptional().orElseThrow(this::tmdbUnavailable);
+    }
+
+    private TmdbLookupResult<TmdbSeasonFullDetails> fetchSeasonLookup(
+            String seriesTmdbId, Integer seasonNumber, String language) {
+        return tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language);
     }
 
     private Map<Integer, Integer> episodeRuntimeMinutesFromTmdb(TmdbSeasonFullDetails season) {
@@ -2044,14 +2092,20 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, LocalDate cutoff,
             List<WatchMutationResult> created, List<DiaryEntryCreationResultDTO.CompletionDescriptor> completions,
             List<UUID> companionIds, String region, String language) {
-        int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber, cutoff, language);
+        SeriesFinaleLookup finaleLookup = resolveSeriesFinaleSeasonNumber(
+                seriesTmdbId, explicitFinaleSeasonNumber, cutoff, language);
+        int finaleSeasonNumber = finaleLookup.finaleSeasonNumber();
+        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = finaleLookup.seriesLookup();
 
         Map<Integer, TmdbSeasonFullDetails> seasonDetailsByNumber = new LinkedHashMap<>();
+        Map<Integer, TmdbLookupResult<TmdbSeasonFullDetails>> seasonLookupsByNumber = new LinkedHashMap<>();
         Map<Integer, Integer> finaleEpisodeNumbersBySeason = new LinkedHashMap<>();
         Map<Integer, List<Integer>> episodeNumbersBySeason = new LinkedHashMap<>();
         int totalEpisodes = 0;
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
-            TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
+            TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup = fetchSeasonLookup(seriesTmdbId, seasonNumber, language);
+            TmdbSeasonFullDetails seasonDetails = seasonLookup.toOptional().orElseThrow(this::tmdbUnavailable);
+            seasonLookupsByNumber.put(seasonNumber, seasonLookup);
             seasonDetailsByNumber.put(seasonNumber, seasonDetails);
             int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
                     explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails, cutoff);
@@ -2061,7 +2115,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             totalEpisodes += episodeNumbers.size();
         }
         if (totalEpisodes > MAX_BULK_EPISODES) {
-            TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional().orElseThrow(this::tmdbUnavailable);
+            TmdbTvFullDetails series = seriesLookup.toOptional().orElseThrow(this::tmdbUnavailable);
             Integer realEpisodeCount = series.numberOfEpisodes();
             if (realEpisodeCount == null || totalEpisodes > realEpisodeCount) {
                 throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES
@@ -2083,11 +2137,45 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason, episodeReferences);
 
         List<VersionedCompletionScope> completionScopes = new ArrayList<>();
-        completionScopes.add(completionScopeLoader.load(
-                MediaReference.series(seriesTmdbId), region, language, Instant.now()));
-        for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+        Instant loadedAt = Instant.now();
+        CalendarScheduleLookup preparedSeriesLookup = calendarScheduleProvider.loadSeriesPrepared(
+                seriesTmdbId, region, language, seriesLookup, seasonLookupsByNumber);
+        CalendarSeriesSchedule preparedSeries = preparedSeriesLookup instanceof CalendarScheduleLookup.FoundSeries found
+                ? found.schedule() : null;
+        if (preparedSeries != null) {
+            completionScopes.add(completionScopeLoader.loadPreparedSeries(
+                    MediaReference.series(seriesTmdbId), region, language, loadedAt, preparedSeries));
+            calendarScheduleSynchronizer.synchronizeSeries(preparedSeries, loadedAt);
+            Map<Integer, CalendarScheduleBatch> preparedSeasons = preparedSeries.seasons().stream()
+                    .filter(season -> season.schedule().seasonNumber() <= finaleSeasonNumber)
+                    .collect(Collectors.toMap(season -> season.schedule().seasonNumber(), season -> new CalendarScheduleBatch(
+                            preparedSeries.key(), season.origin(), loadedAt, null, season.schedule(),
+                            season.expectedEpisodeCount())));
+            for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+                CalendarScheduleBatch preparedSeason = preparedSeasons.get(seasonNumber);
+                if (preparedSeason == null) {
+                    completionScopes.add(completionScopeLoader.load(
+                            MediaReference.season(seriesTmdbId, seasonNumber), region, language, loadedAt));
+                    continue;
+                }
+                completionScopes.add(completionScopeLoader.loadPrepared(
+                        MediaReference.season(seriesTmdbId, seasonNumber), region, language, loadedAt, preparedSeason));
+            }
+        } else if (preparedSeriesLookup == null) {
             completionScopes.add(completionScopeLoader.load(
-                    MediaReference.season(seriesTmdbId, seasonNumber), region, language, Instant.now()));
+                    MediaReference.series(seriesTmdbId), region, language, loadedAt));
+            for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+                completionScopes.add(completionScopeLoader.load(
+                        MediaReference.season(seriesTmdbId, seasonNumber), region, language, loadedAt));
+            }
+        } else {
+            if (preparedSeriesLookup instanceof CalendarScheduleLookup.NotFound notFound) {
+                if (notFound.seasonNumber() != null) {
+                    throw new NotFoundException("Season " + notFound.seasonNumber() + " was not found");
+                }
+                throw new NotFoundException("Series was not found");
+            }
+            throw tmdbUnavailable();
         }
 
         userContentMutationLock.lock(userId);
@@ -2120,8 +2208,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return seasonFinaleEpisodeNumbers == null ? null : seasonFinaleEpisodeNumbers.get(seasonNumber);
     }
 
-    private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber, LocalDate cutoff, String language) {
-        Optional<TmdbTvFullDetails> series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional();
+    private SeriesFinaleLookup resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber, LocalDate cutoff, String language) {
+        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        Optional<TmdbTvFullDetails> series = seriesLookup.toOptional();
         Optional<Content> existingFinale = contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
         boolean hasParseableSeasonDates = series.map(TmdbTvFullDetails::seasons)
                 .map(this::hasParseableSeasonAirDates)
@@ -2132,14 +2221,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 || !hasParseableSeasonDates)) {
             Integer existingSeasonNumber = existingFinale.get().getSeasonNumber();
             if (existingSeasonNumber != null) {
-                return existingSeasonNumber;
+                return new SeriesFinaleLookup(existingSeasonNumber, seriesLookup);
             }
         }
 
         if (series.isPresent()) {
             int latestAiredSeasonNumber = latestAiredSeasonNumber(series.get().seasons(), cutoff);
             if (latestAiredSeasonNumber >= 1) {
-                return latestAiredSeasonNumber;
+                return new SeriesFinaleLookup(latestAiredSeasonNumber, seriesLookup);
             }
             if (hasParseableSeasonDates) {
                 throw new BadRequestException("No seasons in the series have been released by " + cutoff);
@@ -2156,7 +2245,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (realSeasonCount > 0 && explicitFinaleSeasonNumber > realSeasonCount) {
             throw new BadRequestException("finaleSeasonNumber exceeds the " + realSeasonCount + " seasons known by TMDB for this series");
         }
-        return explicitFinaleSeasonNumber;
+        return new SeriesFinaleLookup(explicitFinaleSeasonNumber, seriesLookup);
     }
 
     private LocalDate seasonAirDate(List<TmdbSeasonSummary> seasons, Integer seasonNumber) {
