@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.contentreview.service.impl.ContentReviewServiceImpl;
 import com.watchwise.watchwise_api.contentreview.service.impl.HistoricalOpinionRestoreServiceImpl;
@@ -52,6 +53,9 @@ class ContentReviewServiceTest {
 
     @Mock
     private ContentRatingRepository ratingRepository;
+
+    @Mock
+    private ContentRatingService contentRatingService;
 
     @Mock
     private UserContentMutationLock mutationLock;
@@ -117,7 +121,8 @@ class ContentReviewServiceTest {
 
         assertThat(historicalOpinionRestoreService.restore(UUID.randomUUID(), opinion, null)).isEmpty();
 
-        verifyNoInteractions(reviewRepository, ratingRepository, contentRepository, evidenceVerifier, mutationLock);
+        verifyNoInteractions(
+                reviewRepository, ratingRepository, contentRatingService, contentRepository, evidenceVerifier, mutationLock);
     }
 
     @Test

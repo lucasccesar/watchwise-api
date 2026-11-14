@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentrating.service.OpinionEvidenceService;
 import com.watchwise.watchwise_api.contentreview.dto.ContentReviewCreationDTO;
 import com.watchwise.watchwise_api.contentreview.dto.ContentReviewPatchDTO;
@@ -48,6 +49,7 @@ public class ContentReviewServiceImpl implements ContentReviewService {
 
     private final ContentReviewRepository reviewRepository;
     private final ContentRatingRepository ratingRepository;
+    private final ContentRatingService contentRatingService;
     private final ContentRepository contentRepository;
     private final OpinionEvidenceService opinionEvidenceService;
     private final UserContentMutationLock userContentMutationLock;
@@ -155,7 +157,13 @@ public class ContentReviewServiceImpl implements ContentReviewService {
         try {
             review = reviewRepository.saveAndFlush(review);
             if (creation.score() != null && publicationOrder.isNewLatest(review, existingPublicationBoundary)) {
-                updateCurrentRating(ownerId, content, rating, creation.score(), publishedAt);
+                contentRatingService.setForPass(
+                        ownerId,
+                        content.getId(),
+                        creation.score(),
+                        evidence.completedWatchNumber(),
+                        creation.expectedRatingVersion(),
+                        publishedAt);
             }
         } catch (DataIntegrityViolationException conflict) {
             throw conflict.getCause() instanceof ConstraintViolationException violation
@@ -177,29 +185,6 @@ public class ContentReviewServiceImpl implements ContentReviewService {
             boundary.add(ContentReview.builder().scoreAtPublication(1).build());
         }
         return boundary;
-    }
-
-    private void updateCurrentRating(
-            UUID ownerId,
-            Content content,
-            ContentRating rating,
-            Integer score,
-            Instant publishedAt) {
-        ContentRating updated = rating;
-        if (updated == null) {
-            updated = ContentRating.builder()
-                    .userId(ownerId)
-                    .contentId(content.getId())
-                    .contentType(content.getType())
-                    .score(score)
-                    .createdAt(publishedAt)
-                    .updatedAt(publishedAt)
-                    .build();
-        } else {
-            updated.setScore(score);
-            updated.setUpdatedAt(publishedAt);
-        }
-        ratingRepository.saveAndFlush(updated);
     }
 
     private String completionContext(Content content, OpinionEvidenceService.Snapshot evidence) {

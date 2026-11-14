@@ -60,7 +60,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.lenient;
 
-@SpringBootTest
+@SpringBootTest(classes = ContentReviewControllerIntegrationTest.TestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class ContentReviewSocialIntegrationTest {

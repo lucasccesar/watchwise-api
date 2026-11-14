@@ -152,7 +152,7 @@ public class OpinionImportApplier implements ImportUnitApplier {
             Optional<UUID> restoredRating = ratingService.restoreInitial(context.ownerId(), unit.content(),
                     unit.initialScore(), evidence.get(), preparedScope);
             if (restoredRating.isPresent()) {
-                targetType = "CONTENT_RATING";
+                targetType = "CONTENT_RATING_PASS";
                 targetId = restoredRating.get();
             } else if (unit.review() == null) {
                 if (replayRecord != null) {

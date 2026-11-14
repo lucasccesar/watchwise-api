@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.dto.ContentRatingResponseDTO;
+import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
@@ -39,9 +41,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -73,6 +77,7 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
     private final ContentRatingRepository contentRatingRepository;
+    private final ContentRatingService contentRatingService;
     private final ContentReviewRepository contentReviewRepository;
     private final DiaryCompletionService diaryCompletionService;
     private final UserContentMutationLock userContentMutationLock;
@@ -91,7 +96,7 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
             throw new IllegalStateException("Expected exactly 100 demo users before seeding opinions");
         }
 
-        Set<OpinionKey> existingRatings = loadExistingOpinionKeys("content_ratings", "");
+        Set<OpinionPassKey> existingRatings = loadExistingRatingPassKeys();
         Set<OpinionKey> existingReviews = loadExistingOpinionKeys(
                 "content_reviews", "AND opinion.publication_kind = 'WRITTEN_REVIEW'");
         int ratingsCreated = 0;
@@ -142,32 +147,52 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
                 resultSet.getObject("content_id", UUID.class)), DEMO_USERNAME_PREFIX));
     }
 
+    private Set<OpinionPassKey> loadExistingRatingPassKeys() {
+        String sql = "SELECT rating.user_id, rating.content_id, rating.watch_number " +
+                "FROM content_rating_passes rating JOIN users owner ON owner.id = rating.user_id " +
+                "WHERE position(? in owner.username) = 1 AND rating.watch_number IS NOT NULL";
+        return new HashSet<>(jdbcTemplate.query(sql, (resultSet, rowNumber) -> new OpinionPassKey(
+                resultSet.getObject("user_id", UUID.class),
+                resultSet.getObject("content_id", UUID.class),
+                resultSet.getInt("watch_number")), DEMO_USERNAME_PREFIX));
+    }
+
     private OpinionCounts saveUserOpinions(
             UUID userId,
             Instant now,
-            Set<OpinionKey> existingRatings,
+            Set<OpinionPassKey> existingRatings,
             Set<OpinionKey> existingReviews) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         return transaction.execute(status -> {
             userContentMutationLock.lock(userId);
             List<EligibleTarget> eligibleTargets = loadEligibleTargets(userId, now);
-            List<ContentRating> newRatings = new ArrayList<>();
+            List<UUID> contentIds = eligibleTargets.stream()
+                    .map(EligibleTarget::contentId)
+                    .distinct()
+                    .toList();
+            Map<UUID, Long> projectionVersions = contentIds.isEmpty() ? new java.util.HashMap<>()
+                    : contentRatingRepository.findByUserIdAndContentIdIn(userId, contentIds).stream()
+                            .collect(Collectors.toMap(ContentRating::getContentId, ContentRating::getVersion,
+                                    (existing, ignored) -> existing, java.util.HashMap::new));
             List<ContentReview> newReviews = new ArrayList<>();
+            int ratingsCreated = 0;
 
             for (EligibleTarget target : eligibleTargets) {
-                OpinionKey key = new OpinionKey(userId, target.contentId());
-                if (!existingRatings.contains(key)) {
-                    newRatings.add(ContentRating.builder()
-                            .userId(userId)
-                            .contentId(target.contentId())
-                            .contentType(target.contentType())
-                            .score(random.nextInt(10) + 1)
-                            .createdAt(now)
-                            .updatedAt(now)
-                            .build());
-                    existingRatings.add(key);
+                OpinionPassKey ratingKey = new OpinionPassKey(userId, target.contentId(), target.watchNumber());
+                if (!existingRatings.contains(ratingKey)) {
+                    ContentRatingResponseDTO current = contentRatingService.setForPass(
+                            userId,
+                            target.contentId(),
+                            random.nextInt(10) + 1,
+                            target.watchNumber(),
+                            projectionVersions.get(target.contentId()),
+                            now);
+                    projectionVersions.put(target.contentId(), current.version());
+                    existingRatings.add(ratingKey);
+                    ratingsCreated++;
                 }
 
+                OpinionKey key = new OpinionKey(userId, target.contentId());
                 if (existingReviews.contains(key) || random.nextInt(100) >= REVIEW_PERCENTAGE) continue;
                 try {
                     String context = objectMapper.writeValueAsString(new CompletionContext(
@@ -200,10 +225,9 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
                 }
             }
 
-            if (!newRatings.isEmpty()) contentRatingRepository.saveAllAndFlush(newRatings);
             if (!newReviews.isEmpty()) contentReviewRepository.saveAllAndFlush(newReviews);
             entityManager.clear();
-            return new OpinionCounts(newRatings.size(), newReviews.size(), eligibleTargets.size());
+            return new OpinionCounts(ratingsCreated, newReviews.size(), eligibleTargets.size());
         });
     }
 
@@ -446,6 +470,7 @@ public class DemoContentOpinionsSeeder implements ApplicationRunner {
     }
 
     private record OpinionKey(UUID userId, UUID contentId) {}
+    private record OpinionPassKey(UUID userId, UUID contentId, Integer watchNumber) {}
     private record EligibleTarget(
             UUID contentId,
             ContentType contentType,

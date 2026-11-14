@@ -54,7 +54,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest(properties = {
+@SpringBootTest(classes = com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class, properties = {
         "spring.docker.compose.enabled=false",
         "app.import.worker.enabled=false",
         "app.import.cleanup.enabled=false"

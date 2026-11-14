@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -51,6 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.import.worker.enabled=false",
         "app.import.cleanup.enabled=false"
 })
+@SpringBootTest(classes = com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class)
 class SingleFileImportControllerIntegrationTest extends PicksDomainIntegrationSupport {
     @Autowired private ImportWorker worker;
     @Autowired private ImportLimits limits;

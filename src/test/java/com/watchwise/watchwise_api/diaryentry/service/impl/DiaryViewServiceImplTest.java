@@ -2,11 +2,15 @@ package com.watchwise.watchwise_api.diaryentry.service.impl;
 
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRatingPass;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingPassRepository;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.diaryentry.dto.*;
@@ -44,6 +48,7 @@ class DiaryViewServiceImplTest {
     @Mock ContentMapper contentMapper;
     @Mock ContentCardAssembler contentCardAssembler;
     @Mock ContentRatingRepository contentRatingRepository;
+    @Mock ContentRatingPassRepository contentRatingPassRepository;
     @Mock ContentReviewRepository contentReviewRepository;
     @Mock PageRequestFactory pageRequestFactory;
     @InjectMocks DiaryViewServiceImpl service;
@@ -58,6 +63,57 @@ class DiaryViewServiceImplTest {
                 null, null, true);
         assertThat(result).isEmpty();
         verify(diaryViewRepository, never()).findGroupedPage(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldUseRatingForEachDerivedCompletionPass() {
+        UUID owner = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        UUID passOneEntry = UUID.randomUUID();
+        UUID passTwoEntry = UUID.randomUUID();
+        Instant orderedAt = Instant.parse("2026-11-14T12:00:00Z");
+        LocalDate watchedDate = LocalDate.of(2026, 11, 13);
+        User user = User.builder().id(owner).preferredRegion("US").preferredLanguage("en-US").build();
+        Content content = Content.builder()
+                .id(contentId)
+                .tmdbId("tv-pass-history")
+                .type(ContentType.SERIES)
+                .build();
+        ContentRefDTO contentRef = new ContentRefDTO(
+                contentId, "tv-pass-history", ContentType.SERIES, null, null, null, null, null, null, null);
+        var passOne = new DiaryViewRepository.DiaryViewKey(
+                "DERIVED_COMPLETION", null, contentId, ContentType.SERIES, "tv-pass-history", null,
+                null, null, 1, passOneEntry, watchedDate, orderedAt, orderedAt, passOneEntry, null);
+        var passTwo = new DiaryViewRepository.DiaryViewKey(
+                "DERIVED_COMPLETION", null, contentId, ContentType.SERIES, "tv-pass-history", null,
+                null, null, 2, passTwoEntry, watchedDate, orderedAt.plusSeconds(1), orderedAt.plusSeconds(1),
+                passTwoEntry, null);
+        ContentRatingPass passOneRating = ContentRatingPass.builder()
+                .id(UUID.randomUUID()).userId(owner).contentId(contentId).contentType(ContentType.SERIES)
+                .watchNumber(1).score(9).createdAt(orderedAt).updatedAt(orderedAt).build();
+        ContentRatingPass passTwoRating = ContentRatingPass.builder()
+                .id(UUID.randomUUID()).userId(owner).contentId(contentId).contentType(ContentType.SERIES)
+                .watchNumber(2).score(10).createdAt(orderedAt).updatedAt(orderedAt).build();
+        when(userRepository.findById(owner)).thenReturn(Optional.of(user));
+        when(pageRequestFactory.build(null, null)).thenReturn(PageRequest.of(0, 20));
+        when(diaryViewRepository.findPage(eq(owner), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(passOne, passTwo)));
+        when(contentRepository.findAllById(List.of(contentId))).thenReturn(List.of(content));
+        when(contentMapper.contentToContentRefDto(content)).thenReturn(contentRef);
+        when(contentRatingRepository.findByUserIdAndContentIdIn(owner, List.of(contentId)))
+                .thenReturn(List.of());
+        when(contentRatingPassRepository.findByUserIdAndContentIdInAndWatchNumberIn(
+                owner, List.of(contentId), List.of(1, 2)))
+                .thenReturn(List.of(passOneRating, passTwoRating));
+        when(contentReviewRepository.findByUserIdAndContentIdInOrderByCreatedAtDesc(owner, List.of(contentId)))
+                .thenReturn(List.of());
+
+        var result = service.getView(owner, owner,
+                new DiaryViewFilter(null, null, null, null, null, null), null, null);
+
+        assertThat(result.getContent())
+                .extracting(DiaryViewItemDTO::watchNumber, DiaryViewItemDTO::currentScore)
+                .containsExactly(tuple(1, 9), tuple(2, 10));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.contentrating.controller;
 
 import com.watchwise.watchwise_api.contentrating.dto.ContentRatingResponseDTO;
+import com.watchwise.watchwise_api.contentrating.dto.ContentRatingStateDTO;
 import com.watchwise.watchwise_api.contentrating.dto.ContentRatingUpsertDTO;
 import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import jakarta.validation.Valid;
@@ -9,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,6 +25,11 @@ import java.util.UUID;
 public class ContentRatingController {
 
     private final ContentRatingService contentRatingService;
+
+    @GetMapping("/{contentId}/my-rating")
+    public ResponseEntity<ContentRatingStateDTO> getCurrent(@PathVariable UUID contentId) {
+        return ResponseEntity.ok(contentRatingService.getCurrent(currentUserId(), contentId));
+    }
 
     @PutMapping("/{contentId}/my-rating")
     public ResponseEntity<ContentRatingResponseDTO> set(

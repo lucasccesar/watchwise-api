@@ -1,10 +1,18 @@
 package com.watchwise.watchwise_api.contentreview.controller;
 
+import com.watchwise.watchwise_api.WatchwiseApiApplication;
+import com.watchwise.watchwise_api.DemoDataSeedApplication;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingPassRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRatingPass;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
@@ -28,10 +36,18 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -47,9 +63,11 @@ import java.time.LocalDateTime;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -61,7 +79,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(classes = ContentReviewControllerIntegrationTest.TestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class ContentReviewControllerIntegrationTest {
@@ -93,6 +111,9 @@ class ContentReviewControllerIntegrationTest {
     private ContentRatingRepository contentRatingRepository;
 
     @Autowired
+    private ContentRatingPassRepository contentRatingPassRepository;
+
+    @Autowired
     private ContentReviewRepository contentReviewRepository;
 
     @Autowired
@@ -108,13 +129,43 @@ class ContentReviewControllerIntegrationTest {
     private UserSeriesHistoryStateRepository historyStateRepository;
 
     @Autowired
+    private CalendarScheduleCompletenessRepository completenessRepository;
+
+    @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private RequestThrottler requestThrottler;
 
     @MockitoBean
     private CompletionScopeLoader completionScopeLoader;
 
     @MockitoBean
     private LetterboxdItemCsvParserImpl letterboxdItemCsvParser;
+
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = WatchwiseApiApplication.class)
+    @EnableJpaRepositories(basePackageClasses = WatchwiseApiApplication.class)
+    @ComponentScan(
+            basePackages = "com.watchwise.watchwise_api",
+            excludeFilters = {
+                    @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                            classes = {
+                                    WatchwiseApiApplication.class,
+                                    DemoDataSeedApplication.class,
+                                    com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class
+                            }),
+                    @ComponentScan.Filter(type = FilterType.REGEX,
+                            pattern = "com\\.watchwise\\.watchwise_api\\..*Test\\$.*"),
+                    @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = TestConfiguration.class)
+            })
+    static class TestApplication { }
+
+    @BeforeEach
+    void resetRequestRateLimit() {
+        RequestThrottlerTestSupport.reset(requestThrottler);
+    }
 
     @Test
     void firstRatingWithoutWatchedEpisodeEvidenceIsRejected() throws Exception {
@@ -130,6 +181,57 @@ class ContentReviewControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(400));
 
         assertThat(contentRatingRepository.findByUserIdAndContentId(owner.id(), series.getId())).isEmpty();
+    }
+
+    @Test
+    void currentRatingReadReturnsOnlyTheCompactCurrentState() throws Exception {
+        RegisteredUser owner = registerUser();
+        Content series = persistSeries();
+        Instant now = Instant.now();
+        ContentRating current = contentRatingRepository.saveAndFlush(ContentRating.builder()
+                .userId(owner.id())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .score(9)
+                .watchNumber(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+
+        mockMvc.perform(get("/contents/{contentId}/my-rating", series.getId())
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.score").value(9))
+                .andExpect(jsonPath("$.version").value(current.getVersion()))
+                .andExpect(jsonPath("$.details").doesNotExist());
+    }
+
+    @Test
+    void currentRatingReadReturnsNullFieldsWhenNoRatingExists() throws Exception {
+        RegisteredUser owner = registerUser();
+        Content series = persistSeries();
+
+        mockMvc.perform(get("/contents/{contentId}/my-rating", series.getId())
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.score").value(nullValue()))
+                .andExpect(jsonPath("$.version").value(nullValue()));
+    }
+
+    @Test
+    void currentRatingReadRequiresAuthenticationAndLongFormContent() throws Exception {
+        UUID missingContentId = UUID.randomUUID();
+        mockMvc.perform(get("/contents/{contentId}/my-rating", missingContentId))
+                .andExpect(status().isUnauthorized());
+
+        RegisteredUser owner = registerUser();
+        Content movie = persistMovie();
+        mockMvc.perform(get("/contents/{contentId}/my-rating", movie.getId())
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/contents/{contentId}/my-rating", missingContentId)
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -150,6 +252,11 @@ class ContentReviewControllerIntegrationTest {
         assertThat(contentRatingRepository.findByUserIdAndContentId(owner.id(), ready.target().getId()))
                 .get()
                 .extracting(rating -> rating.getScore())
+                .isEqualTo(7);
+        assertThat(contentRatingPassRepository.findByUserIdAndContentIdAndWatchNumber(
+                owner.id(), ready.target().getId(), 1))
+                .get()
+                .extracting(ContentRatingPass::getScore)
                 .isEqualTo(7);
         assertThat(contentReviewRepository.findByUserIdAndContentIdOrderByCreatedAtDesc(
                 owner.id(), ready.target().getId())).hasSize(1);
@@ -343,6 +450,11 @@ class ContentReviewControllerIntegrationTest {
                 .get()
                 .extracting(ContentRating::getScore)
                 .isEqualTo(7);
+        assertThat(contentRatingPassRepository.findByUserIdAndContentIdAndWatchNumber(
+                owner.id(), ready.series().getId(), 1))
+                .get()
+                .extracting(ContentRatingPass::getScore)
+                .isEqualTo(7);
     }
 
     private RegisteredUser registerUser() throws Exception {
@@ -358,6 +470,16 @@ class ContentReviewControllerIntegrationTest {
         return contentRepository.saveAndFlush(Content.builder()
                 .tmdbId(UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .type(ContentType.SERIES)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private Content persistMovie() {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.saveAndFlush(Content.builder()
+                .tmdbId(UUID.randomUUID().toString().replace("-", "").substring(0, 12))
+                .type(ContentType.MOVIE)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -418,6 +540,28 @@ class ContentReviewControllerIntegrationTest {
                 .updatedAt(now)
                 .likesCount(0)
                 .build());
+        completenessRepository.saveAllAndFlush(List.of(
+                CalendarScheduleCompleteness.builder()
+                        .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                        .seriesTmdbId(series.getTmdbId())
+                        .region(user.getPreferredRegion())
+                        .language(user.getPreferredLanguage())
+                        .expectedEpisodeCount(1)
+                        .complete(true)
+                        .lastCheckedAt(now)
+                        .scopeVersion(0L)
+                        .build(),
+                CalendarScheduleCompleteness.builder()
+                        .groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                        .seriesTmdbId(series.getTmdbId())
+                        .seasonNumber(1)
+                        .region(user.getPreferredRegion())
+                        .language(user.getPreferredLanguage())
+                        .expectedEpisodeCount(1)
+                        .complete(true)
+                        .lastCheckedAt(now)
+                        .scopeVersion(0L)
+                        .build()));
         historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
                 .id(new UserSeriesHistoryState.Key(owner.id(), series.getTmdbId()))
                 .historyRevision(1L)

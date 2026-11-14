@@ -66,7 +66,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(properties = {
+@SpringBootTest(classes = com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class, properties = {
         "spring.docker.compose.enabled=false",
         "app.import.worker.enabled=false",
         "app.import.cleanup.enabled=false"

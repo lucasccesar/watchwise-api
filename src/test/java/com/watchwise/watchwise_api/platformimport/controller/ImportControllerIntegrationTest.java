@@ -70,7 +70,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = {
+@SpringBootTest(classes = com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class, properties = {
         "app.import.max-upload-bytes=4",
         "app.import.max-pending-jobs-per-user=2",
         "app.import.max-pending-upload-bytes-per-user=5",

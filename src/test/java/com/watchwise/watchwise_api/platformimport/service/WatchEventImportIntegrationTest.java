@@ -61,7 +61,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 
-@SpringBootTest(properties = {
+@SpringBootTest(classes = com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication.class, properties = {
         "spring.docker.compose.enabled=false",
         "app.import.worker.enabled=false",
         "app.import.cleanup.enabled=false"

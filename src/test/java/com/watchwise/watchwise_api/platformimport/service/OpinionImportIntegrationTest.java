@@ -1,11 +1,14 @@
 package com.watchwise.watchwise_api.platformimport.service;
 
+import com.watchwise.watchwise_api.platformimport.PlatformImportTestApplication;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRatingPass;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingPassRepository;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
@@ -69,7 +72,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(classes = PlatformImportTestApplication.class)
 @Testcontainers
 class OpinionImportIntegrationTest {
 
@@ -91,6 +94,7 @@ class OpinionImportIntegrationTest {
     @Autowired private ContentRepository contents;
     @Autowired private DiaryEntryRepository diaryEntries;
     @Autowired private ContentRatingRepository ratings;
+    @Autowired private ContentRatingPassRepository passRatings;
     @Autowired private ContentReviewRepository reviews;
     @Autowired private ImportedWatchAssertionRepository assertions;
     @Autowired private ImportJobRepository jobs;
@@ -110,7 +114,7 @@ class OpinionImportIntegrationTest {
     @BeforeEach
     void cleanDatabase() {
         jdbc.execute("TRUNCATE import_items, external_import_links, import_deferred_records, imported_watch_assertions, "
-                + "content_reviews, content_ratings, diary_entries, contents, users CASCADE");
+                + "content_reviews, content_rating_passes, content_ratings, diary_entries, contents, users CASCADE");
         when(completionScopeLoader.load(any(MediaReference.class), anyString(), anyString(), any(Instant.class)))
                 .thenReturn(new VersionedCompletionScope(new CompletionScope(MediaReference.series(SERIES_ID),
                         Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2)), true),
@@ -190,6 +194,18 @@ class OpinionImportIntegrationTest {
 
         assertThat(ratings.findByUserIdAndContentId(owner.getId(), series.getId()).orElseThrow().getScore())
                 .isEqualTo(8);
+        ContentRatingPass passRating = passRatings
+                .findByUserIdAndContentIdAndWatchNumber(owner.getId(), series.getId(), 1)
+                .orElseThrow();
+        assertThat(passRating.getScore()).isEqualTo(8);
+        assertThat(jdbc.queryForObject("SELECT target_type FROM external_import_links "
+                        + "WHERE user_id=? AND object_kind='rating' AND source_id=?", String.class,
+                owner.getId(), "initial-rating"))
+                .isEqualTo("CONTENT_RATING_PASS");
+        assertThat(jdbc.queryForObject("SELECT target_id FROM external_import_links "
+                        + "WHERE user_id=? AND object_kind='rating' AND source_id=?", UUID.class,
+                owner.getId(), "initial-rating"))
+                .isEqualTo(passRating.getId());
         assertThat(reviews.findByUserIdAndContentIdOrderByCreatedAtDesc(owner.getId(), series.getId())).isEmpty();
     }
 

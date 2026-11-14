@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.contentreview.repository;
 
+import com.watchwise.watchwise_api.WatchwiseApiApplication;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -26,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@ContextConfiguration(classes = WatchwiseApiApplication.class)
 class ContentOpinionSchemaTest {
     @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
     @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {
@@ -47,6 +50,22 @@ class ContentOpinionSchemaTest {
         assertThatThrownBy(() -> rating(owner, series, "SERIES", 0)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> rating(owner, series, "SERIES", 11)).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(jdbc.queryForObject("select count(*) from content_ratings where user_id = ?", Integer.class, owner)).isZero();
+    }
+
+    @Test
+    void allowsOneRatingPerOwnerContentPassAndOneLegacySnapshot() {
+        assertTableExists("content_rating_passes");
+        UUID owner = user();
+        UUID series = content("SERIES");
+        passRating(owner, series, 1, 9);
+        passRating(owner, series, 2, 10);
+
+        assertThatThrownBy(() -> passRating(owner, series, 2, 8))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        passRating(owner, series, null, 7);
+        assertThatThrownBy(() -> passRating(owner, series, null, 6))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test void createsPublicationOrderIndexForScoredReviewBoundaryQueries() {
@@ -118,6 +137,12 @@ class ContentOpinionSchemaTest {
         if (type.equals("SEASON")) jdbc.update("insert into contents(id,type,series_tmdb_id,season_number) values (?,'SEASON',?,1)", id, tmdbId);
         else jdbc.update("insert into contents(id,type,tmdb_id) values (?,'SERIES',?)", id, tmdbId);
         return id;
+    }
+
+    private void passRating(UUID owner, UUID content, Integer watchNumber, int score) {
+        jdbc.update("insert into content_rating_passes(id,user_id,content_id,content_type,watch_number,score) "
+                        + "values (?,?,?,'SERIES',?,?)",
+                UUID.randomUUID(), owner, content, watchNumber, score);
     }
 
     private void rating(UUID owner, UUID content, String type, int score) {

@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.service.ContentRatingService;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
@@ -40,6 +41,7 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
     private final ContentRepository contentRepository;
     private final ContentReviewRepository reviewRepository;
     private final ContentRatingRepository ratingRepository;
+    private final ContentRatingService contentRatingService;
     private final HistoricalViewingEvidenceVerifier evidenceVerifier;
     private final UserContentMutationLock userContentMutationLock;
     private final ReviewPublicationOrder publicationOrder;
@@ -123,7 +125,13 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         try {
             review = reviewRepository.saveAndFlush(review);
             if (updateCurrentRating) {
-                updateCurrentRating(ownerId, content, currentRating, opinion.scoreAtPublication(), now);
+                contentRatingService.setForPass(
+                        ownerId,
+                        content.getId(),
+                        opinion.scoreAtPublication(),
+                        opinion.watchNumber(),
+                        currentRating == null ? null : currentRating.getVersion(),
+                        now);
             }
         } catch (DataIntegrityViolationException conflict) {
             throw conflict.getCause() instanceof ConstraintViolationException violation
@@ -174,21 +182,4 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         }
     }
 
-    private void updateCurrentRating(
-            UUID ownerId, Content content, ContentRating rating, Integer score, Instant now) {
-        if (rating == null) {
-            rating = ContentRating.builder()
-                    .userId(ownerId)
-                    .contentId(content.getId())
-                    .contentType(content.getType())
-                    .score(score)
-                    .createdAt(now)
-                    .updatedAt(now)
-                    .build();
-        } else {
-            rating.setScore(score);
-            rating.setUpdatedAt(now);
-        }
-        ratingRepository.saveAndFlush(rating);
-    }
 }

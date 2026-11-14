@@ -15,7 +15,9 @@ import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRatingPass;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingPassRepository;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
@@ -54,6 +56,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     private final ContentMapper contentMapper;
     private final ContentCardAssembler contentCardAssembler;
     private final ContentRatingRepository contentRatingRepository;
+    private final ContentRatingPassRepository contentRatingPassRepository;
     private final ContentReviewRepository contentReviewRepository;
     private final PageRequestFactory pageRequestFactory;
 
@@ -164,11 +167,31 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
         Map<UUID, ContentRating> ratingsByContentId = contentRatingRepository
                 .findByUserIdAndContentIdIn(ownerId, contentIds).stream()
                 .collect(Collectors.toMap(ContentRating::getContentId, rating -> rating));
+        List<Integer> watchNumbers = keys.getContent().stream()
+                .filter(key -> "DERIVED_COMPLETION".equals(key.kind()))
+                .map(DiaryViewRepository.DiaryViewKey::watchNumber)
+                .filter(Objects::nonNull)
+                .filter(watchNumber -> watchNumber > 0)
+                .distinct()
+                .toList();
+        Map<PassKey, ContentRatingPass> passRatingsByKey = contentIds.isEmpty() || watchNumbers.isEmpty()
+                ? Map.of()
+                : contentRatingPassRepository.findByUserIdAndContentIdInAndWatchNumberIn(
+                                ownerId, contentIds, watchNumbers).stream()
+                        .collect(Collectors.toMap(
+                                rating -> new PassKey(rating.getContentId(), rating.getWatchNumber()),
+                                Function.identity()));
         Map<UUID, List<ContentReview>> reviewsByContentId = contentReviewRepository
                 .findByUserIdAndContentIdInOrderByCreatedAtDesc(ownerId, contentIds).stream()
                 .collect(Collectors.groupingBy(ContentReview::getContentId));
         return keys.map(key -> {
             List<ContentReview> reviews = reviewsForKey(key, reviewsByContentId);
+            ContentRatingPass passRating = "DERIVED_COMPLETION".equals(key.kind())
+                    ? passRatingsByKey.get(new PassKey(key.contentId(), key.watchNumber()))
+                    : null;
+            Integer currentScore = passRating != null
+                    ? passRating.getScore()
+                    : key.score() != null ? key.score() : ratingScore(ratingsByContentId.get(key.contentId()));
             return new DiaryViewItemDTO(
                 DiaryViewItemDTO.Kind.valueOf(key.kind()),
                 "PERSISTED_ENTRY".equals(key.kind()) ? key.targetId() : null,
@@ -180,7 +203,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                 key.anchorEntryId(),
                 key.watchedDate(),
                 key.orderedAt(),
-                key.score() != null ? key.score() : ratingScore(ratingsByContentId.get(key.contentId())),
+                currentScore,
                 ratingVersion(ratingsByContentId.get(key.contentId())),
                 reviews.stream()
                         .limit(3)
@@ -221,6 +244,8 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     private Long ratingVersion(ContentRating rating) {
         return rating == null ? null : rating.getVersion();
     }
+
+    private record PassKey(UUID contentId, Integer watchNumber) { }
 
     private DiaryViewReviewPreviewDTO toReviewPreview(ContentReview review) {
         return new DiaryViewReviewPreviewDTO(

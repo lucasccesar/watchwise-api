@@ -15,6 +15,7 @@ public class ContentRating {
     @Column(name = "content_id", nullable = false) private UUID contentId;
     @Enumerated(EnumType.STRING) @Column(name = "content_type", nullable = false) private ContentType contentType;
     @Setter @Column(nullable = false) private Integer score;
+    @Setter @Column(name = "watch_number") private Integer watchNumber;
     @Version private Long version;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Setter @Column(name = "updated_at", nullable = false) private Instant updatedAt;
