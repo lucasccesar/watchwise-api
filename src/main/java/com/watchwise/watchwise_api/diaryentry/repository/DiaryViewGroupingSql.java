@@ -52,6 +52,10 @@ final class DiaryViewGroupingSql {
                     SELECT n.*, r.group_size,
                            CASE r.type_rank WHEN 3 THEN 'SERIES' WHEN 2 THEN 'SEASON' ELSE 'EPISODE' END AS group_type,
                            sc.id AS series_content_id,
+                           CASE
+                               WHEN r.type_rank = 3 THEN sc.id
+                               WHEN r.type_rank = 2 AND COALESCE(m.season_count, 0) = 1 THEN season_content.id
+                           END AS rating_content_id,
                            COALESCE(m.episode_count, 0) AS episode_count,
                            COALESCE(m.season_count, 0) AS season_count,
                            COALESCE(m.season_numbers, ARRAY[]::integer[]) AS season_numbers,
@@ -59,6 +63,9 @@ final class DiaryViewGroupingSql {
                     FROM runs r JOIN numbered n ON n.position = r.first_position
                     LEFT JOIN metrics m ON m.run_id = r.run_id
                     LEFT JOIN contents sc ON sc.type = 'SERIES' AND sc.tmdb_id = n.series_key
+                    LEFT JOIN contents season_content ON season_content.type = 'SEASON'
+                                                     AND season_content.series_tmdb_id = n.series_key
+                                                     AND season_content.season_number = n.season_number
                 )
                 """;
     }

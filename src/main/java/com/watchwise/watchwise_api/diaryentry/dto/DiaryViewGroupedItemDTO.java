@@ -5,10 +5,12 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 public record DiaryViewGroupedItemDTO(
         String kind,
         ContentRefDTO content,
+        UUID ratingContentId,
         String backdropPath,
         ContentType groupType,
         int seasonCount,

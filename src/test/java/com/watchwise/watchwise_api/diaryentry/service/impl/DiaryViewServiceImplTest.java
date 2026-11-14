@@ -2,8 +2,11 @@ package com.watchwise.watchwise_api.diaryentry.service.impl;
 
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -127,7 +130,7 @@ class DiaryViewServiceImplTest {
         var key = new DiaryViewRepository.DiaryViewKey("PERSISTED_ENTRY", entry, UUID.randomUUID(),
                 ContentType.EPISODE, null, "1396", 1, 2, 1, entry, date, now, now, entry, null);
         var grouped = new DiaryViewRepository.GroupedDiaryViewKey(key, 2, ContentType.EPISODE,
-                date, null, "1396", 1, List.of(1), 2, 90L);
+                date, null, null, "1396", 1, List.of(1), 2, 90L);
         when(diaryViewRepository.findGroupedPage(eq(owner), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(grouped)));
         when(contentCardAssembler.assemble(anyCollection(), any(), any(ContentCardFieldSet.class)))
@@ -143,6 +146,76 @@ class DiaryViewServiceImplTest {
         });
         verify(userBlockAccessService).assertContentVisible(owner, owner);
         verify(userVisibilityService).assertCanView(owner, owner);
+    }
+
+    @Test
+    void shouldExposeSeasonRatingTargetSeparatelyFromGroupedSeriesCard() {
+        UUID owner = UUID.randomUUID();
+        UUID seriesContentId = UUID.randomUUID();
+        UUID seasonContentId = UUID.randomUUID();
+        UUID entryId = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 11, 4);
+        Instant now = Instant.now();
+        Content series = Content.builder().id(seriesContentId).tmdbId("1396").type(ContentType.SERIES).build();
+        ContentRefDTO seriesReference = new ContentRefDTO(
+                seriesContentId, "1396", ContentType.SERIES, null, null, null, null, null, null, null);
+        var key = new DiaryViewRepository.DiaryViewKey("DERIVED_COMPLETION", null, seasonContentId,
+                ContentType.SEASON, null, "1396", 1, null, 1, entryId, date, now, now, entryId, 9);
+        var grouped = new DiaryViewRepository.GroupedDiaryViewKey(key, 3, ContentType.SEASON,
+                date, seriesContentId, seasonContentId, "1396", 1, List.of(1), 2, 90L);
+        ContentCardDTO seriesCard = new ContentCardDTO(
+                seriesContentId, ContentType.SERIES, "1396", null, null, null, "Series",
+                null, null, null, null, null, null, null, null, List.of(), null, null,
+                ContentPreviewStatus.AVAILABLE);
+        when(userRepository.findById(owner)).thenReturn(Optional.of(User.builder().id(owner).build()));
+        when(pageRequestFactory.build(null, null)).thenReturn(PageRequest.of(0, 20));
+        when(diaryViewRepository.findGroupedPage(eq(owner), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(grouped)));
+        when(contentRepository.findAllById(List.of(seriesContentId))).thenReturn(List.of(series));
+        when(contentMapper.contentToContentRefDto(series)).thenReturn(seriesReference);
+        when(contentCardAssembler.assemble(anyCollection(), any(), any(ContentCardFieldSet.class)))
+                .thenReturn(java.util.Map.of(new ContentCoordinate(ContentType.SERIES, "1396", null, null, null),
+                        seriesCard));
+
+        var result = service.getView(owner, owner, new DiaryViewFilter(null, null, null, null, null, null),
+                null, null, true);
+
+        assertThat(result.getContent()).singleElement().isInstanceOfSatisfying(DiaryViewGroupedItemDTO.class, item -> {
+            assertThat(item.content().id()).isEqualTo(seriesContentId);
+            assertThat(item.content().type()).isEqualTo(ContentType.SERIES);
+            assertThat(item.ratingContentId()).isEqualTo(seasonContentId);
+            assertThat(item.groupType()).isEqualTo(ContentType.SEASON);
+        });
+    }
+
+    @Test
+    void shouldKeepGroupedDiaryReadableWhenSeriesBackdropIsMissing() {
+        UUID owner = UUID.randomUUID();
+        UUID entry = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 11, 4);
+        Instant now = Instant.now();
+        var key = new DiaryViewRepository.DiaryViewKey("PERSISTED_ENTRY", entry, UUID.randomUUID(),
+                ContentType.EPISODE, null, "1396", 1, 2, 1, entry, date, now, now, entry, null);
+        var grouped = new DiaryViewRepository.GroupedDiaryViewKey(key, 2, ContentType.EPISODE,
+                date, null, null, "1396", 1, List.of(1), 2, 90L);
+        ContentCardDTO seriesCardWithoutBackdrop = new ContentCardDTO(
+                null, ContentType.SERIES, "1396", null, null, null,
+                "Series", null, null, null, null, null, null, null, null,
+                List.of(), null, null, ContentPreviewStatus.AVAILABLE);
+        when(userRepository.findById(owner)).thenReturn(Optional.of(User.builder().id(owner).build()));
+        when(pageRequestFactory.build(null, null)).thenReturn(PageRequest.of(0, 20));
+        when(diaryViewRepository.findGroupedPage(eq(owner), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(grouped)));
+        when(contentRepository.findAllById(List.of())).thenReturn(List.of());
+        when(contentCardAssembler.assemble(anyCollection(), any(), any(ContentCardFieldSet.class)))
+                .thenReturn(java.util.Map.of(new ContentCoordinate(ContentType.SERIES, "1396", null, null, null),
+                        seriesCardWithoutBackdrop));
+
+        var result = service.getView(owner, owner, new DiaryViewFilter(null, null, null, null, null, null),
+                null, null, true);
+
+        assertThat(result.getContent()).singleElement().isInstanceOfSatisfying(
+                DiaryViewGroupedItemDTO.class, item -> assertThat(item.backdropPath()).isNull());
     }
 
     @Test

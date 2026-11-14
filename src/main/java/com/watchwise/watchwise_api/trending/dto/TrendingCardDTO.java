@@ -6,9 +6,11 @@ import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 public record TrendingCardDTO(
         String tmdbId,
+        UUID contentId,
         MovieOrSeriesType type,
         String title,
         String posterUrl,
@@ -35,6 +37,7 @@ public record TrendingCardDTO(
             String posterUrl,
             String backdropPath,
             Integer year,
+            LocalDate releaseDate,
             List<String> genres,
             Double tmdbVoteAverage,
             Double communityAverageScore,
@@ -43,7 +46,26 @@ public record TrendingCardDTO(
             Integer numberOfSeasons,
             ContentCardViewerStateDTO viewerState,
             ContentPreviewStatus previewStatus) {
-        this(tmdbId, type, title, posterUrl, backdropPath, year, null, genres, tmdbVoteAverage,
+        this(tmdbId, null, type, title, posterUrl, backdropPath, year, releaseDate, genres, tmdbVoteAverage,
+                communityAverageScore, popularity, runtimeMinutes, numberOfSeasons, viewerState, previewStatus);
+    }
+
+    public TrendingCardDTO(
+            String tmdbId,
+            MovieOrSeriesType type,
+            String title,
+            String posterUrl,
+            String backdropPath,
+            Integer year,
+            List<String> genres,
+            Double tmdbVoteAverage,
+            Double communityAverageScore,
+            Double popularity,
+            Integer runtimeMinutes,
+            Integer numberOfSeasons,
+            ContentCardViewerStateDTO viewerState,
+            ContentPreviewStatus previewStatus) {
+        this(tmdbId, null, type, title, posterUrl, backdropPath, year, null, genres, tmdbVoteAverage,
                 communityAverageScore, popularity, runtimeMinutes, numberOfSeasons, viewerState, previewStatus);
     }
 
@@ -61,7 +83,7 @@ public record TrendingCardDTO(
             Integer numberOfSeasons,
             ContentCardViewerStateDTO viewerState,
             ContentPreviewStatus previewStatus) {
-        this(tmdbId, type, title, posterUrl, backdropPath, year, null, genres, tmdbVoteAverage, null,
+        this(tmdbId, null, type, title, posterUrl, backdropPath, year, null, genres, tmdbVoteAverage, null,
                 popularity, runtimeMinutes, numberOfSeasons, viewerState, previewStatus);
     }
 
@@ -78,7 +100,7 @@ public record TrendingCardDTO(
             Integer numberOfSeasons,
             ContentCardViewerStateDTO viewerState,
             ContentPreviewStatus previewStatus) {
-        this(tmdbId, type, title, posterUrl, null, year, null, genres, tmdbVoteAverage, null, popularity,
+        this(tmdbId, null, type, title, posterUrl, null, year, null, genres, tmdbVoteAverage, null, popularity,
                 runtimeMinutes, numberOfSeasons, viewerState, previewStatus);
     }
 }

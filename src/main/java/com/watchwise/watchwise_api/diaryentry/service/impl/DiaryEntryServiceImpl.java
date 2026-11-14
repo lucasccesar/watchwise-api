@@ -1089,7 +1089,44 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (actionResult.responseJson() == null) {
             throw new IllegalStateException("Bulk action receipt is missing its response payload");
         }
-        return actionObjectMapper.readValue(actionResult.responseJson(), DiaryEntryCreationResultDTO.class);
+        DiaryEntryCreationResultDTO response = actionObjectMapper.readValue(
+                actionResult.responseJson(), DiaryEntryCreationResultDTO.class);
+        return ensureBulkCompletionContentIds(response);
+    }
+
+    private DiaryEntryCreationResultDTO ensureBulkCompletionContentIds(DiaryEntryCreationResultDTO response) {
+        List<DiaryEntryCreationResultDTO.CompletionDescriptor> missingIds = response.completions().stream()
+                .filter(completion -> completion.contentId() == null)
+                .toList();
+        if (missingIds.isEmpty()) {
+            return response;
+        }
+
+        List<ContentCoordinate> coordinates = missingIds.stream()
+                .map(completion -> coordinate(completion.content()))
+                .distinct()
+                .toList();
+        Map<ContentCoordinate, UUID> contentIds = contentRepository.findAllByCoordinates(coordinates).stream()
+                .collect(Collectors.toMap(ContentCoordinate::from, Content::getId, (first, ignored) -> first));
+        List<DiaryEntryCreationResultDTO.CompletionDescriptor> completions = response.completions().stream()
+                .map(completion -> {
+                    if (completion.contentId() != null) {
+                        return completion;
+                    }
+                    UUID contentId = contentIds.get(coordinate(completion.content()));
+                    if (contentId == null) {
+                        throw new NotFoundException("Bulk completion Content reference not found");
+                    }
+                    return new DiaryEntryCreationResultDTO.CompletionDescriptor(
+                            completion.content(), contentId, completion.pass());
+                })
+                .toList();
+        return new DiaryEntryCreationResultDTO(response.entry(), response.events(), completions);
+    }
+
+    private ContentCoordinate coordinate(MediaReference reference) {
+        return new ContentCoordinate(reference.type(), reference.tmdbId(), reference.seriesTmdbId(),
+                reference.seasonNumber(), reference.episodeNumber());
     }
 
     private UserActionExecutor.ActionResult executeBulkAction(UUID userId, DiaryEntryBulkCreationDTO dto) {
@@ -1241,7 +1278,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private List<DiaryEntryCreationResultDTO.CompletionDescriptor> newCompletionDescriptors(
             List<VersionedCompletionScope> scopes,
             List<DiaryEntry> history,
-            Set<CompletionKey> completedBefore) {
+            Set<CompletionKey> completedBefore,
+            Map<MediaReference, UUID> contentIdsByReference) {
         List<EpisodeWatch> watches = toEpisodeWatches(history);
         Map<CompletionKey, DiaryEntryCreationResultDTO.CompletionDescriptor> newlyCompleted = new LinkedHashMap<>();
         for (VersionedCompletionScope versionedScope : scopes) {
@@ -1249,8 +1287,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             for (CompletedPass pass : completionCalculator.calculate(versionedScope.scope(), watches)) {
                 CompletionKey key = new CompletionKey(reference, pass.watchNumber());
                 if (!completedBefore.contains(key)) {
+                    UUID contentId = contentIdsByReference.get(reference);
+                    if (contentId == null) {
+                        throw new IllegalStateException("Completed bulk scope has no local Content ID");
+                    }
                     newlyCompleted.putIfAbsent(key,
-                            new DiaryEntryCreationResultDTO.CompletionDescriptor(reference, pass));
+                            new DiaryEntryCreationResultDTO.CompletionDescriptor(
+                                    reference, contentId, pass));
                 }
             }
         }
@@ -1700,8 +1743,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Map<EpisodeKey, ContentRefDTO> episodeReferences = resolveBulkEpisodeReferences(
                 seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
                 runtimesBySeason, seriesFinaleBySeason);
-        resolveBulkCompletionReferences(seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
-                episodeReferences);
+        Map<MediaReference, UUID> contentIdsByReference = resolveBulkCompletionReferences(
+                seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason, episodeReferences);
 
         List<VersionedCompletionScope> completionScopes = new ArrayList<>();
         if (seasonNumber > 0) {
@@ -1735,7 +1778,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             }
         }
         List<DiaryEntry> updatedHistory = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId);
-        completions.addAll(newCompletionDescriptors(completionScopes, updatedHistory, completedBefore));
+        completions.addAll(newCompletionDescriptors(
+                completionScopes, updatedHistory, completedBefore, contentIdsByReference));
     }
 
     private BulkPassPlan buildBulkPassPlan(List<EpisodeKey> eligibleEpisodes, List<DiaryEntry> history) {
@@ -1950,22 +1994,26 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return references;
     }
 
-    private void resolveBulkCompletionReferences(
+    private Map<MediaReference, UUID> resolveBulkCompletionReferences(
             String seriesTmdbId,
             Map<Integer, List<Integer>> episodeNumbersBySeason,
             Map<Integer, Integer> finaleEpisodeNumbersBySeason,
             Map<EpisodeKey, ContentRefDTO> episodeReferences) {
-        contentService.getOrCreateReference(new ContentRefCreationDTO(
+        Map<MediaReference, UUID> contentIdsByReference = new LinkedHashMap<>();
+        ContentRefDTO series = contentService.getOrCreateReference(new ContentRefCreationDTO(
                 seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+        contentIdsByReference.put(MediaReference.series(seriesTmdbId), series.id());
         episodeNumbersBySeason.forEach((seasonNumber, episodeNumbers) -> {
             Integer finaleEpisodeNumber = finaleEpisodeNumbersBySeason.get(seasonNumber);
             ContentRefDTO finaleEpisode = finaleEpisodeNumber == null
                     ? null
                     : episodeReferences.get(new EpisodeKey(seasonNumber, finaleEpisodeNumber));
             Boolean isSeriesFinale = finaleEpisode == null ? null : finaleEpisode.isSeriesFinale();
-            contentService.getOrCreateReference(new ContentRefCreationDTO(
+            ContentRefDTO season = contentService.getOrCreateReference(new ContentRefCreationDTO(
                     null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, isSeriesFinale));
+            contentIdsByReference.put(MediaReference.season(seriesTmdbId, seasonNumber), season.id());
         });
+        return Map.copyOf(contentIdsByReference);
     }
 
     private void resolveCompletionReferencesBeforeLock(Content content) {
@@ -2031,8 +2079,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Map<EpisodeKey, ContentRefDTO> episodeReferences = resolveBulkEpisodeReferences(
                 seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
                 runtimesBySeason, seriesFinaleBySeason);
-        resolveBulkCompletionReferences(seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
-                episodeReferences);
+        Map<MediaReference, UUID> contentIdsByReference = resolveBulkCompletionReferences(
+                seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason, episodeReferences);
 
         List<VersionedCompletionScope> completionScopes = new ArrayList<>();
         completionScopes.add(completionScopeLoader.load(
@@ -2064,7 +2112,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             }
         }
         List<DiaryEntry> updatedHistory = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId);
-        completions.addAll(newCompletionDescriptors(completionScopes, updatedHistory, completedBefore));
+        completions.addAll(newCompletionDescriptors(
+                completionScopes, updatedHistory, completedBefore, contentIdsByReference));
     }
 
     private Integer explicitFinaleEpisodeNumberFor(Map<Integer, Integer> seasonFinaleEpisodeNumbers, int seasonNumber) {

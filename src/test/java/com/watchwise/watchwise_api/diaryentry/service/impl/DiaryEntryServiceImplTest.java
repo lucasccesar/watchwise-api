@@ -38,6 +38,8 @@ import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diarycompletion.service.impl.DiaryProjectionInvalidator;
 import com.watchwise.watchwise_api.diarycompletion.model.CompletionScope;
+import com.watchwise.watchwise_api.diarycompletion.model.CompletedPass;
+import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
 import com.watchwise.watchwise_api.diarycompletion.service.CompletionCalculator;
 import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
@@ -330,6 +332,19 @@ class DiaryEntryServiceImplTest {
         lenient().when(contentRepository.findByTmdbIdAndType(any(), eq(ContentType.SERIES)))
                 .thenAnswer(invocation -> Optional.ofNullable(preparedSeriesReferences.get(invocation.getArgument(0))));
         lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO reference = invocation.getArgument(0);
+                    LocalDateTime now = LocalDateTime.now();
+                    return switch (reference.type()) {
+                        case SERIES -> new ContentRefDTO(UUID.randomUUID(), reference.tmdbId(), ContentType.SERIES,
+                                null, null, null, null, null, now, now);
+                        case SEASON -> new ContentRefDTO(UUID.randomUUID(), null, ContentType.SEASON,
+                                reference.seriesTmdbId(), reference.seasonNumber(), null,
+                                reference.isSeasonFinale(), reference.isSeriesFinale(), now, now);
+                        default -> null;
+                    };
+                });
         lenient().when(seriesProgressReadRepository.findCandidatesByUserId(
                         any(UUID.class), any(SeriesProgressReadRepository.SeriesProgressSort.class),
                         any(Sort.Direction.class), any(Pageable.class)))
@@ -3374,10 +3389,23 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.of(s2e1));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
 
+        UUID seriesContentId = UUID.randomUUID();
+        UUID seasonOneContentId = UUID.randomUUID();
+        UUID seasonTwoContentId = UUID.randomUUID();
         // Mock contentService and contentRepository to work together
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
-                .thenReturn(new ContentRefDTO(UUID.randomUUID(), "900", ContentType.SERIES, null, null, null, null, null,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO reference = inv.getArgument(0);
+                    return switch (reference.type()) {
+                        case SERIES -> new ContentRefDTO(seriesContentId, "900", ContentType.SERIES,
+                                null, null, null, null, null, LocalDateTime.now(), LocalDateTime.now());
+                        case SEASON -> new ContentRefDTO(
+                                reference.seasonNumber() == 1 ? seasonOneContentId : seasonTwoContentId,
+                                null, ContentType.SEASON, "900", reference.seasonNumber(), null,
+                                null, null, LocalDateTime.now(), LocalDateTime.now());
+                        default -> throw new AssertionError("Unexpected completion reference type");
+                    };
+                });
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO dto = inv.getArgument(0);
@@ -3410,15 +3438,61 @@ class DiaryEntryServiceImplTest {
                     DiaryEntry entry = inv.getArgument(0);
                     return buildResponseDto(entry);
                 });
+        when(completionScopeLoader.load(any(MediaReference.class), any(), any(), any(Instant.class)))
+                .thenAnswer(inv -> {
+                    MediaReference reference = inv.getArgument(0);
+                    Set<EpisodeCoordinate> episodes = switch (reference.type()) {
+                        case SERIES -> Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2),
+                                new EpisodeCoordinate(2, 1), new EpisodeCoordinate(2, 2));
+                        case SEASON -> reference.seasonNumber() == 1
+                                ? Set.of(new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2))
+                                : Set.of(new EpisodeCoordinate(2, 1), new EpisodeCoordinate(2, 2));
+                        default -> throw new AssertionError("Unexpected completion scope type");
+                    };
+                    return new VersionedCompletionScope(new CompletionScope(reference, episodes, true),
+                            "complete-scope", Instant.now().plusSeconds(60));
+                });
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2, null);
 
-        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto, "bulk-idempotency-key");
 
         // Should return 4 episodes (2 per season, not the season entries)
-        assertThat(result).hasSize(4);
-        assertThat(result).allMatch(entry -> entry.watchNumber() == 1);
+        assertThat(result.events()).hasSize(4);
+        assertThat(result.events()).allMatch(event -> event.entry().watchNumber() == 1);
+        assertThat(result.completions()).extracting(DiaryEntryCreationResultDTO.CompletionDescriptor::content)
+                .containsExactly(MediaReference.series("900"), MediaReference.season("900", 1),
+                        MediaReference.season("900", 2));
+        assertThat(result.completions()).extracting(completion -> recordValue(completion, "contentId"))
+                .containsExactly(seriesContentId, seasonOneContentId, seasonTwoContentId);
+    }
+
+    @Test
+    void shouldResolveLocalContentIdWhenReplayingLegacyBulkCompletionReceipt() throws Exception {
+        Content series = buildContent("900", ContentType.SERIES);
+        MediaReference reference = MediaReference.series("900");
+        DiaryEntryCreationResultDTO legacyResponse = new DiaryEntryCreationResultDTO(null, List.of(), List.of(
+                new DiaryEntryCreationResultDTO.CompletionDescriptor(reference, null,
+                        new CompletedPass(1, UUID.randomUUID(), LocalDate.now(), Instant.now()))));
+        when(userActionExecutor.execute(eq(lucasId), eq(UserActionOperation.DIARY_BULK), eq("legacy-key"),
+                org.mockito.ArgumentMatchers.anyString(), any(Supplier.class)))
+                .thenReturn(new UserActionExecutor.ActionResult(List.of(), 1L, "legacy-response"));
+        when(actionObjectMapper.readValue("legacy-response", DiaryEntryCreationResultDTO.class))
+                .thenReturn(legacyResponse);
+        when(contentRepository.findAllByCoordinates(List.of(
+                new ContentCoordinate(ContentType.SERIES, "900", null, null, null))))
+                .thenReturn(List.of(series));
+
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntriesInBulk(lucasId,
+                new DiaryEntryBulkCreationDTO(
+                        new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
+                        LocalDate.now(), null, 2, null),
+                "legacy-key");
+
+        assertThat(recordValue(result.completions().getFirst(), "contentId")).isEqualTo(series.getId());
+        verify(contentRepository).findAllByCoordinates(List.of(
+                new ContentCoordinate(ContentType.SERIES, "900", null, null, null)));
     }
 
     @Test
@@ -4463,6 +4537,16 @@ class DiaryEntryServiceImplTest {
                 entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
                 null, entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                 entry.getLikesCount(), false);
+    }
+
+    private Object recordValue(Object record, String name) {
+        try {
+            return record.getClass().getMethod(name).invoke(record);
+        } catch (NoSuchMethodException missingComponent) {
+            return null;
+        } catch (ReflectiveOperationException reflectionFailure) {
+            throw new AssertionError(reflectionFailure);
+        }
     }
 
     private DiaryEntryResponseDTO buildResponseDtoWithContent(DiaryEntry entry) {

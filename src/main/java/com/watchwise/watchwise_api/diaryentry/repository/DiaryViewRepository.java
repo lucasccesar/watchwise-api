@@ -24,7 +24,7 @@ public interface DiaryViewRepository {
             Instant now, DiaryViewFilter filter, Pageable pageable);
 
     record GroupedDiaryViewKey(DiaryViewKey item, long groupSize, ContentType groupType,
-            LocalDate groupDate, UUID seriesContentId, String seriesTmdbId,
+            LocalDate groupDate, UUID seriesContentId, UUID ratingContentId, String seriesTmdbId,
             int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes) { }
 
     record DiaryViewKey(

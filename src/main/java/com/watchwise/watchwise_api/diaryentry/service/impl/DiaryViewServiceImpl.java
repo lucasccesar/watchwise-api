@@ -36,6 +36,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -121,7 +122,8 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                 series = new ContentRefDTO(null, row.seriesTmdbId(), ContentType.SERIES,
                         null, null, null, null, null, null, null);
             }
-            return new DiaryViewGroupedItemDTO("GROUPED", series, backdropPaths.get(row.seriesTmdbId()),
+            return new DiaryViewGroupedItemDTO("GROUPED", series, row.ratingContentId(),
+                    backdropPaths.get(row.seriesTmdbId()),
                     row.groupType(), row.seasonCount(), row.seasonNumbers(),
                     row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
         });
@@ -147,9 +149,10 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                 specs,
                 new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), null, null),
                 ContentCardFieldSet.BASIC_METADATA);
-        return cards.entrySet().stream().collect(Collectors.toMap(
-                entry -> entry.getKey().tmdbId(),
-                entry -> entry.getValue().backdropPath()));
+        Map<String, String> backdropPaths = new LinkedHashMap<>();
+        cards.forEach((coordinate, card) -> backdropPaths.put(
+                coordinate.tmdbId(), card == null ? null : card.backdropPath()));
+        return backdropPaths;
     }
 
     private Page<DiaryViewItemDTO> enrich(UUID ownerId, Page<DiaryViewRepository.DiaryViewKey> keys) {

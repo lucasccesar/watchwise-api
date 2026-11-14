@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.diarycompletion.model.CompletedPass;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 public record DiaryEntryCreationResultDTO(
         DiaryEntryResponseDTO entry,
@@ -16,7 +17,7 @@ public record DiaryEntryCreationResultDTO(
         completions = List.copyOf(Objects.requireNonNull(completions, "completions are required"));
     }
 
-    public record CompletionDescriptor(MediaReference content, CompletedPass pass) {
+    public record CompletionDescriptor(MediaReference content, UUID contentId, CompletedPass pass) {
         public CompletionDescriptor {
             Objects.requireNonNull(content, "completion content is required");
             Objects.requireNonNull(pass, "completed pass is required");

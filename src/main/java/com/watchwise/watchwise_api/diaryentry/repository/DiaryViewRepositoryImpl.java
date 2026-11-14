@@ -68,7 +68,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 (rs, index) -> new GroupedDiaryViewKey(mapRow(rs, index), rs.getLong("group_size"),
                         ContentType.valueOf(rs.getString("group_type")),
                         rs.getObject("group_date", LocalDate.class), uuid(rs, "series_content_id"),
-                        rs.getString("series_key"), rs.getInt("season_count"),
+                        uuid(rs, "rating_content_id"), rs.getString("series_key"), rs.getInt("season_count"),
                         integerList(rs, "season_numbers"), rs.getInt("episode_count"),
                         rs.getObject("total_runtime", Long.class)));
         long total = jdbc.queryForObject(cte + " SELECT COUNT(*) FROM result", parameters, Long.class);

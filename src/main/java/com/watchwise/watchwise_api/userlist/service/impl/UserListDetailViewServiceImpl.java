@@ -248,6 +248,9 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
         ContentCardDTO card = item.content() == null
                 ? null
                 : cardsByCoordinate.get(coordinate(item.content()));
+        if (card != null && item.content() != null) {
+            card = card.withContentId(item.content().id());
+        }
         UserListNestedDetailDTO nestedList = item.childList() == null
                 ? null
                 : nestedDetails.get(item.childList().id());

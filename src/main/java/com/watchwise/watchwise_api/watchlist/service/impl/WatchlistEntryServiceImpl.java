@@ -188,15 +188,15 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
         Page<ViewCandidate> page = page(sorted, pageRequest);
         Map<ContentCoordinate, ContentCardDTO> pageCards = assemblePageCards(target, userId, page.getContent());
-        List<WatchlistCardDTO> cards = page.getContent().stream()
-                .map(candidate -> new WatchlistCardDTO(
-                        candidate.entry().getId(),
-                        pageCards.get(ContentCoordinate.from(candidate.entry().getContent())),
-                        candidate.entry().getPosition(),
-                        candidate.entry().getCreatedAt(),
-                        candidate.releaseDate(),
-                        candidate.status()))
-                .toList();
+        List<WatchlistCardDTO> cards = page.getContent().stream().map(candidate -> {
+            Content content = candidate.entry().getContent();
+            ContentCardDTO card = pageCards.get(ContentCoordinate.from(content));
+            if (card != null) {
+                card = card.withContentId(content.getId());
+            }
+            return new WatchlistCardDTO(candidate.entry().getId(), card, candidate.entry().getPosition(),
+                    candidate.entry().getCreatedAt(), candidate.releaseDate(), candidate.status());
+        }).toList();
 
         return new WatchlistViewResponseDTO(
                 cards,

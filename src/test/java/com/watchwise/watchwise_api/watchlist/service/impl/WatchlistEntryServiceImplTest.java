@@ -390,6 +390,29 @@ class WatchlistEntryServiceImplTest {
     }
 
     @Test
+    void shouldPopulateCardContentIdFromThePersistedWatchlistContent() {
+        Content series = content("1396", ContentType.SERIES, null, List.of("Drama"), 480);
+        WatchlistEntry entry = entry(series, ContentType.SERIES, 1);
+        stubViewCandidates(List.of(entry));
+        stubViewDates(List.of(entry), Map.of());
+        stubSeriesProgress(List.of(entry));
+        ContentCardDTO cardWithoutLocalId = new ContentCardDTO(
+                null, ContentType.SERIES, series.getTmdbId(), null, null, null, "Breaking Bad",
+                "/breaking-bad.jpg", null, null, 2008, null, 480, null, 5, null,
+                List.of("Drama"), null, null, ContentPreviewStatus.AVAILABLE);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(series), cardWithoutLocalId));
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "ASC", 1, 10);
+
+        assertThat(result.content()).singleElement()
+                .extracting(row -> row.card().contentId()).isEqualTo(series.getId());
+        assertThat(result.content().getFirst().id()).isNotEqualTo(series.getId());
+    }
+
+    @Test
     void shouldCountUpcomingAfterFilteringBeforePagination() {
         WatchlistEntry upcoming = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
         WatchlistEntry released = entry(content("680", ContentType.MOVIE, 90, List.of("Drama")), ContentType.MOVIE, 2);

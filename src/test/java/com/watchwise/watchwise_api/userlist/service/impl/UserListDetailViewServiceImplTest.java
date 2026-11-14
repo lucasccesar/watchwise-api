@@ -123,6 +123,22 @@ class UserListDetailViewServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getView] Should Populate The Card Content ID From The List Item - When Card Assembly Omits The Local ID")
+    void shouldPopulateCardContentIdFromTheListItemWhenCardAssemblyOmitsTheLocalId() {
+        ContentRefDTO series = contentRef("1396", ContentType.SERIES);
+        ContentCardDTO cardWithoutLocalId = card(coordinate(series), ContentPreviewStatus.AVAILABLE);
+        UserListItemResponseDTO listItem = item(series, 1);
+        givenPage(List.of(listItem));
+        when(userRepository.findById(VIEWER_ID)).thenReturn(Optional.of(viewer));
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(coordinate(series), cardWithoutLocalId));
+
+        UserListDetailViewResponseDTO result = service.getView(request(UserListItemPageMode.VISUAL));
+
+        assertEquals(series.id(), result.items().content().getFirst().card().contentId());
+    }
+
+    @Test
     @DisplayName("[getView] Should Preserve Partial And Unavailable Cards And Item State - When Card Assembly Returns Incomplete Previews")
     void shouldPreservePartialAndUnavailableCardsAndItemStateWhenCardAssemblyReturnsIncompletePreviews() {
         ContentRefDTO partialRef = contentRef("31", ContentType.MOVIE);

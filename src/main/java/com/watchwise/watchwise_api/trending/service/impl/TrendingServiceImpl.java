@@ -183,7 +183,8 @@ public class TrendingServiceImpl implements TrendingService {
                 ? null
                 : card.stats().averageScore();
         return new TrendingCardDTO(
-                movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImagePathBuilder.posterPath(posterPath),
+                movie.id(), card == null ? null : card.contentId(), MovieOrSeriesType.MOVIE, title,
+                TmdbImagePathBuilder.posterPath(posterPath),
                 backdropPath, year, releaseDate, card == null ? null : card.genres(), movie.voteAverage(),
                 communityAverageScore, movie.popularity(), runtime, null,
                 card == null ? null : card.viewerState(),
@@ -206,7 +207,8 @@ public class TrendingServiceImpl implements TrendingService {
                 ? null
                 : card.stats().averageScore();
         return new TrendingCardDTO(
-                series.id(), MovieOrSeriesType.SERIES, title, TmdbImagePathBuilder.posterPath(posterPath),
+                series.id(), card == null ? null : card.contentId(), MovieOrSeriesType.SERIES, title,
+                TmdbImagePathBuilder.posterPath(posterPath),
                 null, year, releaseDate, card == null ? null : card.genres(), series.voteAverage(),
                 communityAverageScore,
                 series.popularity(), runtime, numberOfSeasons, card == null ? null : card.viewerState(),

@@ -40,6 +40,13 @@ public record ContentCardDTO(
                 viewerState, previewStatus);
     }
 
+    public ContentCardDTO withContentId(UUID contentId) {
+        return new ContentCardDTO(contentId, type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber,
+                title, posterPath, backdropPath, customPosterUrl, releaseDate, releaseYear, tmdbVoteAverage,
+                runtimeMinutes, totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, stats,
+                viewerState, previewStatus);
+    }
+
     public ContentCardDTO(
             UUID contentId,
             ContentType type,

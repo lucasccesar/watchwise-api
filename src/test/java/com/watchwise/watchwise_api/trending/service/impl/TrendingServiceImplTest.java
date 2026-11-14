@@ -93,23 +93,25 @@ class TrendingServiceImplTest {
                                 "1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20",
                                 List.of(18, 80), 9.1, 456.7)),
                         3, 42)));
+        ContentCardDTO movieCard = card(ContentType.MOVIE, "603", "The Matrix", "/matrix.jpg", 136, 8.2);
+        ContentCardDTO seriesCard = card(ContentType.SERIES, "1396", "Breaking Bad", "/breaking-bad.jpg", 47, 9.0);
         stubCards(Map.of(
-                new ContentCoordinate(ContentType.MOVIE, "603", null, null, null),
-                card(ContentType.MOVIE, "603", "The Matrix", "/matrix.jpg", 136, 8.2),
-                new ContentCoordinate(ContentType.SERIES, "1396", null, null, null),
-                card(ContentType.SERIES, "1396", "Breaking Bad", "/breaking-bad.jpg", 47, 9.0)));
+                new ContentCoordinate(ContentType.MOVIE, "603", null, null, null), movieCard,
+                new ContentCoordinate(ContentType.SERIES, "1396", null, null, null), seriesCard));
 
         TrendingResponseDTO result = service.getTrending(viewerId, TrendingTimeWindow.DAY, 12);
 
+        assertThat(recordValue(result.movies().getFirst(), "contentId")).isEqualTo(movieCard.contentId());
+        assertThat(recordValue(result.series().getFirst(), "contentId")).isEqualTo(seriesCard.contentId());
         assertThat(result.movies()).containsExactly(new TrendingCardDTO(
-                "603", MovieOrSeriesType.MOVIE, "The Matrix",
+                "603", movieCard.contentId(), MovieOrSeriesType.MOVIE, "The Matrix",
                 "/matrix.jpg", "/matrix-backdrop.jpg", 1999,
                 LocalDate.of(1999, 3, 30),
                 List.of("Science Fiction", "Action"), 8.7, 8.2, 123.4, 136, null,
                 card(ContentType.MOVIE, "603", "The Matrix", "/matrix.jpg", 136, 8.2).viewerState(),
                 ContentPreviewStatus.AVAILABLE));
         assertThat(result.series()).containsExactly(new TrendingCardDTO(
-                "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
+                "1396", seriesCard.contentId(), MovieOrSeriesType.SERIES, "Breaking Bad",
                 "/breaking-bad.jpg", null, 2008,
                 LocalDate.of(2008, 1, 20),
                 List.of("Drama", "Crime"), 9.1, 9.0, 456.7, 47, 5,
@@ -167,7 +169,8 @@ class TrendingServiceImplTest {
                         "604", "The Matrix Reloaded", null, "2003-05-07", List.of(28), 7.2, 90.0)), 4, 80)));
         stubCards(Map.of(
                 new ContentCoordinate(ContentType.MOVIE, "604", null, null, null),
-                card(ContentType.MOVIE, "604", "The Matrix Reloaded", null, 136, 7.7)));
+                card(ContentType.MOVIE, "604", "The Matrix Reloaded", null, 136, 7.7,
+                        LocalDate.of(2003, 5, 7))));
 
         TrendingResponseDTO result = service.getTrendingSection(
                 viewerId, MovieOrSeriesType.MOVIE, TrendingTimeWindow.DAY, 2, 12);
@@ -276,6 +279,16 @@ class TrendingServiceImplTest {
                 .thenAnswer(invocation -> cards);
     }
 
+    private Object recordValue(Object record, String name) {
+        try {
+            return record.getClass().getMethod(name).invoke(record);
+        } catch (NoSuchMethodException missingComponent) {
+            return null;
+        } catch (ReflectiveOperationException reflectionFailure) {
+            throw new AssertionError(reflectionFailure);
+        }
+    }
+
     private ContentCardDTO card(
             ContentType type, String tmdbId, String title, String posterPath, Integer runtimeMinutes) {
         return card(type, tmdbId, title, posterPath, runtimeMinutes, null);
@@ -291,6 +304,17 @@ class TrendingServiceImplTest {
         LocalDate releaseDate = type == ContentType.SERIES
                 ? LocalDate.of(2008, 1, 20)
                 : LocalDate.of(1999, 3, 30);
+        return card(type, tmdbId, title, posterPath, runtimeMinutes, averageScore, releaseDate);
+    }
+
+    private ContentCardDTO card(
+            ContentType type,
+            String tmdbId,
+            String title,
+            String posterPath,
+            Integer runtimeMinutes,
+            Double averageScore,
+            LocalDate releaseDate) {
         Integer releaseYear = releaseDate.getYear();
         return new ContentCardDTO(
                 UUID.randomUUID(), type, tmdbId, null, null, null,
