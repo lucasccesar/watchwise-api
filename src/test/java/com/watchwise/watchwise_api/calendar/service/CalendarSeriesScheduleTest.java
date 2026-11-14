@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CalendarSeriesScheduleTest {
 
     @Test
-    void shouldTreatACompleteScheduleAsRemoteEvenWhenEverySeasonWasCached() {
+    void shouldDistinguishRemoteSummaryAuthorityFromCachedSeasonPayloads() {
         CalendarSeasonSchedule season = new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
                 List.of(new CalendarEpisodeSchedule(1, "One", null, null, null, null)));
 
@@ -24,6 +24,8 @@ class CalendarSeriesScheduleTest {
                 1,
                 true);
 
+        assertThat(schedule.hasRemoteSummaryAuthority()).isTrue();
+        assertThat(schedule.hasRemoteSeasonPayloads()).isFalse();
         assertThat(schedule.hasRemoteResults()).isTrue();
     }
 
@@ -50,6 +52,19 @@ class CalendarSeriesScheduleTest {
                 new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"),
                 List.of(new CalendarSeriesSchedule.Season(season, 1, TmdbLookupOrigin.REMOTE)),
                 Map.of(1, 1, 2, 1),
+                2,
+                true)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldRejectRemoteSummaryAuthorityWhenSeasonPayloadIsNotComplete() {
+        CalendarSeasonSchedule partialSeason = new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                List.of(new CalendarEpisodeSchedule(1, "One", null, null, null, null)));
+
+        assertThatThrownBy(() -> new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"),
+                List.of(new CalendarSeriesSchedule.Season(partialSeason, 2, TmdbLookupOrigin.CACHE)),
+                Map.of(1, 2),
                 2,
                 true)).isInstanceOf(IllegalArgumentException.class);
     }

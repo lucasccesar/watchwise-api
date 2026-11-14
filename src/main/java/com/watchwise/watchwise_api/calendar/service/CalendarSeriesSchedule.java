@@ -59,11 +59,21 @@ public record CalendarSeriesSchedule(
         if (completeSchedule && !seasonNumbers.equals(expectedEpisodeCountsBySeason.keySet())) {
             throw new IllegalArgumentException("Complete series schedules must represent every regular season");
         }
+        if (completeSchedule && seasons.stream().anyMatch(season -> !season.isFullyRepresented())) {
+            throw new IllegalArgumentException("Complete series schedules must fully represent every regular season");
+        }
+    }
+
+    public boolean hasRemoteSummaryAuthority() {
+        return completeSchedule;
+    }
+
+    public boolean hasRemoteSeasonPayloads() {
+        return seasons.stream().anyMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE);
     }
 
     public boolean hasRemoteResults() {
-        return completeSchedule
-                || seasons.stream().anyMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE);
+        return hasRemoteSummaryAuthority() || hasRemoteSeasonPayloads();
     }
 
     public record Season(CalendarSeasonSchedule schedule, int expectedEpisodeCount, TmdbLookupOrigin origin) {

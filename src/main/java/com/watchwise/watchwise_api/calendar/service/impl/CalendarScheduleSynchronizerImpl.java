@@ -73,7 +73,7 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
 
     @Override
     public void synchronizeSeries(CalendarSeriesSchedule schedule, Instant checkedAt) {
-        if (!schedule.hasRemoteResults()) {
+        if (!schedule.hasRemoteSummaryAuthority() && !schedule.hasRemoteSeasonPayloads()) {
             return;
         }
         CalendarSeriesSchedule checkedSchedule = new CalendarSeriesSchedule(

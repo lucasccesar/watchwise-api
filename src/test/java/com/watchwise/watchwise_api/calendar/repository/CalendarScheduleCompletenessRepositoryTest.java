@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.calendar.repository;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
@@ -9,6 +10,8 @@ import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
+import com.watchwise.watchwise_api.calendar.service.impl.CalendarScheduleSynchronizerImpl;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
@@ -311,6 +314,52 @@ class CalendarScheduleCompletenessRepositoryTest {
         assertThat(seasonAfter.getScopeVersion()).isEqualTo(seasonBefore.getScopeVersion());
         assertThat(seriesAfter.getComplete()).isTrue();
         assertThat(seriesAfter.getScopeVersion()).isEqualTo(seriesBefore.getScopeVersion());
+    }
+
+    @Test
+    @DisplayName("[reconcileSeries] Should Preserve Cached Season Facts Without Certifying Them - When Only Summary Is Remote")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void shouldPreserveCachedSeasonFactsWithoutCertifyingThemWhenOnlySummaryIsRemote() {
+        CalendarScheduleSnapshot existingSeason = snapshot(
+                CalendarScheduleSnapshot.EventType.EPISODE, null, "1396", "BR", "pt-BR").toBuilder()
+                .lastCheckedAt(LocalDateTime.now().minusHours(2))
+                .build();
+        CalendarScheduleSnapshot obsoleteSeason = existingSeason.toBuilder()
+                .id(null)
+                .seasonNumber(2)
+                .lastCheckedAt(LocalDateTime.of(2026, 9, 12, 10, 0))
+                .nextCheckAt(LocalDateTime.of(2026, 9, 13, 10, 0))
+                .build();
+        snapshotRepository.saveAllAndFlush(List.of(existingSeason, obsoleteSeason));
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule remoteSummaryWithCacheSeason = new CalendarSeriesSchedule(
+                key,
+                List.of(new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule(
+                        "1396", 1, "BR", "pt-BR", "Series", null,
+                        List.of(new CalendarEpisodeSchedule(1, "Untrusted cache title", LocalDate.of(2026, 10, 1),
+                                null, null, null))), 1, TmdbLookupOrigin.CACHE)),
+                Map.of(1, 1),
+                1,
+                true);
+        CalendarScheduleSynchronizer synchronizer = new CalendarScheduleSynchronizerImpl(
+                store, Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+
+        synchronizer.synchronizeSeries(remoteSummaryWithCacheSeason, Instant.now());
+        entityManager.clear();
+
+        List<CalendarScheduleSnapshot> seasonOne = snapshotRepository
+                .findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                        CalendarScheduleSnapshot.EventType.EPISODE, "1396", 1, "BR", "pt-BR");
+        assertThat(seasonOne).hasSize(1);
+        assertThat(seasonOne.getFirst().getTitle()).isEqualTo("Title");
+        assertThat(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR")).isEmpty();
+        assertThat(repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")).isEmpty();
+        CalendarScheduleCompleteness seriesMarker = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow();
+        assertThat(seriesMarker.getComplete()).isFalse();
     }
 
     @Test

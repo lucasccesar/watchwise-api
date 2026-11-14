@@ -206,7 +206,7 @@ public class CalendarScheduleSnapshotStore {
     }
 
     public boolean reconcileSeries(CalendarSeriesSchedule schedule, Instant checkedAt) {
-        if (!schedule.hasRemoteResults()) {
+        if (!schedule.hasRemoteSummaryAuthority() && !schedule.hasRemoteSeasonPayloads()) {
             return false;
         }
         try {

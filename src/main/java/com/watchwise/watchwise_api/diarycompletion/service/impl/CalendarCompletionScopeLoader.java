@@ -119,7 +119,10 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
             CalendarSeriesSchedule schedule) {
         LocalDate today = LocalDate.ofInstant(now, ZoneId.systemDefault());
         Set<EpisodeCoordinate> episodes = new LinkedHashSet<>();
-        boolean releaseComplete = schedule.completeSchedule() && isCompleteSeriesCalendar(schedule);
+        boolean releaseComplete = schedule.hasRemoteSummaryAuthority()
+                && schedule.seasons().stream()
+                .allMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE)
+                && isCompleteSeriesCalendar(schedule);
         boolean hasLaunchedRegularEpisode = false;
 
         for (CalendarSeriesSchedule.Season season : sortedSeasons(schedule.seasons())) {

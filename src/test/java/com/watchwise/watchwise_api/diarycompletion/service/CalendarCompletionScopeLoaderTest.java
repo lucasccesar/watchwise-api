@@ -161,6 +161,26 @@ class CalendarCompletionScopeLoaderTest {
     }
 
     @Test
+    @DisplayName("[loadPrepared] Should Not Certify A Prepared Cache Season - Until Its Schedule Is Persisted")
+    void shouldNotCertifyAPreparedCacheSeasonUntilItsScheduleIsPersisted() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")),
+                episode(2, LocalDate.parse("2026-10-08")));
+        CalendarScheduleBatch cachedBatch = CalendarScheduleBatch.season(
+                new CalendarScheduleKey(ContentType.SERIES, SERIES_ID, LANGUAGE, REGION),
+                TmdbLookupOrigin.CACHE,
+                directSeason,
+                2);
+
+        VersionedCompletionScope result = loader.loadPrepared(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW, cachedBatch);
+
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2));
+        assertThat(result.scope().releaseComplete()).isFalse();
+    }
+
+    @Test
     @DisplayName("[load] Should Produce Stable Finite Target Metadata - When Season Data Is Unchanged")
     void shouldProduceStableFiniteTargetMetadataWhenSeasonDataIsUnchanged() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
@@ -447,8 +467,15 @@ class CalendarCompletionScopeLoaderTest {
     @Test
     @DisplayName("[load] Should Not Certify A Series From Cache - Until Its Schedule Is Persisted")
     void shouldNotCertifyASeriesFromCacheUntilItsScheduleIsPersisted() {
-        CalendarSeriesSchedule schedule = seriesSchedule(false,
-                season(1, 1, episode(3, LocalDate.parse("2026-10-01"))));
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, SERIES_ID, LANGUAGE, REGION),
+                List.of(new CalendarSeriesSchedule.Season(
+                        seasonSchedule(1, episode(3, LocalDate.parse("2026-10-01"))),
+                        1,
+                        TmdbLookupOrigin.CACHE)),
+                Map.of(1, 1),
+                1,
+                true);
         when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
                 .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
 
