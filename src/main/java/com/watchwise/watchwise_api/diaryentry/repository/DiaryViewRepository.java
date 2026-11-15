@@ -30,7 +30,16 @@ public interface DiaryViewRepository {
             LocalDate groupDate, UUID seriesContentId, UUID ratingContentId, String seriesTmdbId,
             int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes,
             List<SeasonEpisodeCount> seasonEpisodeCounts, List<UUID> memberEntryIds, long representedItemCount,
-            DiaryViewCursorPosition nextPosition) { }
+            DiaryViewCursorPosition nextPosition) {
+
+        public GroupedDiaryViewKey(DiaryViewKey item, long groupSize, ContentType groupType,
+                LocalDate groupDate, UUID seriesContentId, UUID ratingContentId, String seriesTmdbId,
+                int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes) {
+            this(item, groupSize, groupType, groupDate, seriesContentId, ratingContentId, seriesTmdbId,
+                    seasonCount, seasonNumbers, episodeCount, totalRuntimeMinutes, List.of(), List.of(),
+                    groupSize + (groupType == ContentType.SEASON ? episodeCount : 0), null);
+        }
+    }
 
     record SeasonEpisodeCount(int seasonNumber, int episodeCount) { }
 
