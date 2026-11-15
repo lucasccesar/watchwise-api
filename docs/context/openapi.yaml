@@ -4167,6 +4167,30 @@ paths:
         "403": { description: Perfil privado e quem pede não é seguidor aceito }
         "404": { description: Usuário não encontrado }
 
+  /users/{userId}/diary/batch:
+    post:
+      tags: [Diary]
+      summary: Batch-load selected diary entries
+      description: Returns diary entries owned by userId in the requested ID order. Used by the grouped diary to hydrate only members of the current cursor page.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiaryEntriesBatchRequest" }
+      responses:
+        "200":
+          description: Matching diary entries in request order; foreign and missing IDs are omitted.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DiaryEntry" }
+        "400": { description: Empty or oversized ID list }
+        "403": { description: Profile is private or the users are blocked }
+        "404": { description: User not found }
+
   /users/{userId}/diary/view:
     get:
       tags: [Diary]
@@ -4182,15 +4206,24 @@ paths:
         evidence does not fail this read: the response keeps persisted diary events, omits
         unproven completions, and schedules a bounded background season-calendar repair.
         A later read can include the completion after its trusted schedule is persisted.
+        When grouped=true and hasReview is not true, the response uses cursor pagination,
+        returns at most 30 display items, and budgets at most 300 represented timeline items.
+        Groups are never split; one same-series group may exceed 300 and is returned whole,
+        alone if needed. Use nextCursor to continue.
       parameters:
         - name: grouped
           in: query
-          description: Group adjacent same-series, watchNumber and effective-day items before pagination. Ignored when hasReview=true. Singletons retain their current shape.
+          description: Group adjacent same-series, watchNumber and effective-day items. When enabled and hasReview is not true, use cursor instead of page. Singletons retain their current shape.
           schema: { type: boolean, default: false }
         - $ref: "#/components/parameters/userId"
         - $ref: "#/components/parameters/page"
+        - name: cursor
+          in: query
+          description: Opaque cursor from nextCursor in the previous grouped response. Omit it for the first response; reuse the same filters.
+          schema: { type: string }
         - name: size
           in: query
+          description: Requested display items; grouped responses are capped at 30. Defaults to 20.
           schema: { type: integer, minimum: 1, default: 20 }
         - name: type
           in: query
@@ -4211,23 +4244,48 @@ paths:
           in: query
           description: Applies persisted diary comments and non-blank opinion reviews matched to the derived row's watchNumber.
           schema: { type: boolean }
+        - name: seriesTmdbId
+          in: query
+          description: Limits grouped rows to this series before cursor selection.
+          schema: { type: string }
+        - name: watchedInTheater
+          in: query
+          description: Keeps a grouped row when any represented timeline event was watched in a theater.
+          schema: { type: boolean }
+        - name: sortBy
+          in: query
+          description: Sort key for cursor pages; rating sorts use the maximum selected event score, with unrated groups last.
+          schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/PageMeta"
-                  - type: object
-                    properties:
-                      content:
-                        type: array
-                        items:
-                          oneOf:
-                            - $ref: "#/components/schemas/DiaryViewItem"
-                            - $ref: "#/components/schemas/DiaryViewGroupedItem"
-        "400": { description: Invalid page, date range or score range }
+                oneOf:
+                  - allOf:
+                      - $ref: "#/components/schemas/PageMeta"
+                      - type: object
+                        required: [content]
+                        properties:
+                          content:
+                            type: array
+                            items:
+                              oneOf:
+                                - $ref: "#/components/schemas/DiaryViewItem"
+                                - $ref: "#/components/schemas/DiaryViewGroupedItem"
+                  - allOf:
+                      - $ref: "#/components/schemas/CursorPageMeta"
+                      - type: object
+                        required: [content]
+                        properties:
+                          content:
+                            type: array
+                            items:
+                              oneOf:
+                                - $ref: "#/components/schemas/DiaryViewItem"
+                                - $ref: "#/components/schemas/DiaryViewGroupedItem"
+        "400": { description: Invalid page, cursor, date range or score range }
         "401": { description: Authentication required }
         "403": { description: Profile is private or the users are blocked }
         "404": { description: User not found }
@@ -6525,13 +6583,10 @@ components:
     CursorPageMeta:
       type: object
       description: >
-        Pagination envelope for cursor-paginated endpoints (currently just
-        GET /feed). Deliberately not PageMeta: unlike offset pagination, a
-        feed receives constant inserts, so an offset/page number would skip
-        or duplicate items as new events land while the client scrolls (see
-        business-rules.md § Feed). No totalElements/totalPages — a COUNT
-        over the merged three-source query isn't worth paying for a number
-        nobody needs to jump to a specific page of a feed.
+        Pagination envelope for cursor-paginated endpoints, including GET /feed
+        and grouped GET /users/{userId}/diary/view. Deliberately not PageMeta:
+        cursors continue after the last complete returned item and do not expose
+        totalElements/totalPages.
       properties:
         size: { type: integer }
         nextCursor: { type: string, nullable: true, description: "Null when hasNext is false." }
@@ -9230,7 +9285,7 @@ components:
 
     DiaryViewItem:
       type: object
-      required: [kind, content, watchNumber, reviewPreviews, reviewCount]
+      required: [kind, content, watchNumber, reviewPreviews, reviewCount, relatedDiaryEntryIds]
       properties:
         kind: { type: string, enum: [PERSISTED_ENTRY, DERIVED_COMPLETION] }
         diaryEntryId: { type: string, format: uuid, nullable: true }
@@ -9247,18 +9302,37 @@ components:
           description: For derived rows, previews are limited to the same content and watchNumber; only written reviews with text are counted.
           items: { $ref: "#/components/schemas/DiaryViewReviewPreview" }
         reviewCount: { type: integer, format: int64, minimum: 0 }
+        relatedDiaryEntryIds:
+          type: array
+          description: IDs of episode diary entries represented by a derived completion row, for batched hydration.
+          items: { type: string, format: uuid }
+
+    DiaryEntriesBatchRequest:
+      type: object
+      required: [entryIds]
+      properties:
+        entryIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string, format: uuid }
 
     DiaryViewGroupedItem:
       type: object
-      required: [kind, content, backdropPath, groupType, seasonCount, seasonNumbers, episodeCount, groupDate, watchNumber]
+      required: [kind, content, ratingContentId, backdropPath, groupType, seasonCount, seasonNumbers, seasonEpisodeCounts, episodeCount, groupDate, watchNumber, memberEntryIds]
       description: >
         Summary of two or more adjacent same-series items sharing watchNumber and effective date
         (watchedDate/completedOn, falling back to entry/anchor creation date). content always references
         SERIES; groupType is the highest level present. Counts and duration use episode events in the
         sequence, without expanding completions to the catalog scope. With type=SEASON, hidden episode
         events are recovered from represented seasons for the same pass and day, preserving other filters.
-        Runtime is null when any qualifying episode has no runtime or none qualify. Page totals count
-        groups and singletons. Members, entry IDs and opinion details are omitted.
+        seasonEpisodeCounts reports actual watched episode events per represented season; completion markers
+        affect the grouped page's 300-item budget but not episodeCount or seasonEpisodeCounts. Runtime is null
+        when any qualifying episode has no runtime or none qualify. memberEntryIds contains episode diary IDs
+        for the frontend's batched hydration of only the returned page. `ratingContentId` identifies the
+        local Content eligible for a post-watch rating: the SERIES for a series group, or the SEASON only when a
+        season group represents exactly one season. It is null for episode groups, ambiguous multi-season groups,
+        or when the relevant local reference is unavailable.
       properties:
         kind: { type: string, enum: [GROUPED] }
         content:
@@ -9269,6 +9343,11 @@ components:
                 type: { type: string, enum: [SERIES] }
                 id: { type: string, format: uuid, nullable: true }
           description: Series reference; local id may be null when only episode references exist. No reference is persisted during this GET.
+        ratingContentId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Local rating target ID; null when the grouped run does not identify one rateable SERIES/SEASON.
         backdropPath:
           type: string
           nullable: true
@@ -9279,11 +9358,24 @@ components:
           type: array
           description: Distinct season numbers represented by the grouped episode events, sorted ascending.
           items: { type: integer, minimum: 0 }
+        seasonEpisodeCounts:
+          type: array
+          description: Actual watched episode-event count for each represented season, sorted by seasonNumber.
+          items:
+            type: object
+            required: [seasonNumber, episodeCount]
+            properties:
+              seasonNumber: { type: integer, minimum: 0 }
+              episodeCount: { type: integer, minimum: 0 }
         episodeCount: { type: integer, minimum: 0 }
         totalRuntimeMinutes: { type: integer, format: int64, nullable: true }
         groupDate: { type: string, format: date }
         watchNumber: { type: integer, minimum: 1 }
         orderedAt: { type: string, format: date-time, nullable: true }
+        memberEntryIds:
+          type: array
+          description: Diary IDs of episode events represented by this group, for batched page hydration.
+          items: { type: string, format: uuid }
 
     DiaryViewReviewPreview:
       type: object

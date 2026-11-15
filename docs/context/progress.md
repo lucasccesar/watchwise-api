@@ -5973,3 +5973,18 @@ O teste integrado usa Modern Family (TMDB 1421) com 24 episódios na primeira te
 SEASON no diário individual e `WATCHED` na página da temporada e no card da página da série; não cria
 projeção SERIES. A bateria focal passou com 321 testes, e as regressões de query-count, repositório e
 página também passaram.
+
+## 2026-11-15 — Orçamento e cursor para grupos do diário
+
+Quando `grouped=true` e `hasReview` não é true, `/diary/view` usa cursor com no máximo 30 linhas e
+orçamento de 300 itens representados por resposta. Os grupos são indivisíveis; o próximo grupo que
+ultrapassar o espaço restante passa inteiro para a próxima resposta. Um único grupo de uma série que
+ultrapasse 300 é permitido inteiro, ocupando sozinho a resposta quando necessário. A seleção é feita
+antes do enriquecimento; só os IDs dos episódios pertencentes às linhas retornadas são hidratados pelo
+novo POST `/users/{userId}/diary/batch`, em lotes de até 500.
+
+O resumo agrupado agora inclui `seasonEpisodeCounts` com o total de eventos EPISODE por temporada.
+Cursor e filtros abrangem tipo, datas, faixa de nota, série, cinema e ordenação. A interface carrega
+uma página por vez, retém somente seus dados e os cursores visitados; avançar carrega sob demanda e
+voltar reconsulta a página anterior sem acumular todos os episódios já vistos na memória. Maven compile
+e build Angular passaram; os testes automatizados não foram executados nesta alteração.
