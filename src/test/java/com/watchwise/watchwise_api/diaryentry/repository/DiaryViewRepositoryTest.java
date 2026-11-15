@@ -64,7 +64,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(classes = com.watchwise_test.WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class DiaryViewRepositoryTest {
@@ -159,9 +159,8 @@ class DiaryViewRepositoryTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andExpect(jsonPath("$.content.length()").value(2))
-                .andExpect(jsonPath("$.content[0].kind").value("PERSISTED_ENTRY"))
-                .andExpect(jsonPath("$.content[0].diaryEntryId").value(importedEpisode.getId().toString()))
-                .andExpect(jsonPath("$.content[0].content.type").value("EPISODE"))
+                .andExpect(jsonPath("$.content[0].kind").value("DERIVED_COMPLETION"))
+                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
                 .andExpect(jsonPath("$.content[1].kind").value("DERIVED_COMPLETION"))
                 .andExpect(jsonPath("$.content[1].content.type").value("SEASON"))
                 .andExpect(jsonPath("$.content[1].completionKey").value("SEASON:1396:1:pass:1"));
@@ -173,8 +172,9 @@ class DiaryViewRepositoryTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andExpect(jsonPath("$.content.length()").value(2))
-                .andExpect(jsonPath("$.content[0].kind").value("DERIVED_COMPLETION"))
-                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.content[0].kind").value("PERSISTED_ENTRY"))
+                .andExpect(jsonPath("$.content[0].diaryEntryId").value(importedEpisode.getId().toString()))
+                .andExpect(jsonPath("$.content[0].content.type").value("EPISODE"))
                 .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"))
                 .andExpect(jsonPath("$.content[1].content.type").value("MOVIE"));
         mockMvc.perform(get("/users/{userId}/diary/view", owner.id())

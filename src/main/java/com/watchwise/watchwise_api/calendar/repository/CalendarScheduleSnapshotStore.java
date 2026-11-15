@@ -198,12 +198,19 @@ public class CalendarScheduleSnapshotStore {
     }
 
     public boolean reconcileSeason(CalendarSeasonSchedule schedule, Instant checkedAt) {
+        return reconcileSeasonWithStatus(schedule, checkedAt).factsChanged();
+    }
+
+    public SeasonReconciliationResult reconcileSeasonWithStatus(
+            CalendarSeasonSchedule schedule, Instant checkedAt) {
         try {
             return reconcileSeasonInNewTransaction(schedule, checkedAt);
         } catch (DataIntegrityViolationException firstConflict) {
             return reconcileSeasonInNewTransaction(schedule, checkedAt);
         }
     }
+
+    public record SeasonReconciliationResult(boolean accepted, boolean factsChanged) { }
 
     public boolean reconcileSeries(CalendarSeriesSchedule schedule, Instant checkedAt) {
         if (!schedule.hasRemoteSummaryAuthority() && !schedule.hasRemoteSeasonPayloads()) {
@@ -362,14 +369,15 @@ public class CalendarScheduleSnapshotStore {
         });
     }
 
-    private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule, Instant checkedAt) {
+    private SeasonReconciliationResult reconcileSeasonInNewTransaction(
+            CalendarSeasonSchedule schedule, Instant checkedAt) {
         return newTransactionExecutor.runInNewTransaction(() -> {
             lockSeries(schedule.seriesTmdbId(), schedule.region(), schedule.language());
             return reconcileSeasonInTransaction(schedule, true, true, checkedAt);
         });
     }
 
-    private boolean reconcileSeasonInTransaction(
+    private SeasonReconciliationResult reconcileSeasonInTransaction(
             CalendarSeasonSchedule schedule,
             boolean invalidateCompleteness,
             boolean completePayload,
@@ -383,14 +391,14 @@ public class CalendarScheduleSnapshotStore {
                 .map(CalendarScheduleSnapshot::getLastCheckedAt)
                 .filter(Objects::nonNull)
                 .anyMatch(existingCheckedAt -> existingCheckedAt.isAfter(incomingCheckedAt))) {
-            return false;
+            return new SeasonReconciliationResult(false, false);
         }
         if (incomingCheckedAt != null && completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
                         schedule.seriesTmdbId(), schedule.region(), schedule.language()).stream()
                 .map(CalendarScheduleCompleteness::getLastCheckedAt)
                 .filter(Objects::nonNull)
                 .anyMatch(existingCheckedAt -> existingCheckedAt.isAfter(incomingCheckedAt))) {
-            return false;
+            return new SeasonReconciliationResult(false, false);
         }
         boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
@@ -437,7 +445,7 @@ public class CalendarScheduleSnapshotStore {
                         schedule.episodes().size(), true);
             }
         }
-        return changed;
+        return new SeasonReconciliationResult(true, changed);
     }
 
     private boolean reconcileSeriesInNewTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
@@ -502,7 +510,13 @@ public class CalendarScheduleSnapshotStore {
             boolean remotelyLoaded = season != null
                     && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE;
             if (remotelyLoaded && complete) {
-                boolean seasonChanged = reconcileSeasonInTransaction(season.schedule(), false, complete, checkedAt);
+                SeasonReconciliationResult seasonResult = reconcileSeasonInTransaction(
+                        season.schedule(), false, complete, checkedAt);
+                if (!seasonResult.accepted()) {
+                    allSeasonsComplete = false;
+                    continue;
+                }
+                boolean seasonChanged = seasonResult.factsChanged();
                 changed |= seasonChanged;
                 changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SEASON, schedule.key().tmdbId(),
                         expected.getKey(), schedule.key().preferredRegion(), schedule.key().preferredLanguage(),

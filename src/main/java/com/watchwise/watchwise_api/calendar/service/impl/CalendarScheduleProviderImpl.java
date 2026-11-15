@@ -53,6 +53,17 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
     }
 
     @Override
+    public CalendarScheduleLookup loadSeasonFresh(
+            String seriesTmdbId, Integer seasonNumber, String region, String language) {
+        if (seasonNumber == null || seasonNumber <= 0) {
+            return new CalendarScheduleLookup.NotFound(seasonNumber);
+        }
+        return mapSeason(scheduleReader.readCalendarSeasonFresh(
+                seriesTmdbId, seasonNumber, region, language),
+                seriesTmdbId, seasonNumber, region, language);
+    }
+
+    @Override
     public CalendarScheduleLookup prepareSeason(
             String seriesTmdbId,
             Integer seasonNumber,
@@ -157,9 +168,13 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 schedule.posterPath(),
                 schedule.network(),
                 schedule.episodes().stream().map(this::toCalendarEpisode).toList());
+        TmdbLookupOrigin authoritativeOrigin = found.origin() == TmdbLookupOrigin.REMOTE
+                        && found.seriesSummaryOrigin() == TmdbLookupOrigin.REMOTE
+                ? TmdbLookupOrigin.REMOTE
+                : TmdbLookupOrigin.CACHE;
         return new CalendarScheduleLookup.Found(new CalendarScheduleBatch(
                 new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region),
-                found.origin(), loadedAt, null, season, expectedSeasonEpisodeCount(schedule, seasonNumber)));
+                authoritativeOrigin, loadedAt, null, season, expectedSeasonEpisodeCount(schedule, seasonNumber)));
     }
 
     private Integer expectedSeasonEpisodeCount(ContentSchedule schedule, Integer seasonNumber) {
@@ -202,7 +217,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 seasons,
                 expectedCounts,
                 totalEpisodeCount,
-                found.origin() == TmdbLookupOrigin.REMOTE);
+                found.seriesSummaryOrigin() == TmdbLookupOrigin.REMOTE);
         return new CalendarScheduleLookup.FoundSeries(scheduleResult);
     }
 
@@ -230,7 +245,10 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 schedule.posterPath(),
                 schedule.network(),
                 sourceEpisodes.stream().map(this::toCalendarEpisode).toList());
-        TmdbLookupOrigin origin = found.seasonOriginsByNumber().getOrDefault(seasonNumber, found.origin());
+        TmdbLookupOrigin seasonOrigin = found.seasonOriginsByNumber().getOrDefault(seasonNumber, found.origin());
+        TmdbLookupOrigin origin = found.seriesSummaryOrigin() == TmdbLookupOrigin.REMOTE
+                ? seasonOrigin
+                : TmdbLookupOrigin.CACHE;
         return new CalendarSeriesSchedule.Season(season, expectedEpisodeCount, origin);
     }
 

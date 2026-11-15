@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
+import com.watchwise.watchwise_api.content.dto.ContentChildCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentNavigationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
@@ -15,6 +16,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.EpisodeNavigationContext;
 import com.watchwise.watchwise_api.content.service.ContentPageDetails;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import com.watchwise.watchwise_api.content.service.ContentPageService;
@@ -29,8 +31,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -40,7 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -100,7 +100,6 @@ class ContentPageServiceImplTest {
         ContentPageStatsDTO stats = new ContentPageStatsDTO(contentId, 8.5, 1, List.of(), 2, 3);
         ContentViewerStateDTO viewerState = viewerState();
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
-        Page<DiaryEntryRepository.ContentReviewKey> reviews = reviewPage(4);
         ContentCoordinate coordinate = ContentCoordinate.from(content);
 
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(content));
@@ -108,12 +107,11 @@ class ContentPageServiceImplTest {
         when(contentDetailsService.getDetails(contentId, VIEWER_ID)).thenReturn(details);
         when(contentPageMetadataService.getMetadata(content, viewer.getPreferredLanguage(), viewer.getPreferredRegion()))
                 .thenReturn(metadata);
-        when(contentPageStatsService.getStats(contentId)).thenReturn(stats);
+        when(contentPageStatsService.getStats(contentId, ContentType.MOVIE)).thenReturn(stats);
         when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of()))
                 .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, viewerState), Map.of()));
-        when(diaryEntryRepository.findContentReviewKeys(contentId, VIEWER_ID, PageRequest.of(0, 1)))
-                .thenReturn(reviews);
-        when(contentChildCardAssembler.assembleSections(details, null, coordinate, VIEWER_ID)).thenReturn(sections);
+        when(diaryEntryRepository.countVisibleContentReviews(contentId, VIEWER_ID)).thenReturn(4L);
+        when(contentChildCardAssembler.assembleSections(details, coordinate, VIEWER_ID)).thenReturn(sections);
         when(contentChildCardAssembler.assembleNavigation(details, null, coordinate, VIEWER_ID)).thenReturn(null);
 
         ContentPageDTO result = contentPageService.getPage(contentId, VIEWER_ID);
@@ -121,7 +119,7 @@ class ContentPageServiceImplTest {
         assertThat(result).isEqualTo(new ContentPageDTO(
                 details, metadata, stats, 4, viewerState, null, sections));
         verify(contentViewerStateService).resolve(VIEWER_ID, List.of(coordinate), Map.of());
-        verify(contentChildCardAssembler).assembleSections(details, null, coordinate, VIEWER_ID);
+        verify(contentChildCardAssembler).assembleSections(details, coordinate, VIEWER_ID);
         verify(contentChildCardAssembler).assembleNavigation(details, null, coordinate, VIEWER_ID);
         verifyNoMoreInteractions(contentPageMetadataService, contentPageStatsService, contentViewerStateService,
                 contentChildCardAssembler);
@@ -159,22 +157,30 @@ class ContentPageServiceImplTest {
     @DisplayName("[getPage] Should Use Season Summaries Without Loading The Parent Series")
     void shouldUseSeasonSummariesWithoutLoadingTheParentSeries() {
         UUID seasonId = UUID.randomUUID();
-        Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
+        Content season = content(ContentType.SEASON, seasonId, null, "1399", 1, null);
         ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON);
         List<SeasonSummaryDTO> siblingSeasons = List.of(
                 new SeasonSummaryDTO(1, "Season 1", "/season.jpg", null, 8, 8));
-        ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentCoordinate coordinate = ContentCoordinate.from(season);
         stubCommonPageReads(season, seasonDetails, coordinate);
-        when(contentDetailsService.getPageDetails(seasonId, VIEWER_ID, "en-US", "US"))
+        ContentViewerStateDTO seasonViewerState = viewerState(WatchStatus.WATCHED);
+        ContentChildCardDTO seasonCard = new ContentChildCardDTO(
+                seasonId, ContentType.SEASON, null, "1399", 1, 8, null,
+                "Season 1", null, "/season.jpg", null, null, null, seasonViewerState);
+        ContentPageSectionsDTO resolvedSections = new ContentPageSectionsDTO(
+                List.of(seasonCard), List.of(), List.of());
+        when(contentDetailsService.getPageDetails(season, VIEWER_ID, "en-US", "US"))
                 .thenReturn(new ContentPageDetails(seasonDetails, siblingSeasons));
         when(contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
-                seasonDetails, siblingSeasons, coordinate, VIEWER_ID, "US", "en-US")).thenReturn(sections);
+                seasonDetails, siblingSeasons, coordinate, VIEWER_ID, "US", "en-US"))
+                .thenReturn(resolvedSections);
         when(contentChildCardAssembler.assembleNavigation(seasonDetails, null, coordinate, VIEWER_ID)).thenReturn(null);
 
         ContentPageDTO result = contentPageService.getPage(seasonId, VIEWER_ID);
 
-        assertThat(result.sections()).isEqualTo(sections);
+        assertThat(result.sections()).isEqualTo(resolvedSections);
+        assertThat(result.viewerState()).isEqualTo(seasonViewerState);
+        org.mockito.Mockito.verifyNoInteractions(contentViewerStateService);
         verify(contentRepository, org.mockito.Mockito.never())
                 .findByTmdbIdAndType("1399", ContentType.SERIES);
         verify(contentDetailsService, org.mockito.Mockito.never()).getDetails(
@@ -184,31 +190,33 @@ class ContentPageServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getPage] Should Pass Parent Season Details To Episode Navigation")
-    void shouldPassParentSeasonDetailsToEpisodeNavigation() {
+    @DisplayName("[getPage] Should Pass The Resolved Episode Navigation Context To The Assembler")
+    void shouldPassResolvedEpisodeNavigationContextToAssembler() {
         UUID episodeId = UUID.randomUUID();
-        UUID seasonId = UUID.randomUUID();
         Content episode = content(ContentType.EPISODE, episodeId, null, "1399", 2, 3);
-        Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
         ContentDetailsDTO episodeDetails = details(episodeId, ContentType.EPISODE);
-        ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON);
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentNavigationDTO navigation = new ContentNavigationDTO("1399", 2, 3, 8, null, null);
         ContentCoordinate coordinate = ContentCoordinate.from(episode);
         stubCommonPageReads(episode, episodeDetails, coordinate);
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
-                "1399", 2, null, ContentType.SEASON)).thenReturn(Optional.of(season));
-        when(contentDetailsService.getDetails(seasonId, VIEWER_ID)).thenReturn(seasonDetails);
-        when(contentChildCardAssembler.assembleSections(episodeDetails, null, coordinate, VIEWER_ID))
+        doReturn(new ContentPageDetails(
+                        episodeDetails, List.of(), new EpisodeNavigationContext(8, null, null)))
+                .when(contentDetailsService).getPageDetails(episode, VIEWER_ID, "en-US", "US");
+        when(contentChildCardAssembler.assembleSections(episodeDetails, coordinate, VIEWER_ID))
                 .thenReturn(sections);
-        when(contentChildCardAssembler.assembleNavigation(episodeDetails, seasonDetails, coordinate, VIEWER_ID))
+        when(contentChildCardAssembler.assembleNavigation(
+                org.mockito.ArgumentMatchers.any(), eq(coordinate), eq(VIEWER_ID),
+                org.mockito.ArgumentMatchers.any(ContentViewerStateService.Resolution.class),
+                org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(navigation);
 
         ContentPageDTO result = contentPageService.getPage(episodeId, VIEWER_ID);
 
         assertThat(result.navigation()).isEqualTo(navigation);
-        verify(contentDetailsService).getDetails(seasonId, VIEWER_ID);
-        verify(contentChildCardAssembler).assembleNavigation(episodeDetails, seasonDetails, coordinate, VIEWER_ID);
+        verify(contentChildCardAssembler).assembleNavigation(
+                org.mockito.ArgumentMatchers.any(), eq(coordinate), eq(VIEWER_ID),
+                org.mockito.ArgumentMatchers.any(ContentViewerStateService.Resolution.class),
+                org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
@@ -217,22 +225,15 @@ class ContentPageServiceImplTest {
         UUID episodeId = UUID.randomUUID();
         UUID seasonId = UUID.randomUUID();
         Content episode = content(ContentType.EPISODE, episodeId, null, "1399", 2, 3);
-        Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
-        ContentDetailsDTO episodeDetails = detailsWithCrew(episodeId, ContentType.EPISODE, "/episode-still.jpg");
-        ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON, "/season-poster.jpg");
+        ContentDetailsDTO episodeDetails = detailsWithCrew(episodeId, ContentType.EPISODE, "/season-poster.jpg");
         ContentPageMetadataDTO metadata = new ContentPageMetadataDTO(null, null, null, null, null, List.of());
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentCoordinate coordinate = ContentCoordinate.from(episode);
         stubCommonPageReads(episode, episodeDetails, coordinate);
         when(contentPageMetadataService.getMetadata(eq(episode), eq("en-US"), eq("US")))
                 .thenReturn(metadata);
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
-                "1399", 2, null, ContentType.SEASON)).thenReturn(Optional.of(season));
-        when(contentDetailsService.getDetails(seasonId, VIEWER_ID)).thenReturn(seasonDetails);
-        when(contentChildCardAssembler.assembleSections(episodeDetails, null, coordinate, VIEWER_ID))
+        when(contentChildCardAssembler.assembleSections(episodeDetails, coordinate, VIEWER_ID))
                 .thenReturn(sections);
-        when(contentChildCardAssembler.assembleNavigation(episodeDetails, seasonDetails, coordinate, VIEWER_ID))
-                .thenReturn(null);
 
         ContentPageDTO result = contentPageService.getPage(episodeId, VIEWER_ID);
 
@@ -250,10 +251,8 @@ class ContentPageServiceImplTest {
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
         ContentCoordinate coordinate = ContentCoordinate.from(episode);
         stubCommonPageReads(episode, episodeDetails, coordinate);
-        when(contentChildCardAssembler.assembleSections(episodeDetails, null, coordinate, VIEWER_ID))
+        when(contentChildCardAssembler.assembleSections(episodeDetails, coordinate, VIEWER_ID))
                 .thenReturn(sections);
-        when(contentChildCardAssembler.assembleNavigation(episodeDetails, null, coordinate, VIEWER_ID))
-                .thenReturn(null);
 
         ContentPageDTO result = contentPageService.getPage(episodeId, VIEWER_ID);
 
@@ -267,21 +266,32 @@ class ContentPageServiceImplTest {
             Content content, ContentDetailsDTO details, ContentCoordinate coordinate) {
         when(contentRepository.findById(content.getId())).thenReturn(Optional.of(content));
         when(userRepository.findById(VIEWER_ID)).thenReturn(Optional.of(viewer()));
-        if (content.getType() == ContentType.SEASON) {
-            when(contentDetailsService.getPageDetails(content.getId(), VIEWER_ID, "en-US", "US"))
+        if (content.getType() == ContentType.EPISODE) {
+            lenient().when(contentDetailsService.getPageDetails(
+                    content, VIEWER_ID, "en-US", "US"))
                     .thenReturn(new ContentPageDetails(details, List.of()));
-        } else {
-            when(contentDetailsService.getDetails(content.getId(), VIEWER_ID)).thenReturn(details);
+        } else if (content.getType() != ContentType.SEASON) {
+            when(contentDetailsService.getPageDetails(
+                    content, VIEWER_ID, "en-US", "US"))
+                    .thenReturn(new ContentPageDetails(details, List.of()));
         }
         lenient().when(contentPageMetadataService.getMetadata(eq(content), eq("en-US"), eq("US")))
                 .thenReturn(new ContentPageMetadataDTO(null, null, null, null, null, List.of()));
-        when(contentPageStatsService.getStats(content.getId()))
-                .thenReturn(new ContentPageStatsDTO(content.getId(), null, 0, List.of(), 0, 0));
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of()))
-                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, viewerState()), Map.of()));
-        Page<DiaryEntryRepository.ContentReviewKey> reviews = reviewPage(0);
-        when(diaryEntryRepository.findContentReviewKeys(content.getId(), VIEWER_ID, PageRequest.of(0, 1)))
-                .thenReturn(reviews);
+        if (content.getType() != ContentType.EPISODE) {
+            when(contentPageStatsService.getStats(content.getId(), content.getType()))
+                    .thenReturn(new ContentPageStatsDTO(content.getId(), null, 0, List.of(), 0, 0));
+        }
+        if (content.getType() != ContentType.SEASON) {
+            when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of()))
+                    .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, viewerState()), Map.of()));
+        }
+        when(diaryEntryRepository.countVisibleContentReviews(content.getId(), VIEWER_ID)).thenReturn(0L);
+        if (content.getType() == ContentType.EPISODE) {
+            when(contentPageStatsService.resolveStats(
+                    eq(content.getId()), eq(content.getType()), org.mockito.ArgumentMatchers.anyCollection()))
+                    .thenReturn(new ContentPageStatsService.Resolution(
+                            new ContentPageStatsDTO(content.getId(), null, 0, List.of(), 0, 0), Map.of()));
+        }
     }
 
     private Content content(
@@ -323,15 +333,13 @@ class ContentPageServiceImplTest {
     }
 
     private ContentViewerStateDTO viewerState() {
+        return viewerState(WatchStatus.UNWATCHED);
+    }
+
+    private ContentViewerStateDTO viewerState(WatchStatus watchStatus) {
         return new ContentViewerStateDTO(
-                WatchStatus.UNWATCHED, null, null, null, null, null, 0, null,
+                watchStatus, null, null, null, null, null, 0, null,
                 false, null, false, null, List.of(), null, null);
     }
 
-    @SuppressWarnings("unchecked")
-    private Page<DiaryEntryRepository.ContentReviewKey> reviewPage(long totalElements) {
-        Page<DiaryEntryRepository.ContentReviewKey> page = mock(Page.class);
-        when(page.getTotalElements()).thenReturn(totalElements);
-        return page;
-    }
 }

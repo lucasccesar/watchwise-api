@@ -31,12 +31,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 
 @Service
 public class CalendarScheduleRefreshService {
 
     private static final Logger log = LoggerFactory.getLogger(CalendarScheduleRefreshService.class);
     private static final Duration SEASON_REFRESH_RETRY_DELAY = Duration.ofMinutes(1);
+    private static final int MAX_ADMITTED_SEASON_REPAIRS = 32;
 
     private final WatchlistEntryRepository watchlistEntryRepository;
     private final CalendarScheduleSnapshotStore snapshotStore;
@@ -45,6 +47,7 @@ public class CalendarScheduleRefreshService {
     private final ExecutorService calendarScheduleRefreshExecutor;
     private final Clock clock;
     private final Set<RefreshKey> refreshesInFlight = ConcurrentHashMap.newKeySet();
+    private final Semaphore seasonRepairAdmissions = new Semaphore(MAX_ADMITTED_SEASON_REPAIRS);
     private final Cache<RefreshKey, Boolean> failedSeasonRefreshes = Caffeine.newBuilder()
             .maximumSize(10_000)
             .expireAfterWrite(SEASON_REFRESH_RETRY_DELAY)
@@ -104,32 +107,59 @@ public class CalendarScheduleRefreshService {
         }
     }
 
-    public void refreshSeasonInBackground(
+    public boolean refreshSeasonInBackground(
             String seriesTmdbId, Integer seasonNumber, String region, String language) {
         if (seriesTmdbId == null || seriesTmdbId.isBlank() || seasonNumber == null || seasonNumber <= 0) {
-            return;
+            return false;
         }
         CalendarScheduleKey key = new CalendarScheduleKey(
                 ContentType.SERIES, seriesTmdbId, language, region);
         RefreshKey refreshKey = new RefreshKey(key, seasonNumber, false);
         if (failedSeasonRefreshes.getIfPresent(refreshKey) != null
-                || !refreshesInFlight.add(refreshKey)) {
-            return;
+                || !seasonRepairAdmissions.tryAcquire()) {
+            return false;
+        }
+        if (!refreshesInFlight.add(refreshKey)) {
+            seasonRepairAdmissions.release();
+            return false;
         }
         try {
             CompletableFuture.runAsync(() -> {
                 try {
-                    if (!refreshOneReserved(refreshKey, clock.instant())) {
+                    if (!refreshSeasonFreshReserved(refreshKey, clock.instant())) {
                         failedSeasonRefreshes.put(refreshKey, true);
                     }
                 } finally {
                     refreshesInFlight.remove(refreshKey);
+                    seasonRepairAdmissions.release();
                 }
             }, calendarScheduleRefreshExecutor);
+            return true;
         } catch (RejectedExecutionException exception) {
             refreshesInFlight.remove(refreshKey);
+            seasonRepairAdmissions.release();
             failedSeasonRefreshes.put(refreshKey, true);
             log.warn("Calendar season refresh was rejected for {}", refreshKey, exception);
+            return false;
+        }
+    }
+
+    private boolean refreshSeasonFreshReserved(RefreshKey refreshKey, Instant checkedAt) {
+        try {
+            CalendarScheduleKey key = refreshKey.scheduleKey();
+            CalendarScheduleLookup lookup = scheduleProvider.loadSeasonFresh(
+                    key.tmdbId(), refreshKey.seasonNumber(), key.preferredRegion(), key.preferredLanguage());
+            if (lookup instanceof CalendarScheduleLookup.Found found
+                    && found.batch().origin() == TmdbLookupOrigin.REMOTE) {
+                return scheduleSynchronizer.synchronize(found.batch(), checkedAt);
+            }
+            if (lookup instanceof CalendarScheduleLookup.NotFound) {
+                snapshotStore.invalidateSeason(key, refreshKey.seasonNumber(), checkedAt);
+            }
+            return false;
+        } catch (RuntimeException exception) {
+            log.warn("Calendar season recovery failed for {}", refreshKey, exception);
+            return false;
         }
     }
 

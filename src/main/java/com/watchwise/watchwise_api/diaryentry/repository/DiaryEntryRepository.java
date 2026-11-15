@@ -1728,6 +1728,154 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                    d.created_at AS recordedAt
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId AND c.type = 'EPISODE'
+              AND c.series_tmdb_id = :seriesTmdbId
+              AND c.season_number IN :seasonNumbers
+            ORDER BY c.season_number, d.watch_number, c.episode_number, d.created_at
+            """, nativeQuery = true)
+    List<EpisodeCompletionWatch> findEpisodeCompletionWatchesBySeason(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbId") String seriesTmdbId,
+            @Param("seasonNumbers") Collection<Integer> seasonNumbers);
+
+    @Query(value = """
+            WITH trusted_seasons AS (
+                SELECT owner.id AS user_id, content.id AS content_id,
+                       marker.series_tmdb_id, marker.season_number, marker.scope_version,
+                       marker.expected_episode_count, state.history_revision
+                FROM calendar_schedule_completeness marker
+                JOIN users owner ON owner.preferred_region = marker.region
+                  AND owner.preferred_language = marker.language AND owner.id = :userId
+                JOIN user_series_history_states state ON state.user_id = owner.id
+                  AND state.series_tmdb_id = marker.series_tmdb_id
+                  AND state.history_revision = state.computed_revision
+                JOIN contents content ON content.type = 'SEASON'
+                  AND content.series_tmdb_id = marker.series_tmdb_id
+                  AND content.season_number = marker.season_number
+                JOIN calendar_schedule_snapshots snapshot ON snapshot.event_type = 'EPISODE'
+                  AND snapshot.series_tmdb_id = marker.series_tmdb_id
+                  AND snapshot.season_number = marker.season_number
+                  AND snapshot.region = marker.region AND snapshot.language = marker.language
+                  AND snapshot.present_in_last_tmdb_snapshot = true
+                WHERE marker.group_type = 'SEASON' AND marker.complete = true
+                  AND marker.expected_episode_count > 0
+                GROUP BY owner.id, content.id, marker.series_tmdb_id, marker.season_number,
+                         marker.scope_version, marker.expected_episode_count, state.history_revision
+                HAVING COUNT(snapshot.id) = marker.expected_episode_count
+                  AND COUNT(DISTINCT snapshot.episode_number) = marker.expected_episode_count
+                  AND COUNT(*) FILTER (WHERE snapshot.episode_number > 0
+                      AND snapshot.release_date IS NOT NULL AND snapshot.release_date <= :today
+                      AND snapshot.next_check_at > :checkedAt) = marker.expected_episode_count
+            ), passes AS (
+                SELECT diary.user_id, content.series_tmdb_id, content.season_number, diary.watch_number
+                FROM diary_entries diary
+                JOIN contents content ON content.id = diary.content_id AND content.type = 'EPISODE'
+                WHERE diary.user_id = :userId
+                GROUP BY diary.user_id, content.series_tmdb_id, content.season_number, diary.watch_number
+            )
+            SELECT DISTINCT trusted.series_tmdb_id AS seriesTmdbId,
+                            trusted.season_number AS seasonNumber,
+                            pass.watch_number AS watchNumber
+            FROM trusted_seasons trusted
+            JOIN passes pass ON pass.user_id = trusted.user_id
+              AND pass.series_tmdb_id = trusted.series_tmdb_id
+              AND pass.season_number = trusted.season_number
+            WHERE NOT EXISTS (
+                SELECT 1 FROM calendar_schedule_snapshots required
+                WHERE required.event_type = 'EPISODE'
+                  AND required.series_tmdb_id = trusted.series_tmdb_id
+                  AND required.season_number = trusted.season_number
+                  AND required.region = (SELECT preferred_region FROM users WHERE id = :userId)
+                  AND required.language = (SELECT preferred_language FROM users WHERE id = :userId)
+                  AND required.present_in_last_tmdb_snapshot = true
+                  AND NOT EXISTS (
+                      SELECT 1 FROM diary_entries watched
+                      JOIN contents watched_content ON watched_content.id = watched.content_id
+                      WHERE watched.user_id = :userId AND watched.watch_number = pass.watch_number
+                        AND watched_content.type = 'EPISODE'
+                        AND watched_content.series_tmdb_id = trusted.series_tmdb_id
+                        AND watched_content.season_number = trusted.season_number
+                        AND watched_content.episode_number = required.episode_number
+                  )
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM diary_completion_projections projection
+                WHERE projection.user_id = trusted.user_id
+                  AND projection.content_id = trusted.content_id
+                  AND projection.watch_number = pass.watch_number
+                  AND projection.history_revision = trusted.history_revision
+                  AND projection.schedule_version = trusted.scope_version
+                  AND projection.valid_until > :now
+            )
+            ORDER BY trusted.series_tmdb_id, trusted.season_number, pass.watch_number
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<SeasonCompletionCandidate> findSeasonCompletionCandidates(
+            @Param("userId") UUID userId,
+            @Param("today") LocalDate today,
+            @Param("checkedAt") LocalDateTime checkedAt,
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
+    interface SeasonCompletionCandidate {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Integer getWatchNumber();
+    }
+
+    @Query(value = """
+            WITH valid_seasons AS (
+                SELECT marker.series_tmdb_id, marker.season_number
+                FROM calendar_schedule_completeness marker
+                JOIN users owner ON owner.id = :userId
+                  AND owner.preferred_region = marker.region
+                  AND owner.preferred_language = marker.language
+                JOIN calendar_schedule_snapshots snapshot ON snapshot.event_type = 'EPISODE'
+                  AND snapshot.series_tmdb_id = marker.series_tmdb_id
+                  AND snapshot.season_number = marker.season_number
+                  AND snapshot.region = marker.region AND snapshot.language = marker.language
+                  AND snapshot.present_in_last_tmdb_snapshot = true
+                WHERE marker.group_type = 'SEASON' AND marker.complete = true
+                  AND marker.expected_episode_count > 0
+                GROUP BY marker.series_tmdb_id, marker.season_number, marker.expected_episode_count
+                HAVING COUNT(snapshot.id) = marker.expected_episode_count
+                  AND COUNT(DISTINCT snapshot.episode_number) = marker.expected_episode_count
+                  AND COUNT(*) FILTER (WHERE snapshot.episode_number > 0
+                      AND snapshot.release_date IS NOT NULL AND snapshot.next_check_at > :checkedAt)
+                      = marker.expected_episode_count
+            )
+            SELECT DISTINCT content.series_tmdb_id AS seriesTmdbId,
+                            content.season_number AS seasonNumber
+            FROM diary_entries diary
+            JOIN contents content ON content.id = diary.content_id AND content.type = 'EPISODE'
+            LEFT JOIN valid_seasons valid ON valid.series_tmdb_id = content.series_tmdb_id
+              AND valid.season_number = content.season_number
+            WHERE diary.user_id = :userId AND content.season_number > 0 AND valid.season_number IS NULL
+            ORDER BY content.series_tmdb_id, content.season_number
+            LIMIT :limit OFFSET :offset
+            """, nativeQuery = true)
+    List<SeasonScheduleRepairCandidate> findSeasonScheduleRepairCandidates(
+            @Param("userId") UUID userId,
+            @Param("checkedAt") LocalDateTime checkedAt,
+            @Param("limit") int limit,
+            @Param("offset") int offset);
+
+    interface SeasonScheduleRepairCandidate {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+    }
+
+    @Query(value = """
+            SELECT d.id AS diaryEntryId,
+                   c.series_tmdb_id AS seriesTmdbId,
+                   c.season_number AS seasonNumber,
+                   c.episode_number AS episodeNumber,
+                   d.watch_number AS watchNumber,
+                   d.watched_date AS watchedDate,
+                   d.watched_at AS watchedAt,
+                   d.created_at AS recordedAt
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
               AND d.id IN :eventIds
               AND c.type = 'EPISODE'

@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -69,6 +70,7 @@ public class UserServiceImpl implements UserService {
     private final UserBlockAccessService userBlockAccessService;
     private final UserAccountDeletionService userAccountDeletionService;
     private final EmailConfirmationService emailConfirmationService;
+    private final DiaryCompletionService diaryCompletionService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -113,6 +115,10 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new NotFoundException("User not found"));
         boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic())
                 && !Boolean.TRUE.equals(currentUser.getIsProfilePublic());
+        boolean calendarPreferencesChanged = (patchUserDTO.preferredLanguage() != null
+                        && !patchUserDTO.preferredLanguage().equals(currentUser.getPreferredLanguage()))
+                || (patchUserDTO.preferredRegion() != null
+                        && !patchUserDTO.preferredRegion().equals(currentUser.getPreferredRegion()));
         CredentialChanges credentialChanges = resolveCredentialChanges(currentUser, patchUserDTO);
         if (credentialChanges.touchesCredentials()) {
             requireCurrentPassword(currentUser, patchUserDTO.currentPassword());
@@ -124,6 +130,9 @@ public class UserServiceImpl implements UserService {
             }
         }
         applyPatch(currentUser, patchUserDTO, credentialChanges);
+        if (calendarPreferencesChanged) {
+            diaryCompletionService.invalidateScheduleScopes(currentUser.getId());
+        }
         currentUser.setUpdatedAt(LocalDateTime.now());
 
         UserResponseDTO response;

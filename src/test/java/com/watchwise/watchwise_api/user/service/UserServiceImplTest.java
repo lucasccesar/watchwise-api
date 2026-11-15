@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -79,6 +80,9 @@ class UserServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private DiaryCompletionService diaryCompletionService;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -1150,6 +1154,7 @@ class UserServiceImplTest {
 
         verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getPreferredLanguage()).isEqualTo("pt-BR");
+        verify(diaryCompletionService).invalidateScheduleScopes(savedUser.getId());
     }
 
     @Test
@@ -1163,6 +1168,7 @@ class UserServiceImplTest {
         userService.updateUser(savedUser, patchUserDTO);
 
         assertThat(savedUser.getPreferredLanguage()).isEqualTo("en-US");
+        verifyNoInteractions(diaryCompletionService);
     }
 
     @Test
@@ -1190,6 +1196,7 @@ class UserServiceImplTest {
 
         verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getPreferredRegion()).isEqualTo("BR");
+        verify(diaryCompletionService).invalidateScheduleScopes(savedUser.getId());
     }
 
     @Test
@@ -1203,6 +1210,7 @@ class UserServiceImplTest {
         userService.updateUser(savedUser, patchUserDTO);
 
         assertThat(savedUser.getPreferredRegion()).isEqualTo("US");
+        verifyNoInteractions(diaryCompletionService);
     }
 
     @Test

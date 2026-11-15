@@ -75,7 +75,8 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
         CalendarScheduleSynchronizerImpl synchronizer = synchronizer(store);
 
-        synchronizer.synchronize(movieBatch(TmdbLookupOrigin.CACHE, LocalDate.of(2026, 9, 20)), CHECKED_AT);
+        assertThat(synchronizer.synchronize(
+                movieBatch(TmdbLookupOrigin.CACHE, LocalDate.of(2026, 9, 20)), CHECKED_AT)).isFalse();
 
         verifyNoInteractions(store);
     }
@@ -106,12 +107,27 @@ class CalendarScheduleSynchronizerImplTest {
     void shouldReconcileARemoteSeasonAndUseReleasedCadence() {
         CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
         CalendarScheduleSynchronizerImpl synchronizer = synchronizer(store);
+        when(store.reconcileSeasonWithStatus(any(), eq(CHECKED_AT)))
+                .thenReturn(new CalendarScheduleSnapshotStore.SeasonReconciliationResult(true, true));
 
-        synchronizer.synchronize(seasonBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 1)), CHECKED_AT);
+        assertThat(synchronizer.synchronize(
+                seasonBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 1)), CHECKED_AT)).isTrue();
 
         ArgumentCaptor<CalendarSeasonSchedule> schedule = ArgumentCaptor.forClass(CalendarSeasonSchedule.class);
-        verify(store).reconcileSeason(schedule.capture(), eq(CHECKED_AT));
+        verify(store).reconcileSeasonWithStatus(schedule.capture(), eq(CHECKED_AT));
         assertThat(schedule.getValue().episodes().getFirst().nextCheckAt()).isEqualTo(Instant.MAX);
+    }
+
+    @Test
+    @DisplayName("[synchronize] Should Report A Stale Remote Season As Not Accepted")
+    void shouldReportAStaleRemoteSeasonAsNotAccepted() {
+        CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
+        CalendarScheduleSynchronizerImpl synchronizer = synchronizer(store);
+        when(store.reconcileSeasonWithStatus(any(), eq(CHECKED_AT)))
+                .thenReturn(new CalendarScheduleSnapshotStore.SeasonReconciliationResult(false, false));
+
+        assertThat(synchronizer.synchronize(
+                seasonBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 1)), CHECKED_AT)).isFalse();
     }
 
     @Test
@@ -123,7 +139,7 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleBatch partial = new CalendarScheduleBatch(key, TmdbLookupOrigin.REMOTE, CHECKED_AT,
                 null, seasonSchedule(LocalDate.of(2026, 9, 1), null), 2);
 
-        synchronizer.synchronize(partial, CHECKED_AT);
+        assertThat(synchronizer.synchronize(partial, CHECKED_AT)).isFalse();
 
         verifyNoInteractions(store);
     }

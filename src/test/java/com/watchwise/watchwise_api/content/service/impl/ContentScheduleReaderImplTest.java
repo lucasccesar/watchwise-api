@@ -178,6 +178,33 @@ class ContentScheduleReaderImplTest {
     }
 
     @Test
+    @DisplayName("[readCalendarSeasonFresh] Should Preserve Cached Summary Authority Separately - When Season Details Are Fresh")
+    void shouldPreserveCachedSummaryAuthoritySeparatelyWhenSeasonDetailsAreFresh() {
+        TmdbSeasonFullDetails freshSeason = new TmdbSeasonFullDetails(
+                3572, "Season 2", null, "/season.jpg", "2026-09-01", 2, List.of(
+                        episode(1, "Seven Thirty-Seven", "2026-10-01"),
+                        episode(2, "Grilled", "2026-10-08")), null, null);
+        TmdbTvFullDetails cachedSummary = series(
+                "1396", "Breaking Bad", "Returning Series",
+                List.of(new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)));
+        when(tmdbClient.refreshCalendarSeasonDetails("1396", 2, "pt-BR"))
+                .thenReturn(found(freshSeason));
+        when(tmdbClient.refreshTvFullDetails("1396", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(cachedSummary, TmdbLookupOrigin.CACHE));
+
+        ContentScheduleLookup result = reader.readCalendarSeasonFresh("1396", 2, "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(ContentScheduleLookup.Found.class, found -> {
+            assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE);
+            assertThat(found.seriesSummaryOrigin()).isEqualTo(TmdbLookupOrigin.CACHE);
+            assertThat(found.schedule().expectedEpisodeCountsBySeason()).containsEntry(2, 1);
+        });
+        verify(tmdbClient).refreshCalendarSeasonDetails("1396", 2, "pt-BR");
+        verify(tmdbClient).refreshTvFullDetails("1396", "pt-BR");
+        verify(tmdbClient, never()).getTvFullDetails("1396", "pt-BR");
+    }
+
+    @Test
     @DisplayName("[readSeason] Should Preserve The Source Network - When Series Details Include One")
     void shouldPreserveTheSourceNetworkWhenSeriesDetailsIncludeOne() {
         when(tmdbClient.getSeasonFullDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(

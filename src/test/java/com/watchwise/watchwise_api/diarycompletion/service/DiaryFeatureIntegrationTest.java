@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
@@ -42,6 +43,7 @@ import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -99,7 +101,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = com.watchwise_test.WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class DiaryFeatureIntegrationTest {
@@ -152,6 +154,9 @@ class DiaryFeatureIntegrationTest {
     private UserSeriesHistoryStateRepository historyStateRepository;
 
     @Autowired
+    private com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService diaryCompletionService;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -174,6 +179,20 @@ class DiaryFeatureIntegrationTest {
 
     @MockitoSpyBean
     private NamedParameterJdbcTemplate namedParameterJdbcTemplate;
+
+    @BeforeEach
+    void delegatePreparedCompletionScopesToTheSyntheticScopeStub() {
+        when(completionScopeLoader.loadPrepared(any(MediaReference.class), anyString(), anyString(), any(),
+                any(CalendarScheduleBatch.class)))
+                .thenAnswer(invocation -> completionScopeLoader.load(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+                        invocation.getArgument(3)));
+        when(completionScopeLoader.loadPreparedSeries(any(MediaReference.class), anyString(), anyString(), any(),
+                any(CalendarSeriesSchedule.class)))
+                .thenAnswer(invocation -> completionScopeLoader.load(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+                        invocation.getArgument(3)));
+    }
 
     @Test
     @DisplayName("[diaryLifecycle] Should Preserve Episode History And Review Snapshots - When Two Seasons Are Rewatched")
@@ -257,7 +276,7 @@ class DiaryFeatureIntegrationTest {
                         "SEASON:91001:1:pass:1", "SEASON:91001:1:pass:2",
                         "SEASON:91001:2:pass:1", "SEASON:91001:2:pass:2");
         assertThat(JsonPath.<List<Integer>>read(timeline, "$.content[*].currentScore"))
-                .containsExactlyInAnyOrder(9, 9, 10, 10);
+                .containsExactlyInAnyOrder(6, 9, 7, 10);
         assertThat(JsonPath.<List<java.util.Map<String, Object>>>read(
                 timeline, "$.content[*].reviewPreviews[*]"))
                 .allSatisfy(review -> assertThat(review)
@@ -271,7 +290,8 @@ class DiaryFeatureIntegrationTest {
         assertThat(JsonPath.<List<String>>read(timeline,
                 "$.content[?(@.content.seasonNumber == 1)].kind")).containsOnly("DERIVED_COMPLETION");
         assertThat(JsonPath.<List<Integer>>read(timeline,
-                "$.content[?(@.content.seasonNumber == 2)].currentScore")).containsOnly(10);
+                "$.content[?(@.content.seasonNumber == 2)].currentScore"))
+                .containsExactlyInAnyOrder(7, 10);
         assertThat(JsonPath.<List<Integer>>read(timeline,
                 "$.content[?(@.content.seasonNumber == 2)].reviewCount")).containsExactlyInAnyOrder(1, 1);
         assertThat(JsonPath.<List<String>>read(timeline,
@@ -331,7 +351,7 @@ class DiaryFeatureIntegrationTest {
         publishReviewForContent(owner, series.getId(), 9, "Series pass two", "transition-review-pass-2");
         assertSeriesTimeline(owner, seriesId,
                 List.of("SERIES:" + seriesId + ":pass:1", "SERIES:" + seriesId + ":pass:2"),
-                List.of(1, 2), List.of(9, 9), List.of(1, 1));
+                List.of(1, 2), List.of(9, 8), List.of(1, 1));
 
         List<ReviewSnapshot> originalSeriesReviews = seriesReviewSnapshots(owner.id(), series.getId());
         assertThat(originalSeriesReviews).extracting(ReviewSnapshot::scoreAtPublication)
@@ -385,8 +405,21 @@ class DiaryFeatureIntegrationTest {
         assertThat(seriesReviewSnapshots(owner.id(), series.getId())).containsExactlyElementsOf(originalSeriesReviews);
 
         bulkWatch(owner, seriesId, 2, "transition-s2-pass-1");
+        assertThat(diaryEntryRepository.findEpisodeCompletionWatches(owner.id(), List.of(seriesId)))
+                .filteredOn(watch -> watch.getWatchNumber() == 1)
+                .extracting(watch -> new EpisodeCoordinate(watch.getSeasonNumber(), watch.getEpisodeNumber()))
+                .containsExactlyInAnyOrder(
+                        new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 2), new EpisodeCoordinate(1, 3),
+                        new EpisodeCoordinate(2, 1), new EpisodeCoordinate(2, 2), new EpisodeCoordinate(2, 3));
+        persistCompletionMarker(user, seriesId, CalendarScheduleCompleteness.GroupType.SERIES, null, 6);
+        var updatedHistoryState = historyStateRepository
+                .findById(new UserSeriesHistoryState.Key(owner.id(), seriesId)).orElseThrow();
+        assertThat(updatedHistoryState.getComputedRevision()).isNotEqualTo(updatedHistoryState.getHistoryRevision());
+        diaryCompletionService.refreshStaleScopes(owner.id(), Instant.now());
+        assertThat(projectionRepository.findByUserIdAndContentIdOrderByWatchNumber(owner.id(), series.getId()))
+                .isNotEmpty();
         assertSeriesTimeline(owner, seriesId,
-                List.of("SERIES:" + seriesId + ":pass:1"), List.of(1), List.of(5), List.of(1));
+                List.of("SERIES:" + seriesId + ":pass:1"), List.of(1), List.of(8), List.of(1));
 
         publishReviewForContent(owner, series.getId(), 6,
                 "Series pass one after calendar update", "transition-review-pass-1-after-calendar");
@@ -416,7 +449,7 @@ class DiaryFeatureIntegrationTest {
         bulkWatch(owner, seriesId, 2, "transition-s2-pass-2");
         assertSeriesTimeline(owner, seriesId,
                 List.of("SERIES:" + seriesId + ":pass:1", "SERIES:" + seriesId + ":pass:2"),
-                List.of(1, 2), List.of(6, 6), List.of(2, 1));
+                List.of(1, 2), List.of(5, 6), List.of(2, 1));
         assertThat(seriesReviewSnapshots(owner.id(), series.getId()))
                 .containsExactlyElementsOf(afterSecondPassOneReview);
         String finalSeriesTimeline = mockMvc.perform(get("/users/{userId}/diary/view", owner.id())
@@ -430,7 +463,7 @@ class DiaryFeatureIntegrationTest {
                 "$.content[?(@.watchNumber == 2)].reviewPreviews[*].scoreAtPublication"))
                 .containsExactly(9);
         assertThat(contentRatingRepository.findByUserIdAndContentId(owner.id(), series.getId()))
-                .get().extracting(ContentRating::getScore).isEqualTo(6);
+                .get().extracting(ContentRating::getScore).isEqualTo(5);
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(owner.id(),
                 org.springframework.data.domain.PageRequest.of(0, 100)).getContent())
                 .hasSize(12)
@@ -756,45 +789,38 @@ class DiaryFeatureIntegrationTest {
     }
 
     private void persistCalendarMarkers(User owner) {
-        LocalDateTime now = LocalDateTime.now();
-        completenessRepository.saveAndFlush(CalendarScheduleCompleteness.builder()
-                .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
-                .seriesTmdbId(SERIES_TMDB_ID)
-                .region(owner.getPreferredRegion())
-                .language(owner.getPreferredLanguage())
-                .expectedEpisodeCount(6)
-                .complete(true)
-                .lastCheckedAt(now)
-                .scopeVersion(1L)
-                .build());
+        persistCompletionMarker(owner, SERIES_TMDB_ID, CalendarScheduleCompleteness.GroupType.SERIES, null, 6);
         for (int seasonNumber = 1; seasonNumber <= 2; seasonNumber++) {
-            completenessRepository.saveAndFlush(CalendarScheduleCompleteness.builder()
-                    .groupType(CalendarScheduleCompleteness.GroupType.SEASON)
-                    .seriesTmdbId(SERIES_TMDB_ID)
-                    .seasonNumber(seasonNumber)
-                    .region(owner.getPreferredRegion())
-                    .language(owner.getPreferredLanguage())
-                    .expectedEpisodeCount(3)
-                    .complete(true)
-                    .lastCheckedAt(now)
-                    .scopeVersion(1L)
-                    .build());
+            persistCompletionMarker(owner, SERIES_TMDB_ID,
+                    CalendarScheduleCompleteness.GroupType.SEASON, seasonNumber, 3);
         }
     }
 
     private void persistCompletionMarker(User owner, String seriesId,
             CalendarScheduleCompleteness.GroupType groupType, Integer seasonNumber, int episodeCount) {
-        completenessRepository.saveAndFlush(CalendarScheduleCompleteness.builder()
-                .groupType(groupType)
-                .seriesTmdbId(seriesId)
-                .seasonNumber(seasonNumber)
-                .region(owner.getPreferredRegion())
-                .language(owner.getPreferredLanguage())
-                .expectedEpisodeCount(episodeCount)
-                .complete(true)
-                .lastCheckedAt(LocalDateTime.now())
-                .scopeVersion(1L)
-                .build());
+        LocalDateTime checkedAt = LocalDateTime.now();
+        CalendarScheduleCompleteness marker = completenessRepository
+                .findByGroupTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                        groupType, seriesId, seasonNumber,
+                        owner.getPreferredRegion(), owner.getPreferredLanguage())
+                .map(existing -> existing.toBuilder()
+                        .expectedEpisodeCount(episodeCount)
+                        .complete(true)
+                        .lastCheckedAt(checkedAt)
+                        .scopeVersion(1L)
+                        .build())
+                .orElseGet(() -> CalendarScheduleCompleteness.builder()
+                        .groupType(groupType)
+                        .seriesTmdbId(seriesId)
+                        .seasonNumber(seasonNumber)
+                        .region(owner.getPreferredRegion())
+                        .language(owner.getPreferredLanguage())
+                        .expectedEpisodeCount(episodeCount)
+                        .complete(true)
+                        .lastCheckedAt(checkedAt)
+                        .scopeVersion(1L)
+                        .build());
+        completenessRepository.saveAndFlush(marker);
     }
 
     private void reconcileCalendarSchedule(User owner, String seriesId) {

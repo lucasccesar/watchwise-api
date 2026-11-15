@@ -8,6 +8,10 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
@@ -34,6 +38,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -41,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class CalendarCompletionScopeLoaderTest {
@@ -53,6 +62,12 @@ class CalendarCompletionScopeLoaderTest {
 
     @Mock
     private CalendarScheduleProvider scheduleProvider;
+
+    @Mock
+    private CalendarScheduleCompletenessRepository completenessRepository;
+
+    @Mock
+    private CalendarScheduleSnapshotRepository snapshotRepository;
 
     private CalendarCompletionScopeLoader loader;
 
@@ -586,6 +601,115 @@ class CalendarCompletionScopeLoaderTest {
         assertThat(result.validUntil()).isEqualTo(NOW.plusSeconds(30L * 24 * 60 * 60));
     }
 
+    @Test
+    void shouldLoadSeasonCompletionFromACompletePersistedCalendarWithoutCallingTmdb() {
+        loader = new CalendarCompletionScopeLoader(
+                scheduleProvider, completenessRepository, snapshotRepository);
+        CalendarScheduleCompleteness marker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                .seriesTmdbId(SERIES_ID).seasonNumber(1).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(true).scopeVersion(8L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        when(completenessRepository.findSeasonIdentity(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(Optional.of(marker));
+        when(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(List.of(snapshot(1), snapshot(3)));
+
+        var result = loader.loadPersisted(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW).orElseThrow();
+
+        assertThat(result.scope().releaseComplete()).isTrue();
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
+        assertThat(result.scheduleVersion()).isEqualTo("8");
+        assertThat(result.validUntil()).isAfter(NOW);
+        verifyNoInteractions(scheduleProvider);
+    }
+
+    @Test
+    void shouldRejectPersistedSeasonCalendarWhenMarkerCountAndPresentCoordinatesDisagree() {
+        loader = new CalendarCompletionScopeLoader(
+                scheduleProvider, completenessRepository, snapshotRepository);
+        CalendarScheduleCompleteness marker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                .seriesTmdbId(SERIES_ID).seasonNumber(1).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(true).scopeVersion(8L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        when(completenessRepository.findSeasonIdentity(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(Optional.of(marker));
+        when(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(List.of(snapshot(1), snapshot(1)));
+
+        var result = loader.loadPersisted(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(scheduleProvider);
+    }
+
+    @Test
+    void shouldLoadSeriesCompletionLocallyWhenSeriesAndSeasonMarkersCoverAllEpisodes() {
+        loader = new CalendarCompletionScopeLoader(scheduleProvider, completenessRepository, snapshotRepository);
+        CalendarScheduleCompleteness seriesMarker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                .seriesTmdbId(SERIES_ID).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(true).scopeVersion(11L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        CalendarScheduleCompleteness seasonMarker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                .seriesTmdbId(SERIES_ID).seasonNumber(1).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(true).scopeVersion(8L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        when(completenessRepository.findSeriesIdentity(SERIES_ID, REGION, LANGUAGE))
+                .thenReturn(Optional.of(seriesMarker));
+        when(completenessRepository.findByGroupTypeAndSeriesTmdbIdInAndRegionAndLanguage(
+                CalendarScheduleCompleteness.GroupType.SEASON, List.of(SERIES_ID), REGION, LANGUAGE))
+                .thenReturn(List.of(seasonMarker));
+        when(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, SERIES_ID, REGION, LANGUAGE))
+                .thenReturn(List.of(snapshot(1), snapshot(3)));
+
+        var result = loader.loadPersistedSeries(SERIES_ID, REGION, LANGUAGE, NOW).orElseThrow();
+
+        assertThat(result.scope().releaseComplete()).isTrue();
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
+        assertThat(result.scheduleVersion()).isEqualTo("11");
+        verifyNoInteractions(scheduleProvider);
+    }
+
+    @Test
+    void shouldReturnAnIncompleteLocalSeriesScopeWithoutTmdbWhenSeriesMarkerIsPending() {
+        loader = new CalendarCompletionScopeLoader(scheduleProvider, completenessRepository, snapshotRepository);
+        CalendarScheduleCompleteness seriesMarker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                .seriesTmdbId(SERIES_ID).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(false).scopeVersion(11L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        CalendarScheduleCompleteness seasonMarker = CalendarScheduleCompleteness.builder()
+                .id(UUID.randomUUID()).groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                .seriesTmdbId(SERIES_ID).seasonNumber(1).region(REGION).language(LANGUAGE)
+                .expectedEpisodeCount(2).complete(true).scopeVersion(8L)
+                .lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC)).build();
+        when(completenessRepository.findSeriesIdentity(SERIES_ID, REGION, LANGUAGE))
+                .thenReturn(Optional.of(seriesMarker));
+        when(completenessRepository.findByGroupTypeAndSeriesTmdbIdInAndRegionAndLanguage(
+                CalendarScheduleCompleteness.GroupType.SEASON, List.of(SERIES_ID), REGION, LANGUAGE))
+                .thenReturn(List.of(seasonMarker));
+        when(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, SERIES_ID, REGION, LANGUAGE))
+                .thenReturn(List.of(snapshot(1), snapshot(3)));
+
+        var result = loader.loadPersistedSeries(SERIES_ID, REGION, LANGUAGE, NOW).orElseThrow();
+
+        assertThat(result.scope().releaseComplete()).isFalse();
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
+        verifyNoInteractions(scheduleProvider);
+    }
+
     private static CalendarScheduleLookup.Found foundSeason(CalendarSeasonSchedule schedule) {
         return foundSeason(schedule, null);
     }
@@ -640,5 +764,15 @@ class CalendarCompletionScopeLoaderTest {
 
     private static CalendarEpisodeSchedule episode(int number, LocalDate releaseDate) {
         return new CalendarEpisodeSchedule(number, "Episode " + number, releaseDate, null, null, null);
+    }
+
+    private CalendarScheduleSnapshot snapshot(int episodeNumber) {
+        return CalendarScheduleSnapshot.builder()
+                .id(UUID.randomUUID()).eventType(CalendarScheduleSnapshot.EventType.EPISODE)
+                .seriesTmdbId(SERIES_ID).seasonNumber(1).episodeNumber(episodeNumber)
+                .region(REGION).language(LANGUAGE).releaseDate(LocalDate.parse("2026-10-01"))
+                .title("Episode " + episodeNumber).lastCheckedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC))
+                .nextCheckAt(LocalDateTime.ofInstant(NOW.plusSeconds(60), ZoneOffset.UTC))
+                .presentInLastTmdbSnapshot(true).build();
     }
 }

@@ -1,6 +1,10 @@
 package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
@@ -51,6 +55,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -69,7 +74,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.nullValue;
 
-@SpringBootTest
+@SpringBootTest(classes = com.watchwise_test.WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class ContentControllerIntegrationTest {
@@ -102,6 +107,12 @@ class ContentControllerIntegrationTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private CalendarScheduleCompletenessRepository calendarScheduleCompletenessRepository;
+
+    @Autowired
+    private CalendarScheduleSnapshotRepository calendarScheduleSnapshotRepository;
 
     @Autowired
     private DroppedEntryRepository droppedEntryRepository;
@@ -736,37 +747,62 @@ class ContentControllerIntegrationTest {
     @Test
     @DisplayName("[getPage] Should Compose A Season Page Without A Persisted Series Reference")
     void shouldComposeASeasonPageWithoutAPersistedSeriesReference() throws Exception {
+        String seriesTmdbId = "990001";
+        int seasonNumber = 1;
+        LocalDateTime now = LocalDateTime.now();
         Content season = contentRepository.save(Content.builder()
-                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
-                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
-        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                .seriesTmdbId(seriesTmdbId).seasonNumber(seasonNumber).type(ContentType.SEASON)
+                .createdAt(now).updatedAt(now).build());
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId(seriesTmdbId).seasonNumber(seasonNumber).episodeNumber(1).type(ContentType.EPISODE)
+                .createdAt(now).updatedAt(now).build());
+        User viewer = userRepository.findByUsernameIgnoreCase("contentuser").orElseThrow();
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(viewer).content(episode).watchNumber(1).watchedDate(LocalDate.now().minusDays(1))
+                .createdAt(now).updatedAt(now).build());
+        calendarScheduleCompletenessRepository.save(CalendarScheduleCompleteness.builder()
+                .groupType(CalendarScheduleCompleteness.GroupType.SEASON)
+                .seriesTmdbId(seriesTmdbId).seasonNumber(seasonNumber).region("US").language("en-US")
+                .expectedEpisodeCount(1).complete(true).scopeVersion(1L)
+                .lastCheckedAt(now).lastDiscoveredAt(now).build());
+        calendarScheduleSnapshotRepository.save(CalendarScheduleSnapshot.builder()
+                .eventType(CalendarScheduleSnapshot.EventType.EPISODE)
+                .seriesTmdbId(seriesTmdbId).seasonNumber(seasonNumber).episodeNumber(1)
+                .region("US").language("en-US").releaseDate(LocalDate.of(2008, 1, 20))
+                .title("Pilot").lastCheckedAt(now).nextCheckAt(now.plusDays(1))
+                .presentInLastTmdbSnapshot(true).build());
+        when(tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(
                         101, "Season 1", null, "/season.jpg", "2008-01-20", 1,
                         List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/still.jpg", null)),
                         null, null)));
-        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+        when(tmdbClient.getTvFullDetails(seriesTmdbId, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(
-                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        seriesTmdbId, "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                         List.of(), List.of(), null,
                         List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg")),
                         null, null, null, null, 1, 1, null, null, "Ended", null)));
-        when(tmdbClient.getTvContentRatings("1399", "en-US"))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+        when(tmdbClient.getTvContentRatings(seriesTmdbId, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings(seriesTmdbId, null)));
 
         long contentCountBefore = contentRepository.count();
 
         mockMvc.perform(get("/contents/" + season.getId() + "/page").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.details.type").value("SEASON"))
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(1))
                 .andExpect(jsonPath("$.sections.seasons[0].seasonNumber").value(1))
                 .andExpect(jsonPath("$.sections.seasons[0].airedEpisodeCount").value(1))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchStatus").value("WATCHED"))
                 .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
-                .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value(seriesTmdbId))
                 .andExpect(jsonPath("$.sections.episodes[0].episodeNumber").value(1))
                 .andExpect(jsonPath("$.navigation").value(nullValue()));
 
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
-        assertThat(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).isEmpty();
+        assertThat(contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES)).isEmpty();
     }
 
     @Test

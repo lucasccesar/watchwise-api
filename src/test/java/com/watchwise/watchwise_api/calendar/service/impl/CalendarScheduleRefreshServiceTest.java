@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
@@ -32,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +42,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -78,6 +82,86 @@ class CalendarScheduleRefreshServiceTest {
     void tearDown() throws InterruptedException {
         executor.shutdownNow();
         assertThat(executor.awaitTermination(2, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    @DisplayName("[refreshSeasonInBackground] Should Bypass Cached Season Details During Recovery")
+    void shouldBypassCachedSeasonDetailsDuringRecovery() throws InterruptedException {
+        CountDownLatch refreshed = new CountDownLatch(1);
+        when(scheduleProvider.loadSeasonFresh("1396", 1, "BR", "pt-BR"))
+                .thenAnswer(invocation -> {
+                    refreshed.countDown();
+                    return remoteSeason("1396", 1, "BR", "pt-BR");
+                });
+
+        refreshService.refreshSeasonInBackground("1396", 1, "BR", "pt-BR");
+
+        assertThat(refreshed.await(2, TimeUnit.SECONDS)).isTrue();
+        verify(scheduleProvider).loadSeasonFresh("1396", 1, "BR", "pt-BR");
+        verify(scheduleProvider, never()).loadSeason("1396", 1, "BR", "pt-BR");
+        verify(scheduleSynchronizer).synchronize(any(CalendarScheduleBatch.class), eq(NOW));
+    }
+
+    @Test
+    @DisplayName("[refreshSeasonInBackground] Should Back Off - When A Remote Season Cannot Be Reconciled")
+    void shouldBackOffWhenARemoteSeasonCannotBeReconciled() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarScheduleBatch incomplete = new CalendarScheduleBatch(
+                key,
+                TmdbLookupOrigin.REMOTE,
+                NOW,
+                null,
+                remoteSeason("1396", 1, "BR", "pt-BR").batch().season(),
+                2);
+        when(scheduleProvider.loadSeasonFresh("1396", 1, "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.Found(incomplete));
+        ExecutorService directExecutor = mock(ExecutorService.class);
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(directExecutor).execute(any(Runnable.class));
+        CalendarScheduleSynchronizerImpl actualSynchronizer = new CalendarScheduleSynchronizerImpl(
+                snapshotStore, Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+        CalendarScheduleRefreshService directRefreshService = new CalendarScheduleRefreshService(
+                watchlistEntryRepository,
+                snapshotStore,
+                scheduleProvider,
+                actualSynchronizer,
+                directExecutor,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThat(directRefreshService.refreshSeasonInBackground("1396", 1, "BR", "pt-BR")).isTrue();
+        assertThat(directRefreshService.refreshSeasonInBackground("1396", 1, "BR", "pt-BR")).isFalse();
+
+        verify(scheduleProvider, times(1)).loadSeasonFresh("1396", 1, "BR", "pt-BR");
+        verify(snapshotStore, never()).reconcileSeasonWithStatus(any(), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("[refreshSeasonInBackground] Should Cap In-Flight And Queued Season Repairs")
+    void shouldCapInFlightAndQueuedSeasonRepairs() throws InterruptedException {
+        CountDownLatch firstWorkersStarted = new CountDownLatch(2);
+        CountDownLatch releaseWorkers = new CountDownLatch(1);
+        CountDownLatch allSeasonsLoaded = new CountDownLatch(32);
+        doAnswer(invocation -> {
+            firstWorkersStarted.countDown();
+            assertThat(releaseWorkers.await(2, TimeUnit.SECONDS)).isTrue();
+            allSeasonsLoaded.countDown();
+            return remoteSeason(invocation.getArgument(0), invocation.getArgument(1),
+                    invocation.getArgument(2), invocation.getArgument(3));
+        }).when(scheduleProvider).loadSeasonFresh(any(), any(), any(), any());
+
+        for (int seasonNumber = 1; seasonNumber <= 32; seasonNumber++) {
+            assertThat(refreshService.refreshSeasonInBackground(
+                    "1396", seasonNumber, "BR", "pt-BR")).isTrue();
+        }
+        assertThat(refreshService.refreshSeasonInBackground("1396", 33, "BR", "pt-BR")).isFalse();
+        assertThat(firstWorkersStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        releaseWorkers.countDown();
+
+        assertThat(allSeasonsLoaded.await(2, TimeUnit.SECONDS)).isTrue();
+        verify(scheduleProvider, times(32)).loadSeasonFresh(any(), any(), any(), any());
     }
 
     @Test

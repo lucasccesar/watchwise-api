@@ -58,6 +58,7 @@ public class ContentPageServiceImpl implements ContentPageService {
         }
         ContentDetailsDTO details = pageDetails.details();
         ContentCoordinate rootCoordinate = ContentCoordinate.from(content);
+        boolean resolveSeasonRootFromSection = content.getType() == ContentType.SEASON && pageDetailsAvailable;
         ContentViewerStateService.Resolution episodePageState = null;
         ContentPageStatsService.Resolution episodePageStats = null;
         ContentViewerStateDTO viewerState;
@@ -69,6 +70,8 @@ public class ContentPageServiceImpl implements ContentPageService {
                     .distinct()
                     .toList();
             episodePageStats = contentPageStatsService.resolveStats(contentId, content.getType(), pageContentIds);
+        } else if (resolveSeasonRootFromSection) {
+            viewerState = null;
         } else {
             viewerState = contentViewerStateService.resolve(viewerId, List.of(rootCoordinate), Map.of())
                     .statesByCoordinate()
@@ -102,6 +105,18 @@ public class ContentPageServiceImpl implements ContentPageService {
                                 viewer.getPreferredRegion(),
                                 viewer.getPreferredLanguage())
                 : contentChildCardAssembler.assembleSections(details, rootCoordinate, viewerId);
+        if (resolveSeasonRootFromSection) {
+            viewerState = sections.seasons().stream()
+                    .filter(card -> card.type() == ContentType.SEASON)
+                    .filter(card -> java.util.Objects.equals(rootCoordinate.seasonNumber(), card.seasonNumber()))
+                    .map(com.watchwise.watchwise_api.content.dto.ContentChildCardDTO::viewerState)
+                    .filter(java.util.Objects::nonNull)
+                    .findFirst()
+                    .orElseGet(() -> contentViewerStateService.resolve(
+                                    viewerId, List.of(rootCoordinate), Map.of())
+                            .statesByCoordinate()
+                            .get(rootCoordinate));
+        }
         ContentNavigationDTO navigation = content.getType() == ContentType.EPISODE && pageDetailsAvailable
                 ? contentChildCardAssembler.assembleNavigation(
                         pageDetails.episodeNavigation(), rootCoordinate, viewerId,

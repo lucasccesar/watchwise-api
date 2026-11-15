@@ -75,7 +75,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
         validate(filter);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        diaryCompletionService.refreshStaleScopes(ownerId, java.time.Instant.now());
+        refreshCompletions(ownerId, filter);
         Page<DiaryViewRepository.DiaryViewKey> keys = diaryViewRepository.findPage(
                 ownerId,
                 owner.getPreferredRegion(),
@@ -97,7 +97,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
         userVisibilityService.assertCanView(viewerId, ownerId);
         validate(filter);
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        diaryCompletionService.refreshStaleScopes(ownerId, java.time.Instant.now());
+        refreshCompletions(ownerId, filter);
         var rows = diaryViewRepository.findGroupedPage(ownerId, owner.getPreferredRegion(),
                 owner.getPreferredLanguage(), java.time.Instant.now(), filter, pageRequest);
         var singletons = rows.stream().filter(row -> row.groupSize() == 1)
@@ -127,6 +127,11 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                     row.groupType(), row.seasonCount(), row.seasonNumbers(),
                     row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
         });
+    }
+
+    private void refreshCompletions(UUID ownerId, DiaryViewFilter filter) {
+        java.time.Instant now = java.time.Instant.now();
+        diaryCompletionService.refreshDiaryViewScopes(ownerId, now, filter.type() != ContentType.SEASON);
     }
 
     private Map<String, String> resolveGroupedBackdrops(

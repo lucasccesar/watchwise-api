@@ -13,22 +13,31 @@ public sealed interface ContentScheduleLookup
     record Found(
             ContentSchedule schedule,
             TmdbLookupOrigin origin,
-            Map<Integer, TmdbLookupOrigin> seasonOriginsByNumber) implements ContentScheduleLookup {
+            Map<Integer, TmdbLookupOrigin> seasonOriginsByNumber,
+            TmdbLookupOrigin seriesSummaryOrigin) implements ContentScheduleLookup {
 
         public Found {
             Objects.requireNonNull(schedule, "schedule is required");
             Objects.requireNonNull(origin, "origin is required");
+            Objects.requireNonNull(seriesSummaryOrigin, "seriesSummaryOrigin is required");
             seasonOriginsByNumber = seasonOriginsByNumber == null
                     ? Map.of()
                     : Collections.unmodifiableMap(new LinkedHashMap<>(seasonOriginsByNumber));
         }
 
         public Found(ContentSchedule schedule) {
-            this(schedule, TmdbLookupOrigin.REMOTE, Map.of());
+            this(schedule, TmdbLookupOrigin.REMOTE, Map.of(), TmdbLookupOrigin.REMOTE);
         }
 
         public Found(ContentSchedule schedule, TmdbLookupOrigin origin) {
-            this(schedule, origin, Map.of());
+            this(schedule, origin, Map.of(), origin);
+        }
+
+        public Found(
+                ContentSchedule schedule,
+                TmdbLookupOrigin origin,
+                Map<Integer, TmdbLookupOrigin> seasonOriginsByNumber) {
+            this(schedule, origin, seasonOriginsByNumber, origin);
         }
     }
 

@@ -4178,7 +4178,10 @@ paths:
         the owner's current ratings and reviews for the selected content IDs and fills
         derived completion opinion fields without per-item reads. Derived reviews are
         matched to the same content and watchNumber; only reviews with non-blank comment
-        text count. B4 owns opinion writes and eligibility rules.
+        text count. B4 owns opinion writes and eligibility rules. Missing or stale calendar
+        evidence does not fail this read: the response keeps persisted diary events, omits
+        unproven completions, and schedules a bounded background season-calendar repair.
+        A later read can include the completion after its trusted schedule is persisted.
       parameters:
         - name: grouped
           in: query
@@ -4228,7 +4231,6 @@ paths:
         "401": { description: Authentication required }
         "403": { description: Profile is private or the users are blocked }
         "404": { description: User not found }
-        "502": { description: Calendar schedule unavailable without a usable cached snapshot }
 
   /users/{userId}/diary/series:
     get:

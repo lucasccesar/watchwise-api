@@ -80,12 +80,30 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         return readSeason(seriesTmdbId, seasonNumber, region, language, tmdbClient::getCalendarSeasonDetails);
     }
 
+    @Override
+    public ContentScheduleLookup readCalendarSeasonFresh(
+            String seriesTmdbId, Integer seasonNumber, String region, String language) {
+        return readSeason(seriesTmdbId, seasonNumber, region, language,
+                tmdbClient::refreshCalendarSeasonDetails, tmdbClient::refreshTvFullDetails);
+    }
+
     private ContentScheduleLookup readSeason(
             String seriesTmdbId,
             Integer seasonNumber,
             String region,
             String language,
             SeasonDetailsReader seasonDetailsReader) {
+        return readSeason(seriesTmdbId, seasonNumber, region, language,
+                seasonDetailsReader, tmdbClient::getTvFullDetails);
+    }
+
+    private ContentScheduleLookup readSeason(
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            SeasonDetailsReader seasonDetailsReader,
+            TvDetailsReader tvDetailsReader) {
         if (seasonNumber == null || seasonNumber <= 0) {
             return new ContentScheduleLookup.NotFound(seasonNumber);
         }
@@ -97,7 +115,7 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
             return mapFailure(seasonLookup, seasonNumber);
         }
 
-        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tvDetailsReader.read(seriesTmdbId, language);
         return mapSeasonLookups(seriesTmdbId, seasonNumber, region, language, seasonLookup, seriesLookup);
     }
 
@@ -152,7 +170,8 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         return new ContentScheduleLookup.Found(
                 schedule,
                 season.origin(),
-                Map.of(seasonNumber, season.origin()));
+                Map.of(seasonNumber, season.origin()),
+                series.origin());
     }
 
     @Override

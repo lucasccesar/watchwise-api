@@ -64,7 +64,9 @@ public interface DiaryCompletionProjectionRepository extends JpaRepository<Diary
     @Query(value = """
             SELECT c.series_tmdb_id AS seriesTmdbId,
                    c.season_number AS seasonNumber,
-                   p.schedule_version AS scheduleVersion
+                   p.schedule_version AS scheduleVersion,
+                   p.history_revision AS historyRevision,
+                   p.valid_until AS validUntil
             FROM diary_completion_projections p
             JOIN contents c ON c.id = p.content_id
             WHERE p.user_id = :userId
@@ -76,6 +78,8 @@ public interface DiaryCompletionProjectionRepository extends JpaRepository<Diary
         String getSeriesTmdbId();
         Integer getSeasonNumber();
         Long getScheduleVersion();
+        Long getHistoryRevision();
+        java.time.Instant getValidUntil();
     }
 
     @Query(value = """

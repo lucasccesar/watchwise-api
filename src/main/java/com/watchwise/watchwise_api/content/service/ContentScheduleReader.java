@@ -15,6 +15,9 @@ public interface ContentScheduleReader {
 
     ContentScheduleLookup readCalendarSeason(String seriesTmdbId, Integer seasonNumber, String region, String language);
 
+    ContentScheduleLookup readCalendarSeasonFresh(
+            String seriesTmdbId, Integer seasonNumber, String region, String language);
+
     ContentScheduleLookup readCalendarSeason(
             String seriesTmdbId,
             Integer seasonNumber,

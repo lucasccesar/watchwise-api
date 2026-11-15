@@ -12,6 +12,9 @@ public interface CalendarScheduleProvider {
 
     CalendarScheduleLookup loadSeason(String seriesTmdbId, Integer seasonNumber, String region, String language);
 
+    CalendarScheduleLookup loadSeasonFresh(
+            String seriesTmdbId, Integer seasonNumber, String region, String language);
+
     CalendarScheduleLookup prepareSeason(
             String seriesTmdbId,
             Integer seasonNumber,

@@ -37,9 +37,9 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
     }
 
     @Override
-    public void synchronize(CalendarScheduleBatch batch, Instant checkedAt) {
-        if (batch.origin() == TmdbLookupOrigin.CACHE) {
-            return;
+    public boolean synchronize(CalendarScheduleBatch batch, Instant checkedAt) {
+        if (batch == null || batch.origin() != TmdbLookupOrigin.REMOTE) {
+            return false;
         }
 
         if (batch.movie() != null) {
@@ -48,27 +48,34 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
             if (snapshotStore.upsertMovie(movie)) {
                 movieScheduleCache.invalidate(batch.movie().tmdbId() + "|" + batch.movie().language());
             }
-            return;
+            return true;
         }
 
-        CalendarSeasonSchedule season = batch.season().withCheckTimes(
-                checkedAt, releaseDate -> CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
-        if (batch.expectedEpisodeCount() == null
-                || batch.expectedEpisodeCount() != season.episodes().size()
+        CalendarSeasonSchedule sourceSeason = batch.season();
+        if (sourceSeason == null
+                || batch.expectedEpisodeCount() == null
+                || batch.expectedEpisodeCount() <= 0
+                || batch.expectedEpisodeCount() != sourceSeason.episodes().size()
                 || batch.key().type() != com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                || !batch.key().tmdbId().equals(season.seriesTmdbId())
-                || !batch.key().preferredRegion().equals(season.region())
-                || !batch.key().preferredLanguage().equals(season.language())
-                || season.seasonNumber() == null || season.seasonNumber() <= 0
-                || season.episodes().stream().anyMatch(episode -> episode.episodeNumber() == null
-                        || episode.episodeNumber() <= 0)
-                || new HashSet<>(season.episodeCoordinates()).size() != season.episodes().size()) {
-            return;
+                || !batch.key().tmdbId().equals(sourceSeason.seriesTmdbId())
+                || !batch.key().preferredRegion().equals(sourceSeason.region())
+                || !batch.key().preferredLanguage().equals(sourceSeason.language())
+                || sourceSeason.seasonNumber() == null || sourceSeason.seasonNumber() <= 0
+                || sourceSeason.episodes().stream().anyMatch(episode -> episode.episodeNumber() == null
+                        || episode.episodeNumber() <= 0 || episode.releaseDate() == null)
+                || new HashSet<>(sourceSeason.episodeCoordinates()).size() != sourceSeason.episodes().size()) {
+            return false;
         }
-        if (snapshotStore.reconcileSeason(season, checkedAt)) {
+
+        CalendarSeasonSchedule season = sourceSeason.withCheckTimes(
+                checkedAt, releaseDate -> CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
+        CalendarScheduleSnapshotStore.SeasonReconciliationResult result =
+                snapshotStore.reconcileSeasonWithStatus(season, checkedAt);
+        if (result.factsChanged()) {
             seasonScheduleCache.invalidate(
                     batch.season().seriesTmdbId() + "|" + batch.season().seasonNumber() + "|" + batch.season().language());
         }
+        return result.accepted();
     }
 
     @Override

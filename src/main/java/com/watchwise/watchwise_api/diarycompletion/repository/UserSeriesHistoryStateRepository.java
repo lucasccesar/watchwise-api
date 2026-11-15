@@ -7,10 +7,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import java.util.UUID;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeriesHistoryState, UserSeriesHistoryState.Key> {
     @Modifying
@@ -32,6 +33,17 @@ public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeri
     List<UserSeriesHistoryState> findByUserIdAndSeriesTmdbIdIn(
             @Param("userId") UUID userId,
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Modifying
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Query(value = """
+            UPDATE user_series_history_states
+            SET valid_until = :invalidUntil, version = version + 1
+            WHERE user_id = :userId
+            """, nativeQuery = true)
+    int invalidateScheduleValidityForUser(
+            @Param("userId") UUID userId,
+            @Param("invalidUntil") Instant invalidUntil);
 
     @Query(value = "SELECT history_revision FROM user_series_history_states WHERE user_id = :userId AND series_tmdb_id = :seriesTmdbId",
             nativeQuery = true)

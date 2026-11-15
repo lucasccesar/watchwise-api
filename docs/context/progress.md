@@ -5946,3 +5946,30 @@ Os cards de série do Summary do próprio perfil agora expõem `viewerState.myRa
 `viewerState.currentRatingVersion` para Top 5, atividade recente e reviews com alvo SERIES. O Summary
 agrupa os IDs locais e usa uma única consulta de ContentRating, compartilhando nota e versão entre os
 cards da mesma série. Visitantes continuam recebendo `viewerState` nulo.
+
+## 2026-11-14 — Reconhecimento de temporadas completas no diário
+
+O registro bulk de temporadas e séries agora reaproveita o detalhe TMDB de cada temporada para criar os
+eventos e reconciliar a agenda, sem buscar os mesmos detalhes de temporada novamente. A reconciliação
+persiste somente respostas remotas completas e preserva snapshots confiáveis quando a resposta nova é
+parcial ou antiga.
+
+O GET do diário recalcula conclusões a partir dos snapshots persistidos. Agendas ausentes ou inválidas
+iniciam reparos limitados em segundo plano; a resposta mantém os episódios registrados e só passa a
+exibir a conclusão depois que uma agenda completa for persistida e o histórico local for recalculado.
+Cada leitura consulta até 32 candidatas em páginas rotativas por dono, admite até quatro reparos novos e
+o processo limita a 32 reparos simultâneos/enfileirados. A falha de uma temporada não bloqueia as
+próximas candidatas. A raiz da página de temporada reutiliza o estado resolvido para o card da própria
+temporada. A mudança das preferências de região ou idioma invalida as projeções antes que um marcador
+de outro locale com o mesmo número de versão possa ser usado; uma publicação concorrente também
+revalida as preferências e o conjunto completo de versões dos marcadores.
+
+O reparo remoto ignora cache tanto para os detalhes da temporada quanto para o resumo da série que
+define a contagem esperada. Quando a leitura local passa a provar uma passada completa, o recálculo pode
+atualizar as projeções SEASON e SERIES do dono, sem criar uma conclusão de série com escopo incompleto.
+
+O teste integrado usa Modern Family (TMDB 1421) com 24 episódios na primeira temporada. Ele confirma
+24 eventos no POST, `groupType=SEASON` e `ratingContentId` da temporada no diário agrupado, conclusão
+SEASON no diário individual e `WATCHED` na página da temporada e no card da página da série; não cria
+projeção SERIES. A bateria focal passou com 321 testes, e as regressões de query-count, repositório e
+página também passaram.

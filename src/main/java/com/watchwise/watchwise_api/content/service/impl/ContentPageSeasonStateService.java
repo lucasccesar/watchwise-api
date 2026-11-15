@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ContentPageSeasonStateService {
 
+    private static final int MAX_SEASON_REPAIRS_PER_PAGE = 4;
+
     private final DiaryEntryRepository diaryEntryRepository;
     private final CalendarScheduleCompletenessRepository completenessRepository;
     private final CalendarScheduleSnapshotRepository snapshotRepository;
@@ -115,6 +117,7 @@ public class ContentPageSeasonStateService {
         LocalDate today = LocalDate.now(clock);
         LocalDateTime checkedAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         Map<ContentCoordinate, ContentViewerStateDTO> result = new LinkedHashMap<>();
+        int admittedRepairs = 0;
         for (ContentCoordinate coordinate : coordinates) {
             Integer seasonNumber = coordinate.seasonNumber();
             ContentViewerStateDTO base = stateByCoordinate.get(coordinate);
@@ -153,7 +156,11 @@ public class ContentPageSeasonStateService {
             }
 
             if (!trustedSchedule) {
-                scheduleRefreshService.refreshSeasonInBackground(seriesTmdbId, seasonNumber, region, language);
+                if (admittedRepairs < MAX_SEASON_REPAIRS_PER_PAGE
+                        && scheduleRefreshService.refreshSeasonInBackground(
+                                seriesTmdbId, seasonNumber, region, language)) {
+                    admittedRepairs++;
+                }
                 result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
                 continue;
             }
