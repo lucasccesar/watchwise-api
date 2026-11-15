@@ -35,6 +35,8 @@ public interface DiaryEntryService {
 
     DiaryEntryResponseDTO getDiaryEntry(UUID viewerId, UUID diaryEntryId);
 
+    List<DiaryEntryResponseDTO> getDiaryEntriesByIds(UUID viewerId, UUID userId, List<UUID> entryIds);
+
     List<DiaryDaySummaryDTO> getDiaryDailySummary(
             UUID viewerId, UUID userId, ContentType type, LocalDate dateFrom, LocalDate dateTo,
             Boolean hasReview, String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo);

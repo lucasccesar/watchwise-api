@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.diaryentry.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
@@ -26,6 +27,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewResponseItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewGroupedItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewReviewPreviewDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewSeasonEpisodeCountDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryViewRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -37,6 +39,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -60,6 +63,9 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     private final ContentRatingPassRepository contentRatingPassRepository;
     private final ContentReviewRepository contentReviewRepository;
     private final PageRequestFactory pageRequestFactory;
+
+    private static final int GROUPED_VIEW_MAX_PAGE_SIZE = 30;
+    private static final long GROUPED_VIEW_ITEM_BUDGET = 300;
 
     @Override
     public Page<DiaryViewItemDTO> getView(
@@ -87,6 +93,32 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     }
 
     @Override
+    public CursorPageResponseDTO<DiaryViewResponseItemDTO> getGroupedView(UUID viewerId, UUID ownerId,
+            DiaryViewFilter filter, String cursor, Integer pageSize) {
+        User owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
+        userVisibilityService.assertCanView(viewerId, ownerId);
+        validate(filter);
+
+        int effectiveSize = pageRequestFactory.build(0, pageSize, GROUPED_VIEW_MAX_PAGE_SIZE).getPageSize();
+        var cursorPosition = DiaryViewCursorCodec.decode(cursor, ownerId, filter);
+        if (cursorPosition == null) {
+            refreshCompletions(ownerId, filter);
+        }
+        List<DiaryViewRepository.GroupedDiaryViewKey> candidates = diaryViewRepository.findGroupedCandidates(
+                ownerId, owner.getPreferredRegion(), owner.getPreferredLanguage(), java.time.Instant.now(),
+                filter, cursorPosition, effectiveSize + 1);
+        List<DiaryViewRepository.GroupedDiaryViewKey> selected = selectGroupedCandidates(candidates, effectiveSize);
+        boolean hasNext = candidates.size() > selected.size();
+        String nextCursor = hasNext && !selected.isEmpty()
+                ? DiaryViewCursorCodec.encode(ownerId, filter, selected.getLast().nextPosition())
+                : null;
+        List<DiaryViewResponseItemDTO> content = enrichGroupedRows(ownerId, owner, selected);
+        return new CursorPageResponseDTO<>(content, effectiveSize, nextCursor, hasNext);
+    }
+
+    @Override
     public Page<DiaryViewResponseItemDTO> getView(UUID viewerId, UUID ownerId, DiaryViewFilter filter,
             Integer pageNumber, Integer pageSize, boolean grouped) {
         if (!grouped || (filter != null && Boolean.TRUE.equals(filter.hasReview()))) {
@@ -100,6 +132,36 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
         refreshCompletions(ownerId, filter);
         var rows = diaryViewRepository.findGroupedPage(ownerId, owner.getPreferredRegion(),
                 owner.getPreferredLanguage(), java.time.Instant.now(), filter, pageRequest);
+        return new org.springframework.data.domain.PageImpl<>(
+                enrichGroupedRows(ownerId, owner, rows.getContent()), rows.getPageable(), rows.getTotalElements());
+    }
+
+    private List<DiaryViewRepository.GroupedDiaryViewKey> selectGroupedCandidates(
+            List<DiaryViewRepository.GroupedDiaryViewKey> candidates, int pageSize) {
+        List<DiaryViewRepository.GroupedDiaryViewKey> selected = new ArrayList<>();
+        long representedItemCount = 0;
+        for (var candidate : candidates) {
+            if (selected.size() == pageSize) {
+                break;
+            }
+            long candidateItemCount = candidate.representedItemCount();
+            if (!selected.isEmpty() && representedItemCount + candidateItemCount > GROUPED_VIEW_ITEM_BUDGET) {
+                break;
+            }
+            selected.add(candidate);
+            representedItemCount += candidateItemCount;
+            if (candidateItemCount > GROUPED_VIEW_ITEM_BUDGET || representedItemCount >= GROUPED_VIEW_ITEM_BUDGET) {
+                break;
+            }
+        }
+        return List.copyOf(selected);
+    }
+
+    private List<DiaryViewResponseItemDTO> enrichGroupedRows(UUID ownerId, User owner,
+            List<DiaryViewRepository.GroupedDiaryViewKey> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
         var singletons = rows.stream().filter(row -> row.groupSize() == 1)
                 .map(DiaryViewRepository.GroupedDiaryViewKey::item).toList();
         var individualItems = enrich(ownerId, new org.springframework.data.domain.PageImpl<>(singletons))
@@ -111,11 +173,12 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                         .filter(Objects::nonNull).distinct().toList()).stream()
                 .collect(Collectors.toMap(Content::getId, contentMapper::contentToContentRefDto));
         Map<String, String> backdropPaths = resolveGroupedBackdrops(rows, owner);
-        return rows.map(row -> {
+        return rows.stream().<DiaryViewResponseItemDTO>map(row -> {
             var key = row.item();
             if (row.groupSize() == 1) {
-                return individualItems.get("PERSISTED_ENTRY".equals(key.kind())
+                var individual = individualItems.get("PERSISTED_ENTRY".equals(key.kind())
                         ? key.targetId().toString() : completionKey(key));
+                return individual == null ? null : individual.withRelatedDiaryEntryIds(row.memberEntryIds());
             }
             ContentRefDTO series = row.seriesContentId() == null ? null : seriesRefs.get(row.seriesContentId());
             if (series == null) {
@@ -125,8 +188,11 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
             return new DiaryViewGroupedItemDTO("GROUPED", series, row.ratingContentId(),
                     backdropPaths.get(row.seriesTmdbId()),
                     row.groupType(), row.seasonCount(), row.seasonNumbers(),
-                    row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt());
-        });
+                    row.episodeCount(), row.totalRuntimeMinutes(), row.groupDate(), key.watchNumber(), key.orderedAt(),
+                    row.seasonEpisodeCounts().stream()
+                            .map(count -> new DiaryViewSeasonEpisodeCountDTO(count.seasonNumber(), count.episodeCount()))
+                            .toList(), row.memberEntryIds());
+        }).toList();
     }
 
     private void refreshCompletions(UUID ownerId, DiaryViewFilter filter) {
@@ -135,7 +201,7 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     }
 
     private Map<String, String> resolveGroupedBackdrops(
-            Page<DiaryViewRepository.GroupedDiaryViewKey> rows, User owner) {
+            List<DiaryViewRepository.GroupedDiaryViewKey> rows, User owner) {
         List<String> seriesTmdbIds = rows.stream()
                 .filter(row -> row.groupSize() > 1)
                 .map(DiaryViewRepository.GroupedDiaryViewKey::seriesTmdbId)
@@ -217,7 +283,8 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                         .limit(3)
                         .map(this::toReviewPreview)
                         .toList(),
-                reviews.size());
+                reviews.size(),
+                List.of());
         });
     }
 
@@ -283,6 +350,9 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
         if (filter.dateStart() != null && filter.dateEnd() != null
                 && filter.dateStart().isAfter(filter.dateEnd())) {
             throw new BadRequestException("dateStart cannot be after dateEnd");
+        }
+        if (filter.seriesTmdbId() != null && filter.seriesTmdbId().isBlank()) {
+            throw new BadRequestException("seriesTmdbId cannot be blank");
         }
     }
 }

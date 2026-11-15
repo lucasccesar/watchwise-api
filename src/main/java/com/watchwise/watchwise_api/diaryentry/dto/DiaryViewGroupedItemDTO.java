@@ -19,9 +19,13 @@ public record DiaryViewGroupedItemDTO(
         Long totalRuntimeMinutes,
         LocalDate groupDate,
         Integer watchNumber,
-        Instant orderedAt) implements DiaryViewResponseItemDTO {
+        Instant orderedAt,
+        List<DiaryViewSeasonEpisodeCountDTO> seasonEpisodeCounts,
+        List<UUID> memberEntryIds) implements DiaryViewResponseItemDTO {
     public DiaryViewGroupedItemDTO {
         kind = "GROUPED";
         seasonNumbers = List.copyOf(seasonNumbers);
+        seasonEpisodeCounts = List.copyOf(seasonEpisodeCounts);
+        memberEntryIds = List.copyOf(memberEntryIds);
     }
 }

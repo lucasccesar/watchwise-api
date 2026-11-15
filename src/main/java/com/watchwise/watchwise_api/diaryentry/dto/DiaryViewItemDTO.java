@@ -19,10 +19,17 @@ public record DiaryViewItemDTO(
         Integer currentScore,
         Long currentRatingVersion,
         List<DiaryViewReviewPreviewDTO> reviewPreviews,
-        long reviewCount) implements DiaryViewResponseItemDTO {
+        long reviewCount,
+        List<UUID> relatedDiaryEntryIds) implements DiaryViewResponseItemDTO {
 
     public DiaryViewItemDTO {
         reviewPreviews = reviewPreviews == null ? List.of() : List.copyOf(reviewPreviews);
+        relatedDiaryEntryIds = relatedDiaryEntryIds == null ? List.of() : List.copyOf(relatedDiaryEntryIds);
+    }
+
+    public DiaryViewItemDTO withRelatedDiaryEntryIds(List<UUID> entryIds) {
+        return new DiaryViewItemDTO(kind, diaryEntryId, completionKey, content, watchNumber, anchorEntryId,
+                watchedDate, orderedAt, currentScore, currentRatingVersion, reviewPreviews, reviewCount, entryIds);
     }
 
     public enum Kind {

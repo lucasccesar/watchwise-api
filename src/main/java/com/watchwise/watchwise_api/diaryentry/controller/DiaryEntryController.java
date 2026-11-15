@@ -2,12 +2,14 @@ package com.watchwise.watchwise_api.diaryentry.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.dto.PageWithBackdropResponseDTO;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntriesBatchRequestDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -89,8 +91,16 @@ public class DiaryEntryController {
         return ResponseEntity.ok(PageWithBackdropResponseDTO.of(entries, backdropPath));
     }
 
+    @PostMapping("/users/{userId}/diary/batch")
+    public ResponseEntity<List<DiaryEntryResponseDTO>> getDiaryEntriesByIds(
+            @PathVariable UUID userId,
+            @Valid @RequestBody DiaryEntriesBatchRequestDTO request) {
+        return ResponseEntity.ok(diaryEntryService.getDiaryEntriesByIds(
+                getCurrentUserId(), userId, request.entryIds()));
+    }
+
     @GetMapping("/users/{userId}/diary/view")
-    public ResponseEntity<PageResponseDTO<DiaryViewResponseItemDTO>> getDiaryView(
+    public ResponseEntity<?> getDiaryView(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -100,11 +110,26 @@ public class DiaryEntryController {
             @RequestParam(required = false) Integer scoreMin,
             @RequestParam(required = false) Integer scoreMax,
             @RequestParam(required = false) Boolean hasReview,
-            @RequestParam(defaultValue = "false") boolean grouped) {
+            @RequestParam(required = false) String seriesTmdbId,
+            @RequestParam(required = false) Boolean watchedInTheater,
+            @RequestParam(defaultValue = "NEWEST") DiaryEntrySort sortBy,
+            @RequestParam(defaultValue = "false") boolean grouped,
+            @RequestParam(required = false) String cursor) {
+        boolean cursorGroupedView = grouped && !Boolean.TRUE.equals(hasReview);
+        if (cursor != null && !cursorGroupedView) {
+            throw new BadRequestException("cursor requires grouped=true and hasReview=false");
+        }
+        if (cursorGroupedView && page != null && page > 1) {
+            throw new BadRequestException("Use cursor instead of page for grouped diary views");
+        }
+        DiaryViewFilter filter = new DiaryViewFilter(type, dateStart, dateEnd, scoreMin, scoreMax, hasReview,
+                seriesTmdbId, watchedInTheater, sortBy);
+        if (cursorGroupedView) {
+            return ResponseEntity.ok(diaryViewService.getGroupedView(
+                    getCurrentUserId(), userId, filter, cursor, size));
+        }
         Page<DiaryViewResponseItemDTO> view = diaryViewService.getView(
-                getCurrentUserId(), userId,
-                new DiaryViewFilter(type, dateStart, dateEnd, scoreMin, scoreMax, hasReview),
-                page, size, grouped);
+                getCurrentUserId(), userId, filter, page, size, false);
         return ResponseEntity.ok(PageResponseDTO.of(view));
     }
 

@@ -324,6 +324,33 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<DiaryEntryResponseDTO> getDiaryEntriesByIds(UUID viewerId, UUID userId, List<UUID> entryIds) {
+        if (entryIds == null || entryIds.isEmpty()) {
+            return List.of();
+        }
+        if (entryIds.size() > 500) {
+            throw new BadRequestException("At most 500 diary entry IDs can be requested");
+        }
+
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewDiary(viewerId, userId, target);
+
+        List<UUID> uniqueIds = entryIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (uniqueIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, Integer> requestedOrder = IntStream.range(0, uniqueIds.size()).boxed()
+                .collect(Collectors.toMap(uniqueIds::get, index -> index));
+        List<DiaryEntry> entries = diaryEntryRepository.findByIdInWithContentAndUser(uniqueIds).stream()
+                .filter(entry -> userId.equals(entry.getUser().getId()))
+                .sorted(Comparator.comparingInt(entry -> requestedOrder.getOrDefault(entry.getId(), Integer.MAX_VALUE)))
+                .toList();
+        return enrichDiaryPage(viewerId, userId, target, new PageImpl<>(entries)).getContent();
+    }
+
+    @Override
     public List<DiaryDaySummaryDTO> getDiaryDailySummary(
             UUID viewerId, UUID userId, ContentType type, LocalDate dateFrom, LocalDate dateTo,
             Boolean hasReview, String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo) {

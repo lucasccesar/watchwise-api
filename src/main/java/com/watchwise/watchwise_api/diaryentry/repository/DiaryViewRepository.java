@@ -23,9 +23,19 @@ public interface DiaryViewRepository {
     Page<GroupedDiaryViewKey> findGroupedPage(UUID ownerId, String region, String language,
             Instant now, DiaryViewFilter filter, Pageable pageable);
 
+    List<GroupedDiaryViewKey> findGroupedCandidates(UUID ownerId, String region, String language,
+            Instant now, DiaryViewFilter filter, DiaryViewCursorPosition cursor, int candidateLimit);
+
     record GroupedDiaryViewKey(DiaryViewKey item, long groupSize, ContentType groupType,
             LocalDate groupDate, UUID seriesContentId, UUID ratingContentId, String seriesTmdbId,
-            int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes) { }
+            int seasonCount, List<Integer> seasonNumbers, int episodeCount, Long totalRuntimeMinutes,
+            List<SeasonEpisodeCount> seasonEpisodeCounts, List<UUID> memberEntryIds, long representedItemCount,
+            DiaryViewCursorPosition nextPosition) { }
+
+    record SeasonEpisodeCount(int seasonNumber, int episodeCount) { }
+
+    record DiaryViewCursorPosition(Instant groupSortAt, UUID groupSortId, int kindRank, int contentTypeRank,
+            Instant orderedAt, UUID targetId, Integer sortScore) { }
 
     record DiaryViewKey(
             String kind,
