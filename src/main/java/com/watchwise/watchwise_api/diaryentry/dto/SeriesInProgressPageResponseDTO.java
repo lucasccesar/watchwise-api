@@ -9,9 +9,21 @@ public record SeriesInProgressPageResponseDTO(
         long totalElements,
         int totalPages,
         boolean hasNext,
-        SeriesInProgressAggregateDTO aggregate) {
+        SeriesInProgressAggregateDTO aggregate,
+        String backdropPath) {
 
     public SeriesInProgressPageResponseDTO {
         content = List.copyOf(content);
+    }
+
+    public SeriesInProgressPageResponseDTO(
+            List<SeriesInProgressResponseDTO> content,
+            int page,
+            int size,
+            long totalElements,
+            int totalPages,
+            boolean hasNext,
+            SeriesInProgressAggregateDTO aggregate) {
+        this(content, page, size, totalElements, totalPages, hasNext, aggregate, null);
     }
 }

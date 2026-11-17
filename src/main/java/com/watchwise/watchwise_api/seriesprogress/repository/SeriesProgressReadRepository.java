@@ -194,6 +194,11 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                    remaining_runtime_minutes AS remainingRuntimeMinutes
             FROM candidate_rows
             ORDER BY
+                CASE
+                    WHEN total_released_episode_count > 0
+                         AND watched_episode_count >= total_released_episode_count
+                    THEN 1 ELSE 0
+                END ASC,
                 CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'ASC' THEN last_watched_date END ASC NULLS LAST,
                 CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'ASC' THEN last_watched_created_at END ASC NULLS LAST,
                 CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'DESC' THEN last_watched_date END DESC NULLS LAST,

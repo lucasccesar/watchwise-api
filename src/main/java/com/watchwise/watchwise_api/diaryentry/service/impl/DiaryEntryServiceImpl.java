@@ -431,7 +431,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             List<SeriesProgressReadRepository.SeriesProgressCandidate> batch = allRows.subList(start, end);
             List<SeriesInProgressResponseDTO> presented;
             try {
-                presented = assembleSeriesProgressRows(target, userId, batch, snapshots);
+                presented = assembleSeriesProgressRows(target, userId, batch, snapshots).content();
             } catch (TmdbUnavailableException exception) {
                 if (candidatesWithNextEpisode.isEmpty()) {
                     throw exception;
@@ -487,8 +487,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Page<SeriesProgressReadRepository.SeriesProgressCandidate> page =
                 seriesProgressReadRepository.findCandidatesByUserId(
                         userId, effectiveSort, effectiveDirection, pageRequest);
-        List<SeriesInProgressResponseDTO> content = assembleSeriesProgressRows(
-                        target, userId, page.getContent(), snapshots).stream()
+        AssembledSeriesProgress assembled = assembleSeriesProgressRows(
+                target, userId, page.getContent(), snapshots);
+        List<SeriesInProgressResponseDTO> content = assembled.content().stream()
                 .map(this::omitFullyWatchedSeasonProgress)
                 .toList();
         SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
@@ -500,7 +501,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 page.getTotalElements(),
                 page.getTotalPages(),
                 page.hasNext(),
-                aggregate);
+                aggregate,
+                assembled.backdropPath());
     }
 
     private SeriesInProgressResponseDTO omitFullyWatchedSeasonProgress(SeriesInProgressResponseDTO series) {
@@ -516,13 +518,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .withCompletedSeasonProgress(completedSeasons);
     }
 
-    private List<SeriesInProgressResponseDTO> assembleSeriesProgressRows(
+    private AssembledSeriesProgress assembleSeriesProgressRows(
             User target,
             UUID userId,
             List<SeriesProgressReadRepository.SeriesProgressCandidate> rows,
             Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots) {
         if (rows.isEmpty()) {
-            return List.of();
+            return new AssembledSeriesProgress(List.of(), null);
         }
 
         List<String> seriesIds = rows.stream()
@@ -556,7 +558,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                                 target, rows, seasonProgressBySeries, watchedCoordinates, customPosterBySeries))
                 .orElseGet(Map::of);
 
-        return rows.stream()
+        List<SeriesInProgressResponseDTO> content = rows.stream()
                 .map(row -> {
                     SeriesInProgressResponseDTO base = baseResponses.get(row.getSeriesTmdbId());
                     SeriesProgressPresentationEnricher.Enrichment enrichment = presentation.get(row.getSeriesTmdbId());
@@ -567,6 +569,18 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                                     enrichment.lastWatchedEpisodeTitle(), enrichment.nextEpisode());
                 })
                 .toList();
+        String firstSeriesId = rows.get(0).getSeriesTmdbId();
+        SeriesProgressPresentationEnricher.Enrichment firstPresentation = presentation.get(firstSeriesId);
+        String backdropPath = firstPresentation == null ? null : firstPresentation.seriesBackdropPath();
+        return new AssembledSeriesProgress(content, backdropPath);
+    }
+
+    private record AssembledSeriesProgress(
+            List<SeriesInProgressResponseDTO> content,
+            String backdropPath) {
+        private AssembledSeriesProgress {
+            content = List.copyOf(content);
+        }
     }
 
     private Map<String, SeriesProgressMetadataRefreshService.Snapshot> refreshSnapshots(

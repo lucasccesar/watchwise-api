@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.seriesprogress.service;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImagePathBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
@@ -56,7 +57,7 @@ public class SeriesProgressPresentationEnricher {
         String seriesTmdbId = row.getSeriesTmdbId();
         TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
         if (!(seriesLookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found)) {
-            return new Enrichment(null, null, null, null);
+            return new Enrichment(null, null, null, null, null);
         }
 
         TmdbTvFullDetails series = found.value();
@@ -73,7 +74,9 @@ public class SeriesProgressPresentationEnricher {
             // Presentation enrichment is optional; the numeric progress row remains usable.
         }
 
-        return new Enrichment(series.name(), series.posterPath(), lastEpisodeTitle, nextEpisode);
+        return new Enrichment(
+                series.name(), series.posterPath(), TmdbImagePathBuilder.backdropPath(series.backdropPath()),
+                lastEpisodeTitle, nextEpisode);
     }
 
     private String resolveLastEpisodeTitle(
@@ -95,7 +98,16 @@ public class SeriesProgressPresentationEnricher {
     public record Enrichment(
             String seriesTitle,
             String seriesPosterPath,
+            String seriesBackdropPath,
             String lastWatchedEpisodeTitle,
             ProgressEpisodeDTO nextEpisode) {
+
+        public Enrichment(
+                String seriesTitle,
+                String seriesPosterPath,
+                String lastWatchedEpisodeTitle,
+                ProgressEpisodeDTO nextEpisode) {
+            this(seriesTitle, seriesPosterPath, null, lastWatchedEpisodeTitle, nextEpisode);
+        }
     }
 }
