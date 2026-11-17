@@ -176,7 +176,7 @@ class ContentCardAssemblerTest {
         UUID contentId = UUID.randomUUID();
         when(contentViewerStateService.resolve(isNull(), eq(List.of(coordinate)), eq(Map.of())))
                 .thenReturn(resolution(coordinate, contentId, emptyState()));
-        when(contentStatsService.getStatsBatch(List.of(contentId)))
+        when(contentStatsService.getCommunityStatsBatch(List.of(contentId)))
                 .thenReturn(List.of(new com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO(
                         contentId, 8.5, 12, 3, 4)));
 
@@ -188,8 +188,8 @@ class ContentCardAssemblerTest {
 
         assertThat(card.stats()).isEqualTo(new ContentCardStatsDTO(8.5, 12L, 3L, 4L));
         assertThat(card.viewerState()).isNull();
-        verify(contentStatsService).getStatsBatch(List.of(contentId));
-        verifyNoInteractions(tmdbCardMetadataResolver, userContentPosterService);
+        verify(contentStatsService).getCommunityStatsBatch(List.of(contentId));
+        verifyNoInteractions(userContentPosterService);
     }
 
     @Test
@@ -244,6 +244,24 @@ class ContentCardAssemblerTest {
         verify(contentViewerStateService).resolve(VIEWER_ID, List.of(coordinate), Map.of());
         verify(contentViewerStateService).resolve(OTHER_VIEWER_ID, List.of(coordinate), Map.of());
         verifyNoInteractions(contentStatsService, tmdbCardMetadataResolver, userContentPosterService);
+    }
+
+    @Test
+    void watchlistMembershipDoesNotRequestEpisodeProgress() {
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.SERIES, "1396", null, null, null);
+        ContentViewerStateDTO state = state(8, true);
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of(), false))
+                .thenReturn(resolution(coordinate, UUID.randomUUID(), state));
+
+        ContentCardDTO card = assembler().assemble(
+                List.of(new ContentCardSpec(coordinate, "Breaking Bad", null, null, null)),
+                new ContentCardContext(null, null, null, VIEWER_ID),
+                Set.of(ContentCardFieldSet.WATCHLIST_MEMBERSHIP)).get(coordinate);
+
+        assertThat(card.viewerState().inWatchlist()).isTrue();
+        assertThat(card.viewerState().watchStatus()).isNull();
+        assertThat(card.viewerState().watchedEpisodeCount()).isNull();
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(coordinate), Map.of(), false);
     }
 
     @Test
@@ -310,6 +328,8 @@ class ContentCardAssemblerTest {
                 .isEqualTo(8);
         assertThat(second.viewerState()).extracting(ContentCardViewerStateDTO::myRating)
                 .isEqualTo(4);
+        assertThat(first.viewerState().watchedEpisodeCount()).isEqualTo(1);
+        assertThat(first.viewerState().releasedEpisodeCount()).isEqualTo(5);
         mockServer.verify();
     }
 
@@ -329,7 +349,7 @@ class ContentCardAssemblerTest {
         assertThat(card.contentId()).isNull();
         assertThat(card.stats()).isEqualTo(new ContentCardStatsDTO(null, 0L, 0L, 0L));
         assertThat(card.customPosterUrl()).isNull();
-        verifyNoInteractions(contentStatsService, userContentPosterService, tmdbCardMetadataResolver);
+        verifyNoInteractions(contentStatsService, userContentPosterService);
     }
 
     @Test

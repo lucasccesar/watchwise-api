@@ -154,6 +154,36 @@ class ContentPageServiceImplTest {
     }
 
     @Test
+    void shouldNotInferSeriesEpisodeCountsFromAnAiredSummaryWithoutTrustedViewerCounts() {
+        UUID seriesId = UUID.randomUUID();
+        Content series = content(ContentType.SERIES, seriesId, "1399", null, null, null);
+        List<SeasonSummaryDTO> seasonSummaries = List.of(
+                new SeasonSummaryDTO(1, "Season 1", null, null, 10, 3));
+        ContentDetailsDTO seriesDetails = detailsWithSeasons(seriesId, ContentType.SERIES, seasonSummaries);
+        ContentCoordinate coordinate = ContentCoordinate.from(series);
+        ContentViewerStateDTO baseState = viewerState();
+        ContentViewerStateDTO seasonState = viewerState();
+        ContentChildCardDTO seasonCard = new ContentChildCardDTO(
+                null, ContentType.SEASON, null, "1399", 1, 3, null,
+                "Season 1", null, null, null, null, null, seasonState);
+        ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(seasonCard), List.of(), List.of());
+        stubCommonPageReads(series, seriesDetails, coordinate);
+        when(contentChildCardAssembler.assembleSectionsWithSeasonSummaries(
+                seriesDetails, seasonSummaries, coordinate, VIEWER_ID, "US", "en-US"))
+                .thenReturn(sections);
+        when(contentChildCardAssembler.assembleNavigation(seriesDetails, null, coordinate, VIEWER_ID))
+                .thenReturn(null);
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of()))
+                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, baseState), Map.of()));
+
+        ContentPageDTO result = contentPageService.getPage(seriesId, VIEWER_ID);
+
+        assertThat(result.viewerState().watchStatus()).isEqualTo(WatchStatus.UNWATCHED);
+        assertThat(result.viewerState().watchedEpisodeCount()).isNull();
+        assertThat(result.viewerState().releasedEpisodeCount()).isNull();
+    }
+
+    @Test
     @DisplayName("[getPage] Should Use Season Summaries Without Loading The Parent Series")
     void shouldUseSeasonSummariesWithoutLoadingTheParentSeries() {
         UUID seasonId = UUID.randomUUID();
@@ -323,6 +353,14 @@ class ContentPageServiceImplTest {
                 contentId, type, "Title", null, posterPath, null, null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 null, null, List.of(), List.of(), List.of());
+    }
+
+    private ContentDetailsDTO detailsWithSeasons(
+            UUID contentId, ContentType type, List<SeasonSummaryDTO> seasons) {
+        return new ContentDetailsDTO(
+                contentId, type, "Title", null, "/poster.jpg", null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), seasons,
+                List.of(), List.of(), null, null, List.of(), List.of(), List.of());
     }
 
     private ContentDetailsDTO detailsWithCrew(UUID contentId, ContentType type, String posterPath) {

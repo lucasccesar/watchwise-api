@@ -14,21 +14,31 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRatings;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentWatchProgressRepository;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.ContentStateResolver;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.TestEmailConfirmationSender;
 import com.watchwise.watchwise_api.user.service.TestRegistrationHelper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestReporter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.RowCallbackHandler;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -38,13 +48,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -76,6 +91,10 @@ class DiarySeasonCompletionIntegrationTest {
     private TestEmailConfirmationSender emailConfirmationSender;
     @Autowired
     private ContentRepository contentRepository;
+    @Autowired
+    private ContentWatchProgressRepository watchProgressRepository;
+    @MockitoSpyBean
+    private NamedParameterJdbcTemplate namedParameterJdbcTemplate;
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
     @Autowired
@@ -160,7 +179,7 @@ class DiarySeasonCompletionIntegrationTest {
                         .param("grouped", "true")
                         .cookie(owner.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].groupType").value("SEASON"))
                 .andExpect(jsonPath("$.content[0].episodeCount").value(24))
                 .andExpect(jsonPath("$.content[0].seasonNumbers[0]").value(SEASON_NUMBER))
@@ -187,6 +206,262 @@ class DiarySeasonCompletionIntegrationTest {
                 .isEmpty();
         verify(tmdbClient, never()).getCalendarSeasonDetails(
                 SERIES_TMDB_ID, SEASON_NUMBER, user.getPreferredLanguage());
+    }
+
+    @Test
+    @DisplayName("[diaryBulkViewerState] Should Return Watched Series Progress Before Any Diary Or Rating Read - When All Released Episodes Were Logged")
+    void shouldReturnWatchedSeriesProgressImmediatelyAfterBulkWhenUpcomingEpisodeRemains(
+            TestReporter testReporter) throws Exception {
+        String seriesTmdbId = "1422" + Math.abs(System.nanoTime() % 1_000_000);
+        String username = "bulkprogress" + System.nanoTime();
+        TestRegistrationHelper.RegisteredTestUser owner = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender, username, "Bulk Progress",
+                username + "@example.com", true);
+        var user = userRepository.findById(owner.id()).orElseThrow();
+        LocalDate today = LocalDate.now();
+        LocalDateTime now = LocalDateTime.now();
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(
+                202,
+                "Season 1",
+                null,
+                "/season.jpg",
+                today.minusDays(30).toString(),
+                1,
+                IntStream.rangeClosed(1, 24).mapToObj(episodeNumber -> new TmdbEpisodeSummary(
+                        episodeNumber,
+                        "Episode " + episodeNumber,
+                        null,
+                        (episodeNumber <= 18
+                                ? today.minusDays(18L - episodeNumber)
+                                : today.plusDays(episodeNumber - 16L)).toString(),
+                        22,
+                        null,
+                        List.of())).toList(),
+                null,
+                null);
+        TmdbTvFullDetails seriesDetails = new TmdbTvFullDetails(
+                seriesTmdbId, "Future Episode", "Future Episode", null, null, null, null,
+                today.minusDays(30).toString(), List.of(22), List.of(), List.of(), List.of(),
+                List.of(
+                        new TmdbSeasonSummary(0, "Specials", null,
+                                today.minusDays(30).toString(), 1, "/specials.jpg"),
+                        new TmdbSeasonSummary(1, "Season 1", null,
+                                today.minusDays(30).toString(), 24, "/season.jpg")),
+                null, null, null, null, 1, 24, List.of(), null,
+                "Returning Series", null, List.of(), null);
+        when(tmdbClient.getTvFullDetails(seriesTmdbId, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetails));
+        when(tmdbClient.getSeasonFullDetails(seriesTmdbId, 1, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(season));
+        when(tmdbClient.getTvContentRatings(seriesTmdbId, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings(seriesTmdbId, List.of())));
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .header("Idempotency-Key", "future-series-" + seriesTmdbId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":{"type":"SERIES","tmdbId":"%s"}}
+                                """.formatted(seriesTmdbId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.events.length()").value(18))
+                .andExpect(jsonPath("$.completions.length()").value(0));
+
+        Content seriesContent = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES).orElseThrow();
+        Content seasonContent = contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                seriesTmdbId, 1, null, ContentType.SEASON).orElseThrow();
+        assertThat(completenessRepository.findSeriesIdentity(
+                seriesTmdbId, user.getPreferredRegion(), user.getPreferredLanguage()))
+                .get()
+                .satisfies(marker -> {
+                    assertThat(marker.getComplete()).isTrue();
+                    assertThat(marker.getExpectedEpisodeCount()).isEqualTo(24);
+                });
+        assertThat(completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
+                seriesTmdbId, user.getPreferredRegion(), user.getPreferredLanguage()))
+                .filteredOn(marker -> marker.getGroupType() == CalendarScheduleCompleteness.GroupType.SEASON)
+                .singleElement()
+                .satisfies(marker -> {
+                    assertThat(marker.getComplete()).isTrue();
+                    assertThat(marker.getExpectedEpisodeCount()).isEqualTo(24);
+                });
+        mockMvc.perform(get("/contents/{contentId}/page", seriesContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.myRating").doesNotExist())
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.releasedEpisodeCount").value(18));
+        mockMvc.perform(get("/contents/{contentId}/page", seasonContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(18));
+        assertThat(completenessRepository.findSeriesIdentity(
+                seriesTmdbId, user.getPreferredRegion(), user.getPreferredLanguage()))
+                .get()
+                .satisfies(marker -> assertThat(marker.getComplete()).isTrue());
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .header("Idempotency-Key", "future-series-rewatch-" + seriesTmdbId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":{"type":"SERIES","tmdbId":"%s"}}
+                                """.formatted(seriesTmdbId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.events.length()").value(18))
+                .andExpect(jsonPath("$.completions.length()").value(0));
+        clearInvocations(namedParameterJdbcTemplate);
+        Map<ContentCoordinate, ContentStateResolver.WatchProgress> progress = watchProgressRepository.findCurrentProgress(
+                owner.id(),
+                List.of(ContentCoordinate.from(seriesContent), ContentCoordinate.from(seasonContent)),
+                java.time.Instant.now());
+        org.mockito.ArgumentCaptor<String> query = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<SqlParameterSource> parameters =
+                org.mockito.ArgumentCaptor.forClass(SqlParameterSource.class);
+        verify(namedParameterJdbcTemplate, times(1)).query(
+                query.capture(), parameters.capture(), any(RowCallbackHandler.class));
+        List<String> queryPlan = namedParameterJdbcTemplate.queryForList(
+                "EXPLAIN (ANALYZE, BUFFERS) " + query.getValue(), parameters.getValue(), String.class);
+        assertThat(queryPlan).anyMatch(line -> line.startsWith("Execution Time:"));
+        assertThat(queryPlan).anyMatch(line -> line.contains("calendar_schedule_snapshots"));
+        testReporter.publishEntry("watch-progress-query-plan", String.join(System.lineSeparator(), queryPlan));
+        assertThat(progress).hasSize(2);
+        assertThat(progress.get(ContentCoordinate.from(seriesContent)))
+                .isEqualTo(new ContentStateResolver.WatchProgress(WatchStatus.WATCHED, 18, 18));
+        assertThat(progress.get(ContentCoordinate.from(seasonContent)))
+                .isEqualTo(new ContentStateResolver.WatchProgress(WatchStatus.WATCHED, 18, 18));
+        String otherUsername = "bulkprogressother" + System.nanoTime();
+        TestRegistrationHelper.RegisteredTestUser otherViewer = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender, otherUsername, "Other Viewer",
+                otherUsername + "@example.com", true);
+        Map<ContentCoordinate, ContentStateResolver.WatchProgress> otherProgress = watchProgressRepository
+                .findCurrentProgress(otherViewer.id(),
+                        List.of(ContentCoordinate.from(seriesContent), ContentCoordinate.from(seasonContent)),
+                        java.time.Instant.now());
+        assertThat(otherProgress.get(ContentCoordinate.from(seriesContent)))
+                .isEqualTo(new ContentStateResolver.WatchProgress(WatchStatus.UNWATCHED, 0, 18));
+        assertThat(otherProgress.get(ContentCoordinate.from(seasonContent)))
+                .isEqualTo(new ContentStateResolver.WatchProgress(WatchStatus.UNWATCHED, 0, 18));
+        var otherUser = userRepository.findById(otherViewer.id()).orElseThrow();
+        otherUser.setPreferredRegion("GB");
+        otherUser.setPreferredLanguage("en-GB");
+        userRepository.saveAndFlush(otherUser);
+        assertThat(watchProgressRepository.findCurrentProgress(
+                otherViewer.id(), List.of(ContentCoordinate.from(seriesContent)), java.time.Instant.now()))
+                .isEmpty();
+        mockMvc.perform(get("/contents/{contentId}/page", seriesContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.myRating").doesNotExist())
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.releasedEpisodeCount").value(18));
+        mockMvc.perform(get("/contents/{contentId}/page", seasonContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(18))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(18));
+
+        List<DiaryEntry> watchedEpisodes = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(
+                owner.id(), seriesTmdbId);
+        assertThat(watchedEpisodes).hasSize(36);
+        List<DiaryEntry> removedEpisodePasses = watchedEpisodes.stream()
+                .filter(entry -> entry.getContent().getEpisodeNumber() == 1)
+                .toList();
+        assertThat(removedEpisodePasses).hasSize(2);
+        for (DiaryEntry removedEpisode : removedEpisodePasses) {
+            mockMvc.perform(delete("/diary/{diaryEntryId}", removedEpisode.getId())
+                            .cookie(owner.accessToken(), owner.csrfToken())
+                            .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                    .andExpect(status().isNoContent());
+        }
+        mockMvc.perform(get("/contents/{contentId}/page", seriesContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("PARTIALLY_WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(17))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(18));
+        CalendarScheduleCompleteness incompleteSeriesMarker = completenessRepository.findSeriesIdentity(
+                seriesTmdbId, user.getPreferredRegion(), user.getPreferredLanguage()).orElseThrow();
+        completenessRepository.saveAndFlush(incompleteSeriesMarker.toBuilder().complete(false).build());
+        assertThat(watchProgressRepository.findCurrentProgress(
+                owner.id(), List.of(ContentCoordinate.from(seriesContent)), java.time.Instant.now()))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("[diaryBulkViewerState] Should Return Watched Season Progress Immediately After Season Bulk - When A Future Episode Remains")
+    void shouldReturnWatchedSeasonProgressImmediatelyAfterSeasonBulkWithFutureEpisode() throws Exception {
+        String seriesTmdbId = "1423" + Math.abs(System.nanoTime() % 1_000_000);
+        String username = "seasonbulkprogress" + System.nanoTime();
+        TestRegistrationHelper.RegisteredTestUser owner = TestRegistrationHelper.register(
+                mockMvc, userRepository, emailConfirmationSender, username, "Season Bulk Progress",
+                username + "@example.com", true);
+        var user = userRepository.findById(owner.id()).orElseThrow();
+        LocalDate today = LocalDate.now();
+        LocalDateTime now = LocalDateTime.now();
+        Content seriesContent = contentRepository.saveAndFlush(Content.builder()
+                .tmdbId(seriesTmdbId)
+                .type(ContentType.SERIES)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(
+                302, "Season 1", null, "/season.jpg", today.minusDays(30).toString(), 1,
+                IntStream.rangeClosed(1, 3).mapToObj(episodeNumber -> new TmdbEpisodeSummary(
+                        episodeNumber, "Episode " + episodeNumber, null,
+                        (episodeNumber == 3 ? today.plusDays(3) : today.minusDays(2L - episodeNumber)).toString(),
+                        22, null, List.of())).toList(),
+                null, null);
+        TmdbTvFullDetails seriesDetails = new TmdbTvFullDetails(
+                seriesTmdbId, "Future Season Episode", "Future Season Episode", null, null, null, null,
+                today.minusDays(30).toString(), List.of(22), List.of(), List.of(), List.of(),
+                List.of(new TmdbSeasonSummary(1, "Season 1", null,
+                        today.minusDays(30).toString(), 3, "/season.jpg")),
+                null, null, null, null, 1, 3, List.of(), null,
+                "Returning Series", null, List.of(), null);
+        when(tmdbClient.getSeasonFullDetails(seriesTmdbId, 1, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(season));
+        when(tmdbClient.getTvFullDetails(seriesTmdbId, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetails));
+        when(tmdbClient.getTvContentRatings(seriesTmdbId, user.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings(seriesTmdbId, List.of())));
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .header("Idempotency-Key", "future-season-" + seriesTmdbId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":{"type":"SEASON","seriesTmdbId":"%s","seasonNumber":1}}
+                                """.formatted(seriesTmdbId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.events.length()").value(2))
+                .andExpect(jsonPath("$.completions.length()").value(0));
+
+        Content seasonContent = contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                seriesTmdbId, 1, null, ContentType.SEASON).orElseThrow();
+        mockMvc.perform(get("/contents/{contentId}/page", seasonContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(2))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(2));
+        mockMvc.perform(get("/contents/{contentId}/page", seriesContent.getId()).cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.viewerState.watchedEpisodeCount").value(2))
+                .andExpect(jsonPath("$.viewerState.releasedEpisodeCount").value(2))
+                .andExpect(jsonPath("$.sections.seasons[0].viewerState.watchStatus").value("WATCHED"));
+        assertThat(completenessRepository.findSeriesIdentity(
+                seriesTmdbId, user.getPreferredRegion(), user.getPreferredLanguage()))
+                .get()
+                .satisfies(marker -> assertThat(marker.getComplete()).isTrue());
     }
 
     private TmdbSeasonFullDetails seasonDetails() {

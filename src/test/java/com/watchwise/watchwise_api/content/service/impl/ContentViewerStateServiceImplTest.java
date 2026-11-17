@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.repository.ContentWatchProgressRepository;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
@@ -90,6 +91,9 @@ class ContentViewerStateServiceImplTest {
     private DiaryCompletionProjectionRepository completionRepository;
 
     @Mock
+    private ContentWatchProgressRepository watchProgressRepository;
+
+    @Mock
     private ContentStateResolver contentStateResolver;
 
     private ContentViewerStateServiceImpl service;
@@ -105,6 +109,7 @@ class ContentViewerStateServiceImplTest {
                 ratingRepository,
                 reviewRepository,
                 completionRepository,
+                watchProgressRepository,
                 contentStateResolver,
                 CLOCK);
     }
@@ -116,8 +121,6 @@ class ContentViewerStateServiceImplTest {
         UUID reviewId = UUID.randomUUID();
         Set<UUID> ids = Set.of(series.getId());
         when(contentRepository.findAllByCoordinates(List.of(coordinate))).thenReturn(List.of(series));
-        when(diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
-                VIEWER_ID, Set.of(SERIES_ID), Set.of())).thenReturn(List.of());
         when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, ids)).thenReturn(List.of());
         when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, ids)).thenReturn(List.of());
         when(userListItemRepository.findViewerMembershipsByContentIdIn(VIEWER_ID, ids)).thenReturn(List.of());
@@ -162,6 +165,93 @@ class ContentViewerStateServiceImplTest {
         assertThat(state.watchedEpisodeCount()).isNull();
         assertThat(state.releasedEpisodeCount()).isNull();
         verify(diaryEntryRepository, never()).findViewerStateEntriesByContentIdIn(any(), any());
+    }
+
+    @Test
+    void persistedEpisodeProgressOverridesUnknownSeriesStateWithoutCreatingRating() {
+        Content series = content(ContentType.SERIES, SERIES_ID, null, null, null);
+        ContentCoordinate coordinate = coordinate(series);
+        when(contentRepository.findAllByCoordinates(List.of(coordinate))).thenReturn(List.of(series));
+        when(contentStateResolver.resolveWatchProgress(eq(series), any(), anySet(), anySet(), eq(CLOCK)))
+                .thenReturn(new ContentStateResolver.WatchProgress(WatchStatus.UNKNOWN, null, null));
+        when(watchProgressRepository.findCurrentProgress(VIEWER_ID, List.of(coordinate), CLOCK.instant()))
+                .thenReturn(Map.of(coordinate,
+                        new ContentStateResolver.WatchProgress(WatchStatus.WATCHED, 2, 2)));
+
+        ContentViewerStateDTO state = service.resolve(VIEWER_ID, List.of(coordinate), Map.of())
+                .statesByCoordinate().get(coordinate);
+
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.WATCHED);
+        assertThat(state.watchedEpisodeCount()).isEqualTo(2);
+        assertThat(state.releasedEpisodeCount()).isEqualTo(2);
+        assertThat(state.myRating()).isNull();
+        verify(diaryEntryRepository, never())
+                .findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(any(), any(), any());
+    }
+
+    @Test
+    void loadsCalendarProgressForSeriesWithoutPersistedContentReference() {
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.SERIES, SERIES_ID, null, null, null);
+        when(contentRepository.findAllByCoordinates(List.of(coordinate))).thenReturn(List.of());
+        when(watchProgressRepository.findCurrentProgress(VIEWER_ID, List.of(coordinate), CLOCK.instant()))
+                .thenReturn(Map.of(coordinate,
+                        new ContentStateResolver.WatchProgress(WatchStatus.WATCHED, 2, 2)));
+
+        ContentViewerStateDTO state = service.resolve(VIEWER_ID, List.of(coordinate), Map.of())
+                .statesByCoordinate().get(coordinate);
+
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.WATCHED);
+        assertThat(state.watchedEpisodeCount()).isEqualTo(2);
+        assertThat(state.releasedEpisodeCount()).isEqualTo(2);
+        verify(contentRepository).findAllByCoordinates(List.of(coordinate));
+    }
+
+    @Test
+    void releasedEpisodeProgressOverridesCurrentCompletionProjectionWhenNewEpisodeAired() {
+        Content series = content(ContentType.SERIES, SERIES_ID, null, null, null);
+        ContentCoordinate coordinate = coordinate(series);
+        when(contentRepository.findAllByCoordinates(List.of(coordinate))).thenReturn(List.of(series));
+        when(contentStateResolver.resolveWatchProgress(eq(series), any(), anySet(), anySet(), eq(CLOCK)))
+                .thenReturn(new ContentStateResolver.WatchProgress(WatchStatus.UNKNOWN, null, null));
+        when(completionRepository.findCurrentByUserIdAndContentIdIn(VIEWER_ID, Set.of(series.getId())))
+                .thenReturn(List.of(completion(series, 1, "2026-10-01T12:00:00Z")));
+        when(watchProgressRepository.findCurrentProgress(VIEWER_ID, List.of(coordinate), CLOCK.instant()))
+                .thenReturn(Map.of(coordinate,
+                        new ContentStateResolver.WatchProgress(WatchStatus.PARTIALLY_WATCHED, 1, 2)));
+
+        ContentViewerStateDTO state = service.resolve(VIEWER_ID, List.of(coordinate), Map.of())
+                .statesByCoordinate().get(coordinate);
+
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.PARTIALLY_WATCHED);
+        assertThat(state.watchedEpisodeCount()).isOne();
+        assertThat(state.releasedEpisodeCount()).isEqualTo(2);
+        assertThat(state.lastWatchNumber()).isEqualTo(1);
+    }
+
+    @Test
+    void watchlistMembershipOnlyResolutionSkipsEpisodeProgressQuery() {
+        Content series = content(ContentType.SERIES, SERIES_ID, null, null, null);
+        ContentCoordinate coordinate = coordinate(series);
+        Set<UUID> contentIds = Set.of(series.getId());
+        when(contentRepository.findAllByCoordinates(List.of(coordinate))).thenReturn(List.of(series));
+        when(ratingRepository.findByUserIdAndContentIdIn(VIEWER_ID, contentIds)).thenReturn(List.of());
+        when(reviewRepository.findByUserIdAndContentIdInOrderByCreatedAtDesc(VIEWER_ID, contentIds))
+                .thenReturn(List.of());
+        when(completionRepository.findCurrentByUserIdAndContentIdIn(VIEWER_ID, contentIds)).thenReturn(List.of());
+        when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
+                .thenReturn(List.of());
+        when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
+                .thenReturn(List.of());
+        when(userListItemRepository.findViewerMembershipsByContentIdIn(VIEWER_ID, contentIds))
+                .thenReturn(List.of());
+        when(contentStateResolver.resolveWatchProgress(eq(series), any(), anySet(), anySet(), eq(CLOCK)))
+                .thenReturn(new ContentStateResolver.WatchProgress(WatchStatus.UNKNOWN, null, null));
+
+        ContentViewerStateDTO state = service.resolve(VIEWER_ID, List.of(coordinate), Map.of(), false)
+                .statesByCoordinate().get(coordinate);
+
+        assertThat(state.inWatchlist()).isFalse();
+        verify(watchProgressRepository, never()).findCurrentProgress(any(), any(), any());
     }
 
     @Test
@@ -223,9 +313,10 @@ class ContentViewerStateServiceImplTest {
                 Set.of(SERIES_ID),
                 Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1))))
                 .thenReturn(List.of());
-        when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
+        Set<UUID> watchedContentIds = Set.of(series.getId());
+        when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, watchedContentIds))
                 .thenReturn(List.of());
-        when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
+        when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, watchedContentIds))
                 .thenReturn(List.of());
         when(userListItemRepository.findViewerMembershipsByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of());
@@ -246,8 +337,8 @@ class ContentViewerStateServiceImplTest {
                 Set.of(SERIES_ID),
                 Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1)));
         verify(diaryEntryRepository, never()).findViewerStateEntriesByContentIdIn(any(), any());
-        verify(watchlistEntryRepository).findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds);
-        verify(droppedEntryRepository).findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds);
+        verify(watchlistEntryRepository).findByUserIdAndContentIdInWithContent(VIEWER_ID, watchedContentIds);
+        verify(droppedEntryRepository).findByUserIdAndContentIdInWithContent(VIEWER_ID, watchedContentIds);
         verify(userListItemRepository).findViewerMembershipsByContentIdIn(VIEWER_ID, contentIds);
     }
 
@@ -264,10 +355,6 @@ class ContentViewerStateServiceImplTest {
                 .thenReturn(List.of(episode));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of(diaryEntry));
-        when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
-                .thenReturn(List.of());
-        when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
-                .thenReturn(List.of());
         when(userListItemRepository.findViewerMembershipsByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of());
 
@@ -299,10 +386,6 @@ class ContentViewerStateServiceImplTest {
                 Set.of(),
                 Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1))))
                 .thenReturn(List.of(watchedEpisode));
-        when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
-                .thenReturn(List.of());
-        when(droppedEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
-                .thenReturn(List.of());
         when(userListItemRepository.findViewerMembershipsByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of());
         when(contentStateResolver.resolveWatchProgress(

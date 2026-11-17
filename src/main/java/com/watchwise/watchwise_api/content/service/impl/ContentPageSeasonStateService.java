@@ -85,13 +85,21 @@ public class ContentPageSeasonStateService {
 
         Map<Integer, Integer> expectedCounts = expectedEpisodeCounts(seasonSummaries);
         Map<Integer, Integer> airedCountsBySeason = airedEpisodeCounts(seasonSummaries);
+        coordinates.forEach(coordinate -> {
+            ContentViewerStateDTO state = statesBySeason.get(coordinate.seasonNumber());
+            if (state != null && state.releasedEpisodeCount() != null) {
+                airedCountsBySeason.put(coordinate.seasonNumber(), state.releasedEpisodeCount());
+            }
+        });
         Set<Integer> seasonsNeedingSchedule = coordinates.stream()
                 .map(ContentCoordinate::seasonNumber)
                 .filter(Objects::nonNull)
-                .filter(season -> !airedCountsBySeason.containsKey(season)
-                        || (!watchedNumbersBySeason.getOrDefault(season, Set.of()).isEmpty()
-                                && (statesBySeason.get(season) == null
-                                        || statesBySeason.get(season).watchStatus() != WatchStatus.WATCHED)))
+                .filter(season -> {
+                    ContentViewerStateDTO state = statesBySeason.get(season);
+                    return state == null
+                            || state.watchedEpisodeCount() == null
+                            || state.releasedEpisodeCount() == null;
+                })
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
         Map<Integer, CalendarScheduleCompleteness> markers = Map.of();
@@ -144,6 +152,21 @@ public class ContentPageSeasonStateService {
                 airedCountsBySeason.put(seasonNumber, releasedEpisodeNumbers.size());
             }
 
+            if (trustedSchedule) {
+                long watchedReleasedCount = releasedEpisodeNumbers.stream()
+                        .filter(watchedEpisodeNumbers::contains)
+                        .count();
+                WatchStatus status = watchedReleasedCount == 0
+                        ? WatchStatus.UNWATCHED
+                        : watchedReleasedCount == releasedEpisodeNumbers.size()
+                                ? WatchStatus.WATCHED
+                                : WatchStatus.PARTIALLY_WATCHED;
+                result.put(coordinate, copyWithWatchState(
+                        base, status, watchedEpisodeNumbers.isEmpty() ? null : lastWatchedDate,
+                        (int) watchedReleasedCount, releasedEpisodeNumbers.size()));
+                continue;
+            }
+
             if (base.watchStatus() == WatchStatus.WATCHED) {
                 result.put(coordinate, copyWithWatchState(
                         base, WatchStatus.WATCHED, lastWatchedDate,
@@ -155,29 +178,12 @@ public class ContentPageSeasonStateService {
                 continue;
             }
 
-            if (!trustedSchedule) {
-                if (admittedRepairs < MAX_SEASON_REPAIRS_PER_PAGE
-                        && scheduleRefreshService.refreshSeasonInBackground(
-                                seriesTmdbId, seasonNumber, region, language)) {
-                    admittedRepairs++;
-                }
-                result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
-                continue;
+            if (admittedRepairs < MAX_SEASON_REPAIRS_PER_PAGE
+                    && scheduleRefreshService.refreshSeasonInBackground(
+                            seriesTmdbId, seasonNumber, region, language)) {
+                admittedRepairs++;
             }
-
-            if (releasedEpisodeNumbers.isEmpty()) {
-                result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
-                continue;
-            }
-
-            long watchedReleasedCount = releasedEpisodeNumbers.stream().filter(watchedEpisodeNumbers::contains).count();
-            WatchStatus status = watchedReleasedCount == 0
-                    ? WatchStatus.UNWATCHED
-                    : watchedReleasedCount == releasedEpisodeNumbers.size()
-                            ? WatchStatus.WATCHED
-                            : WatchStatus.PARTIALLY_WATCHED;
-            result.put(coordinate, copyWithWatchState(
-                    base, status, lastWatchedDate, (int) watchedReleasedCount, releasedEpisodeNumbers.size()));
+            result.put(coordinate, copyWithWatchState(base, WatchStatus.UNKNOWN, lastWatchedDate, null, null));
         }
         Map<ContentCoordinate, Integer> airedCountsByCoordinate = new LinkedHashMap<>();
         for (ContentCoordinate coordinate : coordinates) {

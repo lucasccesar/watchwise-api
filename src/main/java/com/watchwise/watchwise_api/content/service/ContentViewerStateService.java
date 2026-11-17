@@ -15,6 +15,12 @@ public interface ContentViewerStateService {
             Collection<ContentCoordinate> coordinates,
             Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate);
 
+    Resolution resolve(
+            UUID viewerId,
+            Collection<ContentCoordinate> coordinates,
+            Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate,
+            boolean includeEpisodeProgress);
+
     record Resolution(
             Map<ContentCoordinate, ContentViewerStateDTO> statesByCoordinate,
             Map<ContentCoordinate, UUID> existingContentIdsByCoordinate) {

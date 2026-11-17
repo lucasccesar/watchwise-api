@@ -932,11 +932,21 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return;
         }
 
+        boolean completeSchedule = regularSeasonSummaries.stream()
+                .map(TmdbSeasonSummary::seasonNumber)
+                .distinct()
+                .count() == regularSeasonSummaries.size()
+                && expectedCounts.keySet().equals(seasons.stream()
+                        .map(season -> season.schedule().seasonNumber())
+                        .collect(Collectors.toSet()))
+                && seasons.stream().allMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE
+                        && season.isFullyRepresented());
         CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
                 new CalendarScheduleKey(ContentType.SERIES, content.getTmdbId(), language, region),
                 seasons,
                 expectedCounts,
-                expectedCounts.values().stream().mapToInt(Integer::intValue).sum());
+                expectedCounts.values().stream().mapToInt(Integer::intValue).sum(),
+                completeSchedule);
         calendarScheduleSynchronizer.synchronizeSeries(schedule, checkedAt);
     }
 

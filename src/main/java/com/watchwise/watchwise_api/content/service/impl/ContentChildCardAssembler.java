@@ -365,7 +365,8 @@ public class ContentChildCardAssembler {
                 Set.of(ContentCardFieldSet.STATS, ContentCardFieldSet.VIEWER_STATE),
                 false,
                 viewerState,
-                statsByContentId);
+                statsByContentId,
+                false);
 
         Map<ContentCoordinate, ContentChildCardDTO> cards = new LinkedHashMap<>();
         for (CardSpec spec : distinctSpecs) {

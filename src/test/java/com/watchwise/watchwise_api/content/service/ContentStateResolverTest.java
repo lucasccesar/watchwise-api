@@ -126,6 +126,21 @@ class ContentStateResolverTest {
     }
 
     @Test
+    @DisplayName("Should Resolve Season Progress By Coordinate - Without A Content Reference")
+    void shouldResolveSeasonProgressByCoordinateWithoutAContentReference() {
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.SEASON, null, SERIES_ID, 1, null);
+        List<ContentScheduleEpisode> episodes = List.of(
+                episode(SERIES_ID, 1, 1, TODAY.minusDays(1)),
+                episode(SERIES_ID, 1, 2, TODAY));
+
+        ContentStateResolver.WatchProgress progress = resolver.resolveWatchProgress(
+                coordinate, seasonSchedule(1, episodes, true), Set.of(coordinate(1, 1)), CLOCK);
+
+        assertThat(progress).isEqualTo(new ContentStateResolver.WatchProgress(
+                WatchStatus.PARTIALLY_WATCHED, 1, 2));
+    }
+
+    @Test
     @DisplayName("Should Return Watched Series - When All Released Episodes Were Watched Even With Future Episodes")
     void shouldReturnWatchedSeriesWhenAllReleasedEpisodesWereWatchedEvenWithFutureEpisodes() {
         Content series = content(ContentType.SERIES, SERIES_ID, null, null, null);

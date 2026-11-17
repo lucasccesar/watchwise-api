@@ -109,6 +109,18 @@ public class ContentCardAssembler {
             boolean includeEpisodeBackdrops,
             ContentViewerStateService.Resolution resolvedViewerState,
             Map<UUID, ContentStatsResponseDTO> resolvedStats) {
+        return assembleWithViewerStates(
+                specs, context, fields, includeEpisodeBackdrops, resolvedViewerState, resolvedStats, true);
+    }
+
+    AssemblyResult assembleWithViewerStates(
+            Collection<ContentCardSpec> specs,
+            ContentCardContext context,
+            Set<ContentCardFieldSet> fields,
+            boolean includeEpisodeBackdrops,
+            ContentViewerStateService.Resolution resolvedViewerState,
+            Map<UUID, ContentStatsResponseDTO> resolvedStats,
+            boolean includeEpisodeProgress) {
         Objects.requireNonNull(context, "context is required");
         List<ContentCardSpec> distinctSpecs = distinctSpecs(specs);
         if (distinctSpecs.isEmpty()) {
@@ -123,11 +135,17 @@ public class ContentCardAssembler {
         List<ContentCoordinate> coordinates = distinctSpecs.stream()
                 .map(ContentCardSpec::coordinate)
                 .toList();
-        ContentViewerStateService.Resolution resolution = resolvedViewerState == null
-                ? contentViewerStateService.resolve(viewerId, coordinates, Map.of())
-                : resolvedViewerState;
+        boolean episodeProgressRequested = requestedFields.contains(ContentCardFieldSet.VIEWER_STATE)
+                || requestedFields.contains(ContentCardFieldSet.WATCHLIST_PROGRESS);
+        ContentViewerStateService.Resolution resolution = resolvedViewerState;
+        if (resolution == null) {
+            resolution = viewerId == null || episodeProgressRequested && includeEpisodeProgress
+                    ? contentViewerStateService.resolve(viewerId, coordinates, Map.of())
+                    : contentViewerStateService.resolve(viewerId, coordinates, Map.of(), false);
+        }
+        ContentViewerStateService.Resolution viewerResolution = resolution;
         List<UUID> existingContentIds = coordinates.stream()
-                .map(resolution.existingContentIdsByCoordinate()::get)
+                .map(viewerResolution.existingContentIdsByCoordinate()::get)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
@@ -154,8 +172,8 @@ public class ContentCardAssembler {
                                 includeEpisodeBackdrops
                                         ? metadataByCoordinate.get(seriesCoordinateFor(spec))
                                         : null,
-                                resolution.existingContentIdsByCoordinate().get(spec.coordinate()),
-                                resolution.statesByCoordinate().get(spec.coordinate()),
+                                viewerResolution.existingContentIdsByCoordinate().get(spec.coordinate()),
+                                viewerResolution.statesByCoordinate().get(spec.coordinate()),
                                 statsByContentId,
                                 customPosterByContentId),
                         (left, right) -> left,
@@ -168,7 +186,7 @@ public class ContentCardAssembler {
                         (left, right) -> left,
                         LinkedHashMap::new));
         Map<ContentCoordinate, ContentViewerStateDTO> fullViewerStates = viewerStateRequested
-                ? new LinkedHashMap<>(resolution.statesByCoordinate())
+                ? new LinkedHashMap<>(viewerResolution.statesByCoordinate())
                 : Map.of();
         return new AssemblyResult(cards, fullViewerStates);
     }
@@ -469,8 +487,8 @@ public class ContentCardAssembler {
                 includeViewerState ? state.playsCount() : null,
                 includeWatchlistMembership || includeWatchlistProgress ? state.inWatchlist() : null,
                 includeWatchlistProgress ? state.dropped() : null,
-                includeWatchlistProgress ? state.watchedEpisodeCount() : null,
-                includeWatchlistProgress ? state.releasedEpisodeCount() : null,
+                includeViewerState || includeWatchlistProgress ? state.watchedEpisodeCount() : null,
+                includeViewerState || includeWatchlistProgress ? state.releasedEpisodeCount() : null,
                 includeViewerState ? state.currentRatingVersion() : null,
                 includeViewerState ? state.reviewsCount() : null,
                 includeViewerState ? state.reviewIds() : List.of());

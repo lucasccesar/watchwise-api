@@ -62,12 +62,45 @@ public class ContentStateResolver {
             return new WatchProgress(WatchStatus.UNKNOWN, null, null);
         }
 
-        Set<WatchedEpisodeCoordinate> releasedEpisodes = releasedEpisodeCoordinates(content, schedule, clock);
+        return resolveEpisodeWatchProgress(
+                content.getType(), content.getSeasonNumber(), schedule, watchedEpisodeCoordinates, clock);
+    }
+
+    public WatchProgress resolveWatchProgress(
+            ContentCoordinate coordinate,
+            ContentSchedule schedule,
+            Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates,
+            Clock clock) {
+        Objects.requireNonNull(coordinate, "coordinate is required");
+        Objects.requireNonNull(schedule, "schedule is required");
+        Objects.requireNonNull(clock, "clock is required");
+        if (coordinate.type() != ContentType.SERIES && coordinate.type() != ContentType.SEASON) {
+            return new WatchProgress(WatchStatus.UNKNOWN, null, null);
+        }
+        return resolveEpisodeWatchProgress(
+                coordinate.type(), coordinate.seasonNumber(), schedule, watchedEpisodeCoordinates, clock);
+    }
+
+    private WatchProgress resolveEpisodeWatchProgress(
+            ContentType type,
+            Integer seasonNumber,
+            ContentSchedule schedule,
+            Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates,
+            Clock clock) {
+        if (!schedule.complete()) {
+            return new WatchProgress(WatchStatus.UNKNOWN, null, null);
+        }
+        Set<WatchedEpisodeCoordinate> releasedEpisodes = releasedEpisodeCoordinates(
+                type, seasonNumber, schedule, clock);
         Set<WatchedEpisodeCoordinate> watched = watchedEpisodeCoordinates == null
                 ? Set.of()
                 : watchedEpisodeCoordinates;
         int watchedEpisodeCount = (int) releasedEpisodes.stream().filter(watched::contains).count();
         int releasedEpisodeCount = releasedEpisodes.size();
+        return resolveWatchProgress(watchedEpisodeCount, releasedEpisodeCount);
+    }
+
+    public static WatchProgress resolveWatchProgress(int watchedEpisodeCount, int releasedEpisodeCount) {
         WatchStatus status = watchedEpisodeCount == 0
                 ? WatchStatus.UNWATCHED
                 : watchedEpisodeCount == releasedEpisodeCount
@@ -77,10 +110,10 @@ public class ContentStateResolver {
     }
 
     private Set<WatchedEpisodeCoordinate> releasedEpisodeCoordinates(
-            Content content, ContentSchedule schedule, Clock clock) {
+            ContentType type, Integer seasonNumber, ContentSchedule schedule, Clock clock) {
         LocalDate today = LocalDate.now(clock);
-        Predicate<ContentScheduleEpisode> belongsToContent = episode -> switch (content.getType()) {
-            case SEASON -> Objects.equals(content.getSeasonNumber(), episode.seasonNumber());
+        Predicate<ContentScheduleEpisode> belongsToContent = episode -> switch (type) {
+            case SEASON -> Objects.equals(seasonNumber, episode.seasonNumber());
             case SERIES -> Objects.equals(schedule.seriesTmdbId(), episode.seriesTmdbId());
             default -> false;
         };

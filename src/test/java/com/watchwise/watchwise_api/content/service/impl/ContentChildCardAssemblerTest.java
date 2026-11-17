@@ -75,30 +75,32 @@ class ContentChildCardAssemblerTest {
     }
 
     @Test
-    @DisplayName("[assembleSections] Should Map Series Seasons And Three Recent Episodes In One Viewer Read")
-    void shouldMapSeriesSeasonsAndThreeRecentEpisodesInOneViewerRead() {
+    @DisplayName("[assembleSections] Should Map Series Seasons And Four Recent Episodes In One Viewer Read")
+    void shouldMapSeriesSeasonsAndFourRecentEpisodesInOneViewerRead() {
         ContentCoordinate seasonOne = season(1);
         ContentCoordinate seasonTwo = season(2);
         ContentCoordinate firstRecentEpisode = episode(2, 3);
         ContentCoordinate secondRecentEpisode = episode(2, 2);
         ContentCoordinate thirdRecentEpisode = episode(1, 10);
+        ContentCoordinate fourthRecentEpisode = episode(1, 9);
         List<ContentCoordinate> coordinates = List.of(
-                seasonOne, seasonTwo, firstRecentEpisode, secondRecentEpisode, thirdRecentEpisode);
+                seasonOne, seasonTwo, firstRecentEpisode, secondRecentEpisode, thirdRecentEpisode, fourthRecentEpisode);
         UUID seasonOneId = UUID.randomUUID();
         UUID firstRecentEpisodeId = UUID.randomUUID();
         ContentViewerStateDTO watched = state(WatchStatus.WATCHED, 1);
-        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(
                         Map.of(
                                 seasonOne, watched,
                                 seasonTwo, emptyState(),
                                 firstRecentEpisode, watched,
                                 secondRecentEpisode, emptyState(),
-                                thirdRecentEpisode, emptyState()),
+                                thirdRecentEpisode, emptyState(),
+                                fourthRecentEpisode, emptyState()),
                         Map.of(seasonOne, seasonOneId, firstRecentEpisode, firstRecentEpisodeId)));
         ContentStatsResponseDTO seasonStats = new ContentStatsResponseDTO(seasonOneId, 8.0, 4, 2, 1);
         ContentStatsResponseDTO episodeStats = new ContentStatsResponseDTO(firstRecentEpisodeId, 9.0, 3, 1, 0);
-        when(contentStatsService.getStatsBatch(List.of(seasonOneId, firstRecentEpisodeId)))
+        when(contentStatsService.getCommunityStatsBatch(List.of(seasonOneId, firstRecentEpisodeId)))
                 .thenReturn(List.of(seasonStats, episodeStats));
 
         ContentPageSectionsDTO result = assembler.assembleSections(
@@ -132,15 +134,15 @@ class ContentChildCardAssemblerTest {
         assertThat(result.seasons().get(1).contentId()).isNull();
         assertThat(result.seasons().get(1).airedEpisodeCount()).isEqualTo(3);
         assertThat(result.recentEpisodes()).extracting(ContentChildCardDTO::episodeNumber)
-                .containsExactly(3, 2, 10);
+                .containsExactly(3, 2, 10, 9);
         assertThat(result.recentEpisodes().get(0))
                 .extracting(ContentChildCardDTO::contentId, ContentChildCardDTO::title,
                         ContentChildCardDTO::posterPath, ContentChildCardDTO::runtimeMinutes,
                         ContentChildCardDTO::stats)
                 .containsExactly(firstRecentEpisodeId, "Episode 3", "/ep-3.png", 52, episodeStats);
         assertThat(result.episodes()).isEmpty();
-        verify(contentViewerStateService).resolve(VIEWER_ID, coordinates, Map.of());
-        verify(contentStatsService).getStatsBatch(List.of(seasonOneId, firstRecentEpisodeId));
+        verify(contentViewerStateService).resolve(VIEWER_ID, coordinates, Map.of(), false);
+        verify(contentStatsService).getCommunityStatsBatch(List.of(seasonOneId, firstRecentEpisodeId));
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 
@@ -151,12 +153,12 @@ class ContentChildCardAssemblerTest {
         ContentCoordinate secondEpisode = episode(1, 2);
         UUID firstEpisodeId = UUID.randomUUID();
         ContentViewerStateDTO watched = state(WatchStatus.WATCHED, 1);
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(firstEpisode, secondEpisode), Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(firstEpisode, secondEpisode), Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(
                         Map.of(firstEpisode, watched, secondEpisode, emptyState()),
                         Map.of(firstEpisode, firstEpisodeId)));
         ContentStatsResponseDTO firstStats = new ContentStatsResponseDTO(firstEpisodeId, 7.5, 2, 1, 3);
-        when(contentStatsService.getStatsBatch(List.of(firstEpisodeId))).thenReturn(List.of(firstStats));
+        when(contentStatsService.getCommunityStatsBatch(List.of(firstEpisodeId))).thenReturn(List.of(firstStats));
 
         ContentPageSectionsDTO result = assembler.assembleSections(
                 details(ContentType.SEASON, List.of(), List.of(
@@ -178,8 +180,8 @@ class ContentChildCardAssemblerTest {
                         ContentChildCardDTO::stats, ContentChildCardDTO::viewerState)
                 .containsExactly(null, SERIES_TMDB_ID, 1, 2,
                         new ContentStatsResponseDTO(null, null, 0, 0, 0), emptyState());
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(firstEpisode, secondEpisode), Map.of());
-        verify(contentStatsService).getStatsBatch(List.of(firstEpisodeId));
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(firstEpisode, secondEpisode), Map.of(), false);
+        verify(contentStatsService).getCommunityStatsBatch(List.of(firstEpisodeId));
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 
@@ -192,13 +194,13 @@ class ContentChildCardAssemblerTest {
         UUID parentSeasonOneId = UUID.randomUUID();
         UUID firstEpisodeId = UUID.randomUUID();
         List<ContentCoordinate> coordinates = List.of(parentSeasonOne, parentSeasonTwo, firstEpisode);
-        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(
                         Map.of(parentSeasonOne, emptyState(), parentSeasonTwo, emptyState(), firstEpisode, emptyState()),
                         Map.of(parentSeasonOne, parentSeasonOneId, firstEpisode, firstEpisodeId)));
         ContentStatsResponseDTO seasonStats = new ContentStatsResponseDTO(parentSeasonOneId, 8.0, 3, 1, 0);
         ContentStatsResponseDTO episodeStats = new ContentStatsResponseDTO(firstEpisodeId, 7.0, 1, 1, 0);
-        when(contentStatsService.getStatsBatch(List.of(parentSeasonOneId, firstEpisodeId)))
+        when(contentStatsService.getCommunityStatsBatch(List.of(parentSeasonOneId, firstEpisodeId)))
                 .thenReturn(List.of(seasonStats, episodeStats));
 
         ContentPageSectionsDTO result = assembler.assembleSections(
@@ -221,15 +223,15 @@ class ContentChildCardAssemblerTest {
                 .extracting(ContentChildCardDTO::contentId, ContentChildCardDTO::episodeNumber,
                         ContentChildCardDTO::stats)
                 .containsExactly(firstEpisodeId, 1, episodeStats);
-        verify(contentViewerStateService).resolve(VIEWER_ID, coordinates, Map.of());
-        verify(contentStatsService).getStatsBatch(List.of(parentSeasonOneId, firstEpisodeId));
+        verify(contentViewerStateService).resolve(VIEWER_ID, coordinates, Map.of(), false);
+        verify(contentStatsService).getCommunityStatsBatch(List.of(parentSeasonOneId, firstEpisodeId));
     }
 
     @Test
     @DisplayName("[assembleSections] Should Not Request Stats For Any Unreferenced Child")
     void shouldNotRequestStatsForAnyUnreferencedChild() {
         ContentCoordinate child = episode(1, 1);
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(child), Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(child), Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(Map.of(child, emptyState()), Map.of()));
 
         ContentPageSectionsDTO result = assembler.assembleSections(
@@ -240,7 +242,7 @@ class ContentChildCardAssemblerTest {
         assertThat(result.episodes().get(0).contentId()).isNull();
         assertThat(result.episodes().get(0).stats())
                 .isEqualTo(new ContentStatsResponseDTO(null, null, 0, 0, 0));
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(child), Map.of());
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(child), Map.of(), false);
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 
@@ -315,10 +317,10 @@ class ContentChildCardAssemblerTest {
                 firstBatch.get(0), 7.5, 11, 2, 3);
         ContentStatsResponseDTO secondBatchStats = new ContentStatsResponseDTO(
                 secondBatch.get(0), 9.0, 13, 4, 5);
-        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, coordinates, Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(statesByCoordinate, idsByCoordinate));
-        when(contentStatsService.getStatsBatch(firstBatch)).thenReturn(List.of(firstBatchStats));
-        when(contentStatsService.getStatsBatch(secondBatch)).thenReturn(List.of(secondBatchStats));
+        when(contentStatsService.getCommunityStatsBatch(firstBatch)).thenReturn(List.of(firstBatchStats));
+        when(contentStatsService.getCommunityStatsBatch(secondBatch)).thenReturn(List.of(secondBatchStats));
 
         ContentPageSectionsDTO result = assembler.assembleSections(
                 details(ContentType.SERIES, seasonSummaries, List.of(), List.of()),
@@ -329,8 +331,8 @@ class ContentChildCardAssemblerTest {
                 .containsExactlyElementsOf(idsInOrder);
         assertThat(result.seasons().get(0).stats()).isEqualTo(firstBatchStats);
         assertThat(result.seasons().get(100).stats()).isEqualTo(secondBatchStats);
-        verify(contentStatsService).getStatsBatch(firstBatch);
-        verify(contentStatsService).getStatsBatch(secondBatch);
+        verify(contentStatsService).getCommunityStatsBatch(firstBatch);
+        verify(contentStatsService).getCommunityStatsBatch(secondBatch);
         verifyNoMoreInteractions(contentStatsService);
     }
 
@@ -340,12 +342,12 @@ class ContentChildCardAssemblerTest {
         ContentCoordinate previous = episode(2, 1);
         ContentCoordinate next = episode(2, 3);
         UUID previousId = UUID.randomUUID();
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(previous, next), Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(previous, next), Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(
                         Map.of(previous, emptyState(), next, emptyState()),
                         Map.of(previous, previousId)));
         ContentStatsResponseDTO previousStats = new ContentStatsResponseDTO(previousId, 8.5, 2, 1, 0);
-        when(contentStatsService.getStatsBatch(List.of(previousId))).thenReturn(List.of(previousStats));
+        when(contentStatsService.getCommunityStatsBatch(List.of(previousId))).thenReturn(List.of(previousStats));
 
         ContentNavigationDTO result = assembler.assembleNavigation(
                 details(ContentType.EPISODE, List.of(), List.of()),
@@ -366,8 +368,8 @@ class ContentChildCardAssemblerTest {
                         ContentChildCardDTO::episodeNumber, ContentChildCardDTO::stats)
                 .containsExactly(null, 2, 3,
                         new ContentStatsResponseDTO(null, null, 0, 0, 0));
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(previous, next), Map.of());
-        verify(contentStatsService).getStatsBatch(List.of(previousId));
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(previous, next), Map.of(), false);
+        verify(contentStatsService).getCommunityStatsBatch(List.of(previousId));
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 
@@ -375,7 +377,7 @@ class ContentChildCardAssemblerTest {
     @DisplayName("[assembleNavigation] Should Omit Previous And Include Next For The First Episode")
     void shouldOmitPreviousAndIncludeNextForTheFirstEpisode() {
         ContentCoordinate next = episode(1, 2);
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(next), Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(next), Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(Map.of(next, emptyState()), Map.of()));
 
         ContentNavigationDTO result = assembler.assembleNavigation(
@@ -389,7 +391,7 @@ class ContentChildCardAssemblerTest {
                 .extracting(ContentChildCardDTO::seriesTmdbId, ContentChildCardDTO::seasonNumber,
                         ContentChildCardDTO::episodeNumber)
                 .containsExactly(SERIES_TMDB_ID, 1, 2);
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(next), Map.of());
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(next), Map.of(), false);
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 
@@ -397,7 +399,7 @@ class ContentChildCardAssemblerTest {
     @DisplayName("[assembleNavigation] Should Omit Next At The Parent Season Boundary For The Last Episode")
     void shouldOmitNextAtTheParentSeasonBoundaryForTheLastEpisode() {
         ContentCoordinate previous = episode(1, 2);
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(previous), Map.of()))
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(previous), Map.of(), false))
                 .thenReturn(new ContentViewerStateService.Resolution(Map.of(previous, emptyState()), Map.of()));
 
         ContentNavigationDTO result = assembler.assembleNavigation(
@@ -410,7 +412,7 @@ class ContentChildCardAssemblerTest {
                 .extracting(ContentChildCardDTO::seasonNumber, ContentChildCardDTO::episodeNumber)
                 .containsExactly(1, 2);
         assertThat(result.nextEpisode()).isNull();
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(previous), Map.of());
+        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(previous), Map.of(), false);
         verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
     }
 

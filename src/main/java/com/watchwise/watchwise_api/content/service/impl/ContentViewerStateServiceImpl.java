@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.repository.ContentWatchProgressRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentSchedule;
 import com.watchwise.watchwise_api.content.service.ContentScheduleKey;
@@ -66,6 +67,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
     private final DiaryCompletionProjectionRepository completionRepository;
     private final ContentStateResolver contentStateResolver;
     private final Clock clock;
+    private final ContentWatchProgressRepository watchProgressRepository;
 
     @Autowired
     public ContentViewerStateServiceImpl(
@@ -77,6 +79,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             ContentRatingRepository ratingRepository,
             ContentReviewRepository reviewRepository,
             DiaryCompletionProjectionRepository completionRepository,
+            ContentWatchProgressRepository watchProgressRepository,
             Clock clock) {
         this(
                 diaryEntryRepository,
@@ -87,6 +90,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 ratingRepository,
                 reviewRepository,
                 completionRepository,
+                watchProgressRepository,
                 new ContentStateResolver(),
                 clock);
     }
@@ -102,6 +106,23 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             DiaryCompletionProjectionRepository completionRepository,
             ContentStateResolver contentStateResolver,
             Clock clock) {
+        this(diaryEntryRepository, watchlistEntryRepository, droppedEntryRepository, userListItemRepository,
+                contentRepository, ratingRepository, reviewRepository, completionRepository, null,
+                contentStateResolver, clock);
+    }
+
+    public ContentViewerStateServiceImpl(
+            DiaryEntryRepository diaryEntryRepository,
+            WatchlistEntryRepository watchlistEntryRepository,
+            DroppedEntryRepository droppedEntryRepository,
+            UserListItemRepository userListItemRepository,
+            ContentRepository contentRepository,
+            ContentRatingRepository ratingRepository,
+            ContentReviewRepository reviewRepository,
+            DiaryCompletionProjectionRepository completionRepository,
+            ContentWatchProgressRepository watchProgressRepository,
+            ContentStateResolver contentStateResolver,
+            Clock clock) {
         this.diaryEntryRepository = Objects.requireNonNull(diaryEntryRepository, "diaryEntryRepository is required");
         this.watchlistEntryRepository = Objects.requireNonNull(
                 watchlistEntryRepository, "watchlistEntryRepository is required");
@@ -115,6 +136,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         this.contentStateResolver = Objects.requireNonNull(
                 contentStateResolver, "contentStateResolver is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
+        this.watchProgressRepository = watchProgressRepository;
     }
 
     @Override
@@ -122,6 +144,15 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             UUID viewerId,
             Collection<ContentCoordinate> coordinates,
             Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate) {
+        return resolve(viewerId, coordinates, schedulesByCoordinate, true);
+    }
+
+    @Override
+    public Resolution resolve(
+            UUID viewerId,
+            Collection<ContentCoordinate> coordinates,
+            Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate,
+            boolean includeEpisodeProgress) {
         List<ContentCoordinate> requestedCoordinates = distinctCoordinates(coordinates);
         if (requestedCoordinates.isEmpty()) {
             return new Resolution(Map.of(), Map.of());
@@ -134,7 +165,8 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         }
 
         return resolveExistingContentStates(
-                viewerId, requestedCoordinates, contentByCoordinate, schedulesByCoordinate);
+                viewerId, requestedCoordinates, contentByCoordinate, schedulesByCoordinate,
+                includeEpisodeProgress);
     }
 
     private Resolution resolveWithoutViewerState(
@@ -160,18 +192,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             UUID viewerId,
             List<ContentCoordinate> requestedCoordinates,
             Map<ContentCoordinate, Content> contentByCoordinate,
-            Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate) {
+            Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate,
+            boolean includeEpisodeProgress) {
         Objects.requireNonNull(viewerId, "viewerId is required");
-
-        if (contentByCoordinate.isEmpty()) {
-            Map<ContentCoordinate, ContentViewerStateDTO> emptyStates = requestedCoordinates.stream()
-                    .collect(Collectors.toMap(
-                            Function.identity(),
-                            ignored -> emptyState(),
-                            (left, right) -> left,
-                            LinkedHashMap::new));
-            return new Resolution(emptyStates, Map.of());
-        }
 
         Set<UUID> contentIds = contentByCoordinate.values().stream()
                 .map(Content::getId)
@@ -214,8 +237,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 ? List.of()
                 : droppedEntryRepository.findByUserIdAndContentIdInWithContent(
                         viewerId, watchlistAndDroppedContentIds);
-        List<UserListItem> listItems = userListItemRepository
-                .findViewerMembershipsByContentIdIn(viewerId, contentIds);
+        List<UserListItem> listItems = contentIds.isEmpty()
+                ? List.of()
+                : userListItemRepository.findViewerMembershipsByContentIdIn(viewerId, contentIds);
 
         Map<UUID, List<DiaryEntry>> diaryByContentId = diaryEntries.stream()
                 .filter(entry -> entry.getContent() != null && entry.getContent().getId() != null)
@@ -229,8 +253,25 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 .map(Content::getId)
                 .filter(contentIds::contains)
                 .collect(Collectors.toUnmodifiableSet());
-        Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates = findWatchedEpisodeCoordinates(
-                viewerId, requestedCoordinates, contentByCoordinate);
+        Map<ContentCoordinate, ContentSchedule> schedules = schedulesByCoordinate == null
+                ? Map.of()
+                : schedulesByCoordinate;
+        boolean hasCompleteRequestedSchedule = requestedCoordinates.stream()
+                .map(schedules::get)
+                .filter(Objects::nonNull)
+                .anyMatch(ContentSchedule::complete);
+        Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates = hasCompleteRequestedSchedule
+                ? findWatchedEpisodeCoordinates(viewerId, requestedCoordinates)
+                : Set.of();
+        List<ContentCoordinate> coordinatesWithoutCompleteSchedules = requestedCoordinates.stream()
+                .filter(coordinate -> schedules.get(coordinate) == null || !schedules.get(coordinate).complete())
+                .toList();
+        Map<ContentCoordinate, ContentStateResolver.WatchProgress> persistedProgress = !includeEpisodeProgress
+                || watchProgressRepository == null
+                || coordinatesWithoutCompleteSchedules.isEmpty()
+                        ? Map.of()
+                        : safeMap(watchProgressRepository.findCurrentProgress(
+                                viewerId, coordinatesWithoutCompleteSchedules, clock.instant()));
 
         Map<UUID, WatchlistEntry> watchlistByContentId = indexWatchlistByContentId(watchlistEntries);
         Map<UUID, DroppedEntry> droppedByContentId = indexDroppedByContentId(droppedEntries);
@@ -241,14 +282,22 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
 
         Map<ContentCoordinate, ContentViewerStateDTO> statesByCoordinate = new LinkedHashMap<>();
         Map<ContentCoordinate, UUID> existingContentIdsByCoordinate = new LinkedHashMap<>();
-        Map<ContentCoordinate, ContentSchedule> schedules = schedulesByCoordinate == null
-                ? Map.of()
-                : schedulesByCoordinate;
 
         for (ContentCoordinate coordinate : requestedCoordinates) {
             Content content = contentByCoordinate.get(coordinate);
             if (content == null || content.getId() == null) {
-                statesByCoordinate.put(coordinate, emptyState());
+                ContentStateResolver.WatchProgress watchProgress = persistedProgress.get(coordinate);
+                ContentSchedule directSchedule = schedules.get(coordinate);
+                if (watchProgress == null && includeEpisodeProgress
+                        && (coordinate.type() == ContentType.SERIES || coordinate.type() == ContentType.SEASON)
+                        && directSchedule != null && directSchedule.complete()) {
+                    watchProgress = contentStateResolver.resolveWatchProgress(
+                            coordinate, directSchedule, watchedEpisodeCoordinates, clock);
+                }
+                ContentViewerStateDTO state = emptyState();
+                statesByCoordinate.put(coordinate, watchProgress == null
+                        ? state
+                        : copyWithWatchProgress(state, watchProgress));
                 continue;
             }
 
@@ -263,6 +312,13 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                     schedules,
                     watchedDirectContentIds,
                     watchedEpisodeCoordinates);
+            ContentStateResolver.WatchProgress persistedWatchProgress = persistedProgress.get(coordinate);
+            if ((watchProgress.status() == WatchStatus.UNKNOWN
+                    || watchProgress.watchedEpisodeCount() == null
+                    || watchProgress.releasedEpisodeCount() == null)
+                    && persistedWatchProgress != null) {
+                watchProgress = persistedWatchProgress;
+            }
 
             WatchlistEntry watchlistEntry = watchlistByContentId.get(content.getId());
             DroppedEntry droppedEntry = droppedByContentId.get(content.getId());
@@ -278,12 +334,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             WatchStatus watchStatus = watchProgress.status();
             Integer watchedEpisodeCount = watchProgress.watchedEpisodeCount();
             Integer releasedEpisodeCount = watchProgress.releasedEpisodeCount();
-            if (opinionContent && latestCompletion != null) {
+            if (opinionContent && latestCompletion != null
+                    && (watchedEpisodeCount == null || releasedEpisodeCount == null)) {
                 watchStatus = WatchStatus.WATCHED;
-                if (!Objects.equals(watchedEpisodeCount, releasedEpisodeCount)) {
-                    watchedEpisodeCount = null;
-                    releasedEpisodeCount = null;
-                }
             }
             statesByCoordinate.put(coordinate, new ContentViewerStateDTO(
                     watchStatus,
@@ -415,8 +468,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
 
     private Set<WatchedEpisodeCoordinate> findWatchedEpisodeCoordinates(
             UUID viewerId,
-            Collection<ContentCoordinate> requestedCoordinates,
-            Map<ContentCoordinate, Content> contentByCoordinate) {
+            Collection<ContentCoordinate> requestedCoordinates) {
         Set<String> seriesIds = requestedCoordinates.stream()
                 .filter(coordinate -> coordinate.type() == ContentType.SERIES)
                 .map(ContentCoordinate::tmdbId)
@@ -425,7 +477,6 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         Set<DiaryEntryRepositoryCustom.SeriesSeasonPair> seriesSeasonPairs = requestedCoordinates.stream()
                 .filter(coordinate -> coordinate.type() == ContentType.SEASON)
                 .filter(coordinate -> hasText(coordinate.seriesTmdbId()) && coordinate.seasonNumber() != null)
-                .filter(contentByCoordinate::containsKey)
                 .map(coordinate -> new DiaryEntryRepositoryCustom.SeriesSeasonPair(
                         coordinate.seriesTmdbId(), coordinate.seasonNumber()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -438,6 +489,33 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
                         viewerId, seriesIds, seriesSeasonPairs));
         return Set.copyOf(result);
+    }
+
+    private ContentViewerStateDTO copyWithWatchProgress(
+            ContentViewerStateDTO state, ContentStateResolver.WatchProgress progress) {
+        return new ContentViewerStateDTO(
+                progress.status(),
+                state.myRating(),
+                state.myReview(),
+                state.lastWatchedDate(),
+                state.lastWatchNumber(),
+                state.watchedInTheater(),
+                state.playsCount(),
+                state.latestDiaryEntryId(),
+                state.inWatchlist(),
+                state.watchlistEntryId(),
+                state.dropped(),
+                state.droppedEntryId(),
+                state.lists(),
+                progress.watchedEpisodeCount(),
+                progress.releasedEpisodeCount(),
+                state.currentRatingVersion(),
+                state.reviewsCount(),
+                state.reviewIds());
+    }
+
+    private <K, V> Map<K, V> safeMap(Map<K, V> values) {
+        return values == null ? Map.of() : values;
     }
 
     private void addWatchedEpisodeCoordinates(

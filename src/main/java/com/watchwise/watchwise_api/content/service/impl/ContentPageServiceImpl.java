@@ -9,10 +9,13 @@ import com.watchwise.watchwise_api.content.dto.ContentPageStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.EpisodeSummaryDTO;
+import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
 import com.watchwise.watchwise_api.content.service.ContentPageDetails;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
@@ -126,6 +129,9 @@ public class ContentPageServiceImpl implements ContentPageService {
         ContentPageStatsDTO stats = episodePageStats == null
                 ? contentPageStatsService.getStats(contentId, content.getType())
                 : episodePageStats.pageStats();
+        if (content.getType() == ContentType.SERIES) {
+            viewerState = aggregateSeriesWatchState(viewerState, details.seasons(), sections.seasons());
+        }
 
         return new ContentPageDTO(
                 details,
@@ -135,6 +141,61 @@ public class ContentPageServiceImpl implements ContentPageService {
                 viewerState,
                 navigation,
                 sections);
+    }
+
+    private ContentViewerStateDTO aggregateSeriesWatchState(
+            ContentViewerStateDTO base,
+            List<SeasonSummaryDTO> seasonSummaries,
+            List<com.watchwise.watchwise_api.content.dto.ContentChildCardDTO> seasonCards) {
+        List<SeasonSummaryDTO> regularSeasons = seasonSummaries.stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .toList();
+        if (regularSeasons.isEmpty()) {
+            return base;
+        }
+
+        int watchedCount = 0;
+        int releasedCount = 0;
+        for (SeasonSummaryDTO season : regularSeasons) {
+            var card = seasonCards.stream()
+                    .filter(candidate -> candidate.type() == ContentType.SEASON)
+                    .filter(candidate -> java.util.Objects.equals(
+                            candidate.seasonNumber(), season.seasonNumber()))
+                    .findFirst()
+                    .orElse(null);
+            if (card == null || card.viewerState() == null) {
+                return base;
+            }
+            ContentViewerStateDTO state = card.viewerState();
+            Integer released = state.releasedEpisodeCount();
+            Integer watched = state.watchedEpisodeCount();
+            if (released == null || watched == null) {
+                return base;
+            }
+            watchedCount += watched;
+            releasedCount += released;
+        }
+
+        WatchStatus watchStatus = ContentStateResolver.resolveWatchProgress(watchedCount, releasedCount).status();
+        return new ContentViewerStateDTO(
+                watchStatus,
+                base.myRating(),
+                base.myReview(),
+                base.lastWatchedDate(),
+                base.lastWatchNumber(),
+                base.watchedInTheater(),
+                base.playsCount(),
+                base.latestDiaryEntryId(),
+                base.inWatchlist(),
+                base.watchlistEntryId(),
+                base.dropped(),
+                base.droppedEntryId(),
+                base.lists(),
+                watchedCount,
+                releasedCount,
+                base.currentRatingVersion(),
+                base.reviewsCount(),
+                base.reviewIds());
     }
 
     private long visibleReviewsCount(UUID contentId, UUID viewerId) {
