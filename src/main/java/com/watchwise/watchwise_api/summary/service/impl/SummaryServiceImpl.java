@@ -778,10 +778,10 @@ public class SummaryServiceImpl implements SummaryService {
         assertCanViewSummary(viewerId, userId, target);
         String language = resolveViewerPreferredLanguage(viewerId, userId, target);
 
-        List<DiaryEntryRepository.SeriesEpisodeCount> counts = diaryEntryRepository
+        List<DiaryEntryRepository.EpisodeRatingsMapSeriesCount> counts = diaryEntryRepository
                 .findEpisodeSeriesCountsByUserId(userId);
         List<String> seriesTmdbIds = counts.stream()
-                .map(DiaryEntryRepository.SeriesEpisodeCount::getSeriesTmdbId)
+                .map(DiaryEntryRepository.EpisodeRatingsMapSeriesCount::getSeriesTmdbId)
                 .toList();
         Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = seriesTmdbIds.isEmpty()
                 ? Map.of()
@@ -794,11 +794,11 @@ public class SummaryServiceImpl implements SummaryService {
                             ? null
                             : snapshot.series().regularReleasedEpisodeCount();
                     return new EpisodeRatingsMapEntry(
-                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount);
+                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount,
+                            row.getLastWatchedDate());
                 })
-                .sorted(Comparator.comparing(EpisodeRatingsMapEntry::watchedRatio,
-                                Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(EpisodeRatingsMapEntry::watchedEpisodeCount,
+                .sorted(Comparator.comparing(EpisodeRatingsMapEntry::isComplete, Comparator.reverseOrder())
+                        .thenComparing(EpisodeRatingsMapEntry::lastWatchedDate,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(EpisodeRatingsMapEntry::seriesTmdbId))
                 .toList();
@@ -830,6 +830,7 @@ public class SummaryServiceImpl implements SummaryService {
         }
         Map<String, String> customPosterBySeries = loadSeriesPosters(userId, pageSeriesTmdbIds);
         Map<String, EpisodeRatingsMetadata> resolvedMetadata = metadataBySeriesId;
+        String firstPageSeriesTmdbId = pageSeriesTmdbIds.isEmpty() ? null : pageSeriesTmdbIds.getFirst();
 
         List<EpisodeRatingsMapItemDTO> series = pageEntries.stream()
                 .map(entry -> {
@@ -839,7 +840,10 @@ public class SummaryServiceImpl implements SummaryService {
                             customPosterBySeries.get(entry.seriesTmdbId()),
                             metadata == null ? null : metadata.title(),
                             metadata == null ? null : metadata.releaseYear(),
-                            metadata == null ? null : metadata.posterPath());
+                            metadata == null ? null : metadata.posterPath(),
+                            entry.seriesTmdbId().equals(firstPageSeriesTmdbId) && metadata != null
+                                    ? metadata.backdropPath()
+                                    : null);
                 })
                 .toList();
 
@@ -877,13 +881,12 @@ public class SummaryServiceImpl implements SummaryService {
     private record EpisodeRatingsMapEntry(
             String seriesTmdbId,
             Long watchedEpisodeCount,
-            Integer totalEpisodeCount) {
+            Integer totalEpisodeCount,
+            LocalDate lastWatchedDate) {
 
-        private Double watchedRatio() {
-            if (watchedEpisodeCount == null || totalEpisodeCount == null || totalEpisodeCount <= 0) {
-                return null;
-            }
-            return (double) watchedEpisodeCount / totalEpisodeCount;
+        private boolean isComplete() {
+            return watchedEpisodeCount != null && totalEpisodeCount != null && totalEpisodeCount > 0
+                    && watchedEpisodeCount >= totalEpisodeCount;
         }
     }
 

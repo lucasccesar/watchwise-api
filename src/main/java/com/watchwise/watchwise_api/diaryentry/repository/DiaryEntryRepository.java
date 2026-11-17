@@ -710,7 +710,8 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
 
     @Query(value = """
             SELECT c.series_tmdb_id AS seriesTmdbId,
-                   COUNT(DISTINCT (c.season_number, c.episode_number)) AS watchedEpisodeCount
+                   COUNT(DISTINCT (c.season_number, c.episode_number)) AS watchedEpisodeCount,
+                   MAX(d.watched_date) AS lastWatchedDate
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
@@ -720,7 +721,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             GROUP BY c.series_tmdb_id
             ORDER BY c.series_tmdb_id
             """, nativeQuery = true)
-    List<SeriesEpisodeCount> findEpisodeSeriesCountsByUserId(@Param("userId") UUID userId);
+    List<EpisodeRatingsMapSeriesCount> findEpisodeSeriesCountsByUserId(@Param("userId") UUID userId);
 
     @Query(value = """
             WITH distinct_episode_coordinates AS (
@@ -774,6 +775,12 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     interface SeriesEpisodeCount {
         String getSeriesTmdbId();
         Long getWatchedEpisodeCount();
+    }
+
+    interface EpisodeRatingsMapSeriesCount {
+        String getSeriesTmdbId();
+        Long getWatchedEpisodeCount();
+        LocalDate getLastWatchedDate();
     }
 
     @Query(value = """

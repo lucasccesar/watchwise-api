@@ -1527,7 +1527,8 @@ class SummaryServiceImplTest {
                         "c", seriesProgressSnapshot("c", 10), "d", seriesProgressSnapshot("d", 10),
                         "e", seriesProgressSnapshot("e", 10)));
         when(episodeRatingsMetadataService.resolve(List.of("c", "d"), "pt-BR"))
-                .thenReturn(Map.of("c", new EpisodeRatingsMetadata("c", "Série C", 2024, "/c.jpg", null)));
+                .thenReturn(Map.of("c", new EpisodeRatingsMetadata(
+                        "c", "Série C", 2024, "/c.jpg", "/c-backdrop.jpg")));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of("c", "d")))
                 .thenReturn(Map.of("c", "custom-c.jpg"));
 
@@ -1536,8 +1537,10 @@ class SummaryServiceImplTest {
         assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::seriesTmdbId).containsExactly("c", "d");
         assertThat(result.series().getFirst())
                 .extracting(EpisodeRatingsMapItemDTO::title, EpisodeRatingsMapItemDTO::releaseYear,
-                        EpisodeRatingsMapItemDTO::posterPath, EpisodeRatingsMapItemDTO::customPosterUrl)
-                .containsExactly("Série C", 2024, "/c.jpg", "custom-c.jpg");
+                        EpisodeRatingsMapItemDTO::posterPath, EpisodeRatingsMapItemDTO::customPosterUrl,
+                        EpisodeRatingsMapItemDTO::backdropPath)
+                .containsExactly("Série C", 2024, "/c.jpg", "custom-c.jpg", "/c-backdrop.jpg");
+        assertThat(result.series().getLast().backdropPath()).isNull();
         assertThat(result.page()).isEqualTo(2);
         assertThat(result.size()).isEqualTo(2);
         assertThat(result.totalElements()).isEqualTo(5L);
@@ -1590,25 +1593,33 @@ class SummaryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getEpisodeRatingsMap] Should Sort By Ratio Then Watched Count Then Series Id")
-    void shouldSortByRatioThenWatchedCountThenSeriesIdForEpisodeRatingsMap() {
+    @DisplayName("[getEpisodeRatingsMap] Should Put Complete Series First And Sort By Latest Watched Date")
+    void shouldPutCompleteSeriesFirstAndSortByLatestWatchedDateForEpisodeRatingsMap() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of(
-                seriesEpisodeCount("ratio", 4L), seriesEpisodeCount("count", 8L),
-                seriesEpisodeCount("tie-b", 4L), seriesEpisodeCount("tie-a", 4L),
-                seriesEpisodeCount("unknown", 100L)));
+                seriesEpisodeCount("complete-new", 10L, LocalDate.of(2025, 1, 8)),
+                seriesEpisodeCount("complete-tie-b", 10L, LocalDate.of(2025, 1, 5)),
+                seriesEpisodeCount("complete-tie-a", 10L, LocalDate.of(2025, 1, 5)),
+                seriesEpisodeCount("incomplete-new", 3L, LocalDate.of(2025, 1, 10)),
+                seriesEpisodeCount("incomplete-old", 8L, LocalDate.of(2025, 1, 3)),
+                seriesEpisodeCount("unknown", 100L, LocalDate.of(2025, 1, 12)),
+                seriesEpisodeCount("zero", 1L, LocalDate.of(2025, 1, 11))));
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
-                eq(List.of("ratio", "count", "tie-b", "tie-a", "unknown")), any(LocalDate.class)))
+                eq(List.of("complete-new", "complete-tie-b", "complete-tie-a", "incomplete-new",
+                        "incomplete-old", "unknown", "zero")), any(LocalDate.class)))
                 .thenReturn(Map.of(
-                        "ratio", seriesProgressSnapshot("ratio", 5),
-                        "count", seriesProgressSnapshot("count", 20),
-                        "tie-b", seriesProgressSnapshot("tie-b", 10),
-                        "tie-a", seriesProgressSnapshot("tie-a", 10)));
+                        "complete-new", seriesProgressSnapshot("complete-new", 10),
+                        "complete-tie-b", seriesProgressSnapshot("complete-tie-b", 10),
+                        "complete-tie-a", seriesProgressSnapshot("complete-tie-a", 10),
+                        "incomplete-new", seriesProgressSnapshot("incomplete-new", 10),
+                        "incomplete-old", seriesProgressSnapshot("incomplete-old", 10),
+                        "zero", seriesProgressSnapshot("zero", 0)));
 
         EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, 1, 12);
 
         assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::seriesTmdbId)
-                .containsExactly("ratio", "count", "tie-a", "tie-b", "unknown");
+                .containsExactly("complete-new", "complete-tie-a", "complete-tie-b", "unknown", "zero",
+                        "incomplete-new", "incomplete-old");
     }
 
     @Test
@@ -1671,8 +1682,14 @@ class SummaryServiceImplTest {
         verifyNoInteractions(diaryEntryRepository, seriesProgressMetadataRefreshService);
     }
 
-    private DiaryEntryRepository.SeriesEpisodeCount seriesEpisodeCount(String seriesTmdbId, long watchedEpisodeCount) {
-        return new DiaryEntryRepository.SeriesEpisodeCount() {
+    private DiaryEntryRepository.EpisodeRatingsMapSeriesCount seriesEpisodeCount(
+            String seriesTmdbId, long watchedEpisodeCount) {
+        return seriesEpisodeCount(seriesTmdbId, watchedEpisodeCount, null);
+    }
+
+    private DiaryEntryRepository.EpisodeRatingsMapSeriesCount seriesEpisodeCount(
+            String seriesTmdbId, long watchedEpisodeCount, LocalDate lastWatchedDate) {
+        return new DiaryEntryRepository.EpisodeRatingsMapSeriesCount() {
             @Override
             public String getSeriesTmdbId() {
                 return seriesTmdbId;
@@ -1681,6 +1698,11 @@ class SummaryServiceImplTest {
             @Override
             public Long getWatchedEpisodeCount() {
                 return watchedEpisodeCount;
+            }
+
+            @Override
+            public LocalDate getLastWatchedDate() {
+                return lastWatchedDate;
             }
         };
     }

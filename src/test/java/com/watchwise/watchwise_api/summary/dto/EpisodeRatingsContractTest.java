@@ -25,7 +25,7 @@ class EpisodeRatingsContractTest {
     @Test
     void mapResponseExposesPaginationNullableTotalAndAnImmutableSeriesList() {
         EpisodeRatingsMapItemDTO item = new EpisodeRatingsMapItemDTO(
-                "1399", 5L, 8, "custom.jpg", "Game of Thrones", 2011, "/poster.jpg");
+                "1399", 5L, 8, "custom.jpg", "Game of Thrones", 2011, "/poster.jpg", "/backdrop.jpg");
         List<EpisodeRatingsMapItemDTO> mutableSeries = new ArrayList<>(List.of(item));
         EpisodeRatingsMapResponseDTO response = new EpisodeRatingsMapResponseDTO(
                 mutableSeries, 1, 12, 1L, 1, false, 5L, null);
@@ -43,6 +43,7 @@ class EpisodeRatingsContractTest {
         assertThat(item.title()).isEqualTo("Game of Thrones");
         assertThat(item.releaseYear()).isEqualTo(2011);
         assertThat(item.posterPath()).isEqualTo("/poster.jpg");
+        assertThat(item.backdropPath()).isEqualTo("/backdrop.jpg");
         assertThatThrownBy(() -> response.series().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
 

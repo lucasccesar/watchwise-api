@@ -655,26 +655,34 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findEpisodeSeriesCountsByUserId] Should Count Distinct Regular Episodes Across All Series")
+    @DisplayName("[findEpisodeSeriesCountsByUserId] Should Count Distinct Episodes And Find Latest Watch Date")
     void shouldCountDistinctRegularEpisodesAcrossAllSeries() {
         Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
         Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
         Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
         Content completedSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 1));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 2));
+        DiaryEntry firstWatch = buildEntry(lucas, firstEpisode, 1);
+        firstWatch.setWatchedDate(LocalDate.of(2025, 1, 2));
+        diaryEntryRepository.saveAndFlush(firstWatch);
+        DiaryEntry rewatch = buildEntry(lucas, firstEpisode, 2);
+        rewatch.setWatchedDate(LocalDate.of(2025, 1, 8));
+        diaryEntryRepository.saveAndFlush(rewatch);
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeriesEpisode));
+        DiaryEntry specialWatch = buildEntry(lucas, specialEpisode);
+        specialWatch.setWatchedDate(LocalDate.of(2025, 1, 12));
+        diaryEntryRepository.saveAndFlush(specialWatch);
+        DiaryEntry otherSeriesWatch = buildEntry(lucas, completedSeriesEpisode);
+        otherSeriesWatch.setWatchedDate(LocalDate.of(2025, 1, 4));
+        diaryEntryRepository.saveAndFlush(otherSeriesWatch);
 
-        List<DiaryEntryRepository.SeriesEpisodeCount> result =
+        List<DiaryEntryRepository.EpisodeRatingsMapSeriesCount> result =
                 diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucas.getId());
 
         assertThat(result)
-                .extracting("seriesTmdbId", "watchedEpisodeCount")
+                .extracting("seriesTmdbId", "watchedEpisodeCount", "lastWatchedDate")
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("1396", 1L),
-                        org.assertj.core.groups.Tuple.tuple("1399", 2L));
+                        org.assertj.core.groups.Tuple.tuple("1396", 1L, LocalDate.of(2025, 1, 4)),
+                        org.assertj.core.groups.Tuple.tuple("1399", 2L, LocalDate.of(2025, 1, 8)));
     }
 
     @Test
