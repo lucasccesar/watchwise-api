@@ -53,6 +53,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.impl.UserListItemPageReaderImpl;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReadResult;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -1670,7 +1671,8 @@ class UserListServiceImplTest {
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
                 .thenReturn(items);
         when(seriesProgressReader.readForSeriesIds(marinaId, List.of("1396", "94605")))
-                .thenReturn(Map.of("1396", zeroProgress, "94605", completedProgress));
+                .thenReturn(new SeriesProgressReadResult(
+                        Map.of("1396", zeroProgress, "94605", completedProgress), null));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
 
         UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());
@@ -1707,7 +1709,8 @@ class UserListServiceImplTest {
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
                 .thenReturn(items);
         when(seriesProgressReader.readForSeriesIds(marinaId, List.of("1396", "94605")))
-                .thenReturn(Map.of("1396", knownProgress, "94605", unknownProgress));
+                .thenReturn(new SeriesProgressReadResult(
+                        Map.of("1396", knownProgress, "94605", unknownProgress), null));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
 
         UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());

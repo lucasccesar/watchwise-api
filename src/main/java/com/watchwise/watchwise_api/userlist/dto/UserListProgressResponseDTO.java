@@ -26,7 +26,13 @@ public record UserListProgressResponseDTO(
         double watchedPercentage,
         List<UserListProgressItemDTO> items,
         UserListProgressAggregateDTO movieProgress,
-        SeriesInProgressAggregateDTO seriesProgressAggregate) {
+        SeriesInProgressAggregateDTO seriesProgressAggregate,
+        int page,
+        int size,
+        long totalElements,
+        int totalPages,
+        boolean hasNext,
+        String backdropPath) {
 
     public UserListProgressResponseDTO {
         items = List.copyOf(items);

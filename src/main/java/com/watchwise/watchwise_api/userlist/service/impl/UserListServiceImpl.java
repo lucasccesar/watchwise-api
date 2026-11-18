@@ -54,6 +54,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReadResult;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -73,6 +74,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -337,9 +339,11 @@ public class UserListServiceImpl implements UserListService {
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        Map<String, SeriesInProgressResponseDTO> seriesProgressById = seriesTmdbIds.isEmpty()
-                ? Map.of()
+        SeriesProgressReadResult seriesProgressResult = seriesTmdbIds.isEmpty()
+                ? SeriesProgressReadResult.empty()
                 : seriesProgressReader.readForSeriesIds(viewerId, seriesTmdbIds);
+        Map<String, SeriesInProgressResponseDTO> seriesProgressById =
+                seriesProgressResult.progressBySeriesId();
 
         List<UserListProgressItemDTO> progressItems = new ArrayList<>();
         long watchedItems = 0L;
@@ -427,7 +431,13 @@ public class UserListServiceImpl implements UserListService {
                 watchedPercentage,
                 progressItems,
                 movieProgress,
-                seriesProgressAggregate);
+                seriesProgressAggregate,
+                1,
+                progressItems.size(),
+                totalItems,
+                totalItems == 0 ? 0 : 1,
+                false,
+                seriesProgressResult.backdropPath());
     }
 
     private SeriesInProgressAggregateDTO aggregateSeriesProgress(
@@ -486,7 +496,9 @@ public class UserListServiceImpl implements UserListService {
         if (seriesProgress == null || seasonNumber == null) {
             return null;
         }
-        return seriesProgress.seasonProgress().stream()
+        return Stream.concat(
+                        seriesProgress.seasonProgress().stream(),
+                        seriesProgress.completedSeasonProgress().stream())
                 .filter(season -> Objects.equals(season.seasonNumber(), seasonNumber))
                 .findFirst()
                 .orElse(null);

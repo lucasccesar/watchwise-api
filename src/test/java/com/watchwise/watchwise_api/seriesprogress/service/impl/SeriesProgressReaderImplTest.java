@@ -5,6 +5,10 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressPresentationEnricher;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReadResult;
+import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,6 +42,15 @@ class SeriesProgressReaderImplTest {
     @Mock
     private SeriesProgressMetadataRefreshService metadataRefreshService;
 
+    @Mock
+    private SeriesProgressPresentationEnricher presentationEnricher;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private User viewer;
+
     private SeriesProgressReaderImpl reader;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-09-25T03:00:00Z"), ZoneOffset.UTC);
@@ -48,7 +62,15 @@ class SeriesProgressReaderImplTest {
                 diaryEntryRepository,
                 metadataRefreshService,
                 new SeriesProgressAssembler(),
+                presentationEnricher,
+                userRepository,
                 clock);
+        when(userRepository.findById(viewerId())).thenReturn(Optional.of(viewer));
+        when(viewer.getPreferredLanguage()).thenReturn("en-US");
+        when(presentationEnricher.enrich(
+                eq(viewer), org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyMap(), org.mockito.ArgumentMatchers.anySet(),
+                org.mockito.ArgumentMatchers.anyMap())).thenReturn(Map.of());
     }
 
     @Test
@@ -63,22 +85,22 @@ class SeriesProgressReaderImplTest {
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(viewerId(), seriesIds))
                 .thenReturn(List.of());
 
-        Map<String, SeriesInProgressResponseDTO> result = reader.readForSeriesIds(
+        SeriesProgressReadResult result = reader.readForSeriesIds(
                 viewerId(), List.of("1396", "1396", "94605"));
 
-        assertThat(result).containsOnlyKeys("1396", "94605");
-        assertThat(result.get("1396").watchedEpisodeCount()).isZero();
-        assertThat(result.get("94605").watchedPercentage()).isEqualTo(100.0);
+        assertThat(result.progressBySeriesId()).containsOnlyKeys("1396", "94605");
+        assertThat(result.progressBySeriesId().get("1396").watchedEpisodeCount()).isZero();
+        assertThat(result.progressBySeriesId().get("94605").watchedPercentage()).isEqualTo(100.0);
         verify(metadataRefreshService).getSnapshotsForRead(seriesIds, LocalDate.of(2026, 9, 25));
         verify(diaryEntryRepository).findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(viewerId(), seriesIds);
     }
 
     @Test
     void returnsEmptyMapWithoutRepositoryCallsWhenThereAreNoUsableSeriesIds() {
-        Map<String, SeriesInProgressResponseDTO> result = reader.readForSeriesIds(
+        SeriesProgressReadResult result = reader.readForSeriesIds(
                 viewerId(), java.util.Arrays.asList(null, "", "  "));
 
-        assertThat(result).isEmpty();
+        assertThat(result.progressBySeriesId()).isEmpty();
     }
 
     private SeriesProgressReadRepository.SeriesProgressCandidate row(String seriesTmdbId, long watchedEpisodeCount) {

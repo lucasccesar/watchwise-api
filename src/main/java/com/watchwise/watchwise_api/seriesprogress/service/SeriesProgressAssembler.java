@@ -112,6 +112,17 @@ public class SeriesProgressAssembler {
         return Double.valueOf(100.0).equals(percentage(watchedEpisodeCount, totalEpisodeCount));
     }
 
+    public SeriesInProgressResponseDTO splitCompletedSeasonProgress(SeriesInProgressResponseDTO series) {
+        List<SeasonProgressDTO> completedSeasons = series.seasonProgress().stream()
+                .filter(season -> isAtFullProgress(season.watchedEpisodeCount(), season.totalEpisodeCount()))
+                .toList();
+        List<SeasonProgressDTO> inProgressSeasons = series.seasonProgress().stream()
+                .filter(season -> !isAtFullProgress(season.watchedEpisodeCount(), season.totalEpisodeCount()))
+                .toList();
+        return series.withSeasonProgress(inProgressSeasons)
+                .withCompletedSeasonProgress(completedSeasons);
+    }
+
     private Double percentage(Long watchedEpisodeCount, Integer totalEpisodeCount) {
         if (totalEpisodeCount == null || totalEpisodeCount <= 0) {
             return null;

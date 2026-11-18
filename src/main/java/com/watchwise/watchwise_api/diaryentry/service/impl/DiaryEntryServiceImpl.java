@@ -490,7 +490,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         AssembledSeriesProgress assembled = assembleSeriesProgressRows(
                 target, userId, page.getContent(), snapshots);
         List<SeriesInProgressResponseDTO> content = assembled.content().stream()
-                .map(this::omitFullyWatchedSeasonProgress)
+                .map(seriesProgressAssembler::splitCompletedSeasonProgress)
                 .toList();
         SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
 
@@ -503,19 +503,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 page.hasNext(),
                 aggregate,
                 assembled.backdropPath());
-    }
-
-    private SeriesInProgressResponseDTO omitFullyWatchedSeasonProgress(SeriesInProgressResponseDTO series) {
-        List<SeasonProgressDTO> completedSeasons = series.seasonProgress().stream()
-                .filter(season -> seriesProgressAssembler.isAtFullProgress(
-                        season.watchedEpisodeCount(), season.totalEpisodeCount()))
-                .toList();
-        List<SeasonProgressDTO> inProgressSeasons = series.seasonProgress().stream()
-                .filter(season -> !seriesProgressAssembler.isAtFullProgress(
-                        season.watchedEpisodeCount(), season.totalEpisodeCount()))
-                .toList();
-        return series.withSeasonProgress(inProgressSeasons)
-                .withCompletedSeasonProgress(completedSeasons);
     }
 
     private AssembledSeriesProgress assembleSeriesProgressRows(

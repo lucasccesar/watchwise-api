@@ -373,7 +373,8 @@ class UserListControllerTest {
         LocalDateTime now = LocalDateTime.now();
         return new UserListProgressResponseDTO(
                 UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, now, now,
-                0, false, 1L, 0L, 0L, 1, null, 1L, 0L, 0.0, List.of(), null, null);
+                0, false, 1L, 0L, 0L, 1, null, 1L, 0L, 0.0, List.of(), null, null,
+                1, 1, 1L, 1, false, null);
     }
 
     private ContentRefCreationDTO buildContentRef() {
