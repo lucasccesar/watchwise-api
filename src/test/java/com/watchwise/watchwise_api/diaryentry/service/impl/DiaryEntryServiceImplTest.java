@@ -356,7 +356,7 @@ class DiaryEntryServiceImplTest {
                         default -> null;
                     };
                 });
-        lenient().when(seriesProgressReadRepository.findCandidatesByUserId(
+        lenient().when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                         any(UUID.class), any(SeriesProgressReadRepository.SeriesProgressSort.class),
                         any(Sort.Direction.class), any(Pageable.class)))
                 .thenReturn(Page.empty());
@@ -1166,15 +1166,15 @@ class DiaryEntryServiceImplTest {
                 progressCandidate("off-page", 4L, 200L, 3, 7, LocalDate.of(2026, 9, 18), 3, 2, 3, null, null, 0L, null));
 
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), candidates, false));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), candidates.reversed(), true));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(9L, 300L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), any(List.class)))
@@ -1216,7 +1216,7 @@ class DiaryEntryServiceImplTest {
 
         assertThat(ascending.content()).extracting(SeriesInProgressResponseDTO::seriesTmdbId)
                 .containsExactly("off-page", "b");
-        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+        verify(seriesProgressReadRepository, times(2)).findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class));
     }
@@ -1230,11 +1230,11 @@ class DiaryEntryServiceImplTest {
                 5, 14, 16, 900, LocalDate.of(2026, 9, 22), 2L, 112L);
 
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(14L, 900L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1278,11 +1278,11 @@ class DiaryEntryServiceImplTest {
                 3, 60, LocalDate.of(2026, 9, 21), 2L, 40L);
 
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(1L, 20L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1313,11 +1313,11 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(
                 marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(1L, 20L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1345,11 +1345,11 @@ class DiaryEntryServiceImplTest {
                 3, 60, LocalDate.of(2026, 9, 21), 2L, 40L);
 
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(1L, 20L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1381,11 +1381,11 @@ class DiaryEntryServiceImplTest {
                         seriesTmdbId, 1, 2, 100, 2, LocalDate.of(2026, 9, 21), LocalDateTime.now())));
 
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(1L, null, false));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1410,12 +1410,12 @@ class DiaryEntryServiceImplTest {
                 seriesTmdbId, 1L, 20L, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
                 2, 40, LocalDate.of(2026, 9, 21), 1L, 20L);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(seriesProgressReadRepository.findCandidatesByUserId(
+        when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.DESC), any(Pageable.class)))
                 .thenAnswer(invocation -> candidatesPage(
                         invocation.getArgument(3), List.of(candidate), false));
-        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+        when(seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucasId))
                 .thenReturn(seriesProgressTotals(1L, 20L));
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
@@ -1679,7 +1679,7 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, -1, 10))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
+        verify(seriesProgressReadRepository, never()).findStartedCandidatesByUserId(any(), any(), any(), any());
     }
 
     @Test
@@ -1712,7 +1712,7 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, -5))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
+        verify(seriesProgressReadRepository, never()).findStartedCandidatesByUserId(any(), any(), any(), any());
     }
 
     @Test
@@ -1723,7 +1723,7 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 0))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
+        verify(seriesProgressReadRepository, never()).findStartedCandidatesByUserId(any(), any(), any(), any());
     }
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
@@ -1733,7 +1733,7 @@ class DiaryEntryServiceImplTest {
 
     private PageRequest captureRequestedProgressPage() {
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+        verify(seriesProgressReadRepository, times(2)).findStartedCandidatesByUserId(
                 eq(lucasId), any(SeriesProgressReadRepository.SeriesProgressSort.class),
                 any(Sort.Direction.class), captor.capture());
         assertThat(captor.getAllValues().getFirst().isUnpaged()).isTrue();
@@ -1954,7 +1954,7 @@ class DiaryEntryServiceImplTest {
         SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
                 seriesTmdbId, watchedEpisodeCount, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate,
                 maxSeasonNumber, maxEpisodeNumber, null, null, null, null, null);
-        lenient().when(seriesProgressReadRepository.findCandidatesByUserId(
+        lenient().when(seriesProgressReadRepository.findStartedCandidatesByUserId(
                         any(UUID.class), any(SeriesProgressReadRepository.SeriesProgressSort.class),
                         any(Sort.Direction.class), any(Pageable.class)))
                 .thenAnswer(invocation -> {

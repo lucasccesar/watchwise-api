@@ -479,13 +479,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<SeriesProgressReadRepository.SeriesProgressCandidate> allCandidates =
-                seriesProgressReadRepository.findCandidatesByUserId(
+                seriesProgressReadRepository.findStartedCandidatesByUserId(
                         userId, effectiveSort, effectiveDirection, Pageable.unpaged());
         List<SeriesProgressReadRepository.SeriesProgressCandidate> allRows = allCandidates.getContent();
         Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = refreshSnapshots(allRows);
 
         Page<SeriesProgressReadRepository.SeriesProgressCandidate> page =
-                seriesProgressReadRepository.findCandidatesByUserId(
+                seriesProgressReadRepository.findStartedCandidatesByUserId(
                         userId, effectiveSort, effectiveDirection, pageRequest);
         AssembledSeriesProgress assembled = assembleSeriesProgressRows(
                 target, userId, page.getContent(), snapshots);
@@ -641,7 +641,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         SeriesProgressReadRepository.SeriesProgressTotals totals =
-                seriesProgressReadRepository.findGlobalTotalsByUserId(userId);
+                seriesProgressReadRepository.findStartedGlobalTotalsByUserId(userId);
         long watchedEpisodeCount = totals == null || totals.getWatchedEpisodeCount() == null
                 ? fallbackWatchedEpisodeCount
                 : totals.getWatchedEpisodeCount();

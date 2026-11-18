@@ -344,12 +344,12 @@ class SeriesProgressReadRepositoryTest {
 
         var page = seriesProgressReadRepository.findCandidatesByUserId(
                 lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 20));
-        var totals = seriesProgressReadRepository.findGlobalTotalsByUserId(lucas.getId());
+        var totals = seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucas.getId());
 
         assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
                 .containsExactlyInAnyOrderElementsOf(List.of("1420", "1421", "1422", "1423", "1425"));
         assertThat(page.getTotalElements()).isEqualTo(5L);
-        assertThat(totals.getWatchedEpisodeCount()).isEqualTo(5L);
+        assertThat(totals.getWatchedEpisodeCount()).isEqualTo(6L);
     }
 
     @Test
@@ -378,8 +378,8 @@ class SeriesProgressReadRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findGlobalTotalsByUserId] Should Include Off Page Candidates And Exclude Completion Drop Specials And Rewatches")
-    void shouldIncludeOffPageCandidatesAndExcludeCompletionDropSpecialsAndRewatches() {
+    @DisplayName("[started series progress] Should Include Completed And Dropped Started Series But Exclude Specials And Rewatches")
+    void shouldIncludeCompletedAndDroppedStartedSeriesButExcludeSpecialsAndRewatches() {
         Content firstSeriesEpisode = saveEpisode("1399", 1, 1, 40);
         Content firstSeriesSpecial = saveEpisode("1399", 0, 1, 999);
         Content secondSeriesEpisode = saveEpisode("1396", 1, 1, 10);
@@ -404,15 +404,20 @@ class SeriesProgressReadRepositoryTest {
                 .createdAt(now).updatedAt(now).build());
         entityManager.clear();
 
-        var page = seriesProgressReadRepository.findCandidatesByUserId(
-                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 1));
-        assertThat(page.getContent()).hasSize(1);
-        assertThat(page.getTotalElements()).isEqualTo(3L);
+        var inProgressPage = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+        assertThat(inProgressPage.getTotalElements()).isEqualTo(3L);
 
-        var totals = seriesProgressReadRepository.findGlobalTotalsByUserId(lucas.getId());
+        var page = seriesProgressReadRepository.findStartedCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+        assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactlyInAnyOrder("1399", "1396", "1400", "1401", "1402");
+        assertThat(page.getTotalElements()).isEqualTo(5L);
 
-        assertThat(totals.getWatchedEpisodeCount()).isEqualTo(3L);
-        assertThat(totals.getWatchedRuntimeMinutes()).isEqualTo(70L);
+        var totals = seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucas.getId());
+
+        assertThat(totals.getWatchedEpisodeCount()).isEqualTo(5L);
+        assertThat(totals.getWatchedRuntimeMinutes()).isEqualTo(130L);
     }
 
     @Test

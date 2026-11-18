@@ -16,6 +16,7 @@ import java.util.UUID;
 
 public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUID> {
 
+    /** Current continuation candidates; excludes valid completions and series marked as dropped. */
     default Page<SeriesProgressCandidate> findCandidatesByUserId(
             UUID userId, SeriesProgressSort sort, Pageable pageable) {
         return findCandidatesByUserId(userId, sort, Sort.Direction.DESC, pageable);
@@ -23,10 +24,27 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
 
     default Page<SeriesProgressCandidate> findCandidatesByUserId(
             UUID userId, SeriesProgressSort sort, Sort.Direction direction, Pageable pageable) {
-        return findCandidatesByUserIdAndSort(
+        return findCandidateRowsByUserIdAndSort(
                 userId,
                 Objects.requireNonNull(sort).name(),
                 Objects.requireNonNull(direction).name(),
+                false,
+                pageable);
+    }
+
+    /** All series with a regular episode event, including completed and dropped series. */
+    default Page<SeriesProgressCandidate> findStartedCandidatesByUserId(
+            UUID userId, SeriesProgressSort sort, Pageable pageable) {
+        return findStartedCandidatesByUserId(userId, sort, Sort.Direction.DESC, pageable);
+    }
+
+    default Page<SeriesProgressCandidate> findStartedCandidatesByUserId(
+            UUID userId, SeriesProgressSort sort, Sort.Direction direction, Pageable pageable) {
+        return findCandidateRowsByUserIdAndSort(
+                userId,
+                Objects.requireNonNull(sort).name(),
+                Objects.requireNonNull(direction).name(),
+                true,
                 pageable);
     }
 
@@ -49,7 +67,9 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             candidate_series AS (
                 SELECT DISTINCT ee.series_tmdb_id
                 FROM episode_entries ee
-                WHERE NOT EXISTS (
+                WHERE (
+                    :includeCompletedOrDropped = TRUE
+                    OR NOT EXISTS (
                     SELECT 1
                     FROM diary_completion_projections completion
                     JOIN contents completed_series ON completed_series.id = completion.content_id
@@ -87,8 +107,11 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                                AND watched_content.season_number > 0
                                AND watched_content.series_tmdb_id = ee.series_tmdb_id
                          ))
+                    )
                 )
-                AND NOT EXISTS (
+                AND (
+                    :includeCompletedOrDropped = TRUE
+                    OR NOT EXISTS (
                     SELECT 1
                     FROM dropped_entries dropped
                     JOIN contents dropped_series ON dropped_series.id = dropped.content_id
@@ -96,6 +119,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                     AND dropped.type = 'SERIES'
                     AND dropped_series.type = 'SERIES'
                     AND dropped_series.tmdb_id = ee.series_tmdb_id
+                    )
                 )
             ),
             distinct_episode_coordinates AS (
@@ -223,7 +247,9 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             candidate_series AS (
                 SELECT DISTINCT ee.series_tmdb_id
                 FROM episode_entries ee
-                WHERE NOT EXISTS (
+                WHERE (
+                    :includeCompletedOrDropped = TRUE
+                    OR NOT EXISTS (
                     SELECT 1
                     FROM diary_completion_projections completion
                     JOIN contents completed_series ON completed_series.id = completion.content_id
@@ -261,8 +287,11 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                                AND watched_content.season_number > 0
                                AND watched_content.series_tmdb_id = ee.series_tmdb_id
                          ))
+                    )
                 )
-                AND NOT EXISTS (
+                AND (
+                    :includeCompletedOrDropped = TRUE
+                    OR NOT EXISTS (
                     SELECT 1
                     FROM dropped_entries dropped
                     JOIN contents dropped_series ON dropped_series.id = dropped.content_id
@@ -270,6 +299,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                     AND dropped.type = 'SERIES'
                     AND dropped_series.type = 'SERIES'
                     AND dropped_series.tmdb_id = ee.series_tmdb_id
+                    )
                 )
             )
             SELECT COUNT(*)
@@ -277,9 +307,11 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             WHERE :sort IS NOT NULL
             """,
             nativeQuery = true)
-    Page<SeriesProgressCandidate> findCandidatesByUserIdAndSort(
+    Page<SeriesProgressCandidate> findCandidateRowsByUserIdAndSort(
             @Param("userId") UUID userId, @Param("sort") String sort,
-            @Param("direction") String direction, Pageable pageable);
+            @Param("direction") String direction,
+            @Param("includeCompletedOrDropped") boolean includeCompletedOrDropped,
+            Pageable pageable);
 
     @Query(value = """
             WITH requested_series AS (
@@ -430,65 +462,12 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 AND c.type = 'EPISODE'
                 AND c.season_number > 0
             ),
-            candidate_series AS (
-                SELECT DISTINCT ee.series_tmdb_id
-                FROM episode_entries ee
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM diary_completion_projections completion
-                    JOIN contents completed_series ON completed_series.id = completion.content_id
-                    JOIN user_series_history_states state
-                      ON state.user_id = completion.user_id
-                     AND state.series_tmdb_id = ee.series_tmdb_id
-                    JOIN users completion_user ON completion_user.id = completion.user_id
-                    LEFT JOIN series_progress_metadata released
-                      ON released.series_tmdb_id = ee.series_tmdb_id
-                    WHERE completion.user_id = :userId
-                    AND completed_series.type = 'SERIES'
-                    AND completed_series.tmdb_id = ee.series_tmdb_id
-                    AND completion.history_revision = state.history_revision
-                    AND completion.history_revision = state.computed_revision
-                    AND completion.schedule_version = state.schedule_version
-                    AND completion.valid_until > CURRENT_TIMESTAMP
-                    AND state.valid_until > CURRENT_TIMESTAMP
-                    AND EXISTS (
-                        SELECT 1
-                        FROM calendar_schedule_completeness marker
-                        WHERE marker.group_type = 'SERIES'
-                          AND marker.series_tmdb_id = ee.series_tmdb_id
-                          AND marker.season_number IS NULL
-                          AND marker.region = completion_user.preferred_region
-                          AND marker.language = completion_user.preferred_language
-                          AND marker.scope_version = completion.schedule_version
-                          AND marker.complete = TRUE
-                    )
-                    AND (released.regular_released_episode_count IS NULL OR
-                         released.regular_released_episode_count <= (
-                             SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
-                             FROM diary_entries watched
-                             JOIN contents watched_content ON watched_content.id = watched.content_id
-                             WHERE watched.user_id = :userId AND watched_content.type = 'EPISODE'
-                               AND watched_content.season_number > 0
-                               AND watched_content.series_tmdb_id = ee.series_tmdb_id
-                         ))
-                )
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM dropped_entries dropped
-                    JOIN contents dropped_series ON dropped_series.id = dropped.content_id
-                    WHERE dropped.user_id = :userId
-                    AND dropped.type = 'SERIES'
-                    AND dropped_series.type = 'SERIES'
-                    AND dropped_series.tmdb_id = ee.series_tmdb_id
-                )
-            ),
             distinct_episode_coordinates AS (
                 SELECT DISTINCT ee.series_tmdb_id,
                                 ee.season_number,
                                 ee.episode_number,
                                 ee.runtime_minutes
                 FROM episode_entries ee
-                JOIN candidate_series cs ON cs.series_tmdb_id = ee.series_tmdb_id
             )
             SELECT COALESCE(COUNT(*), 0) AS watchedEpisodeCount,
                    CASE WHEN COUNT(dec.runtime_minutes) = COUNT(*)
@@ -497,7 +476,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                    COUNT(dec.runtime_minutes) = COUNT(*) AS watchedRuntimeComplete
             FROM distinct_episode_coordinates dec
             """, nativeQuery = true)
-    SeriesProgressTotals findGlobalTotalsByUserId(@Param("userId") UUID userId);
+    SeriesProgressTotals findStartedGlobalTotalsByUserId(@Param("userId") UUID userId);
 
     enum SeriesProgressSort {
         LAST_WATCHED,
