@@ -52,9 +52,11 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Compactação retomável de importação concluída** (`ImportUnitTransaction.finishApplyChunk`, `ImportItemRepository.compactAppliedPayloads`): payloads de itens `APPLIED`/`SKIPPED` são limpos em blocos de até 200 por transação. Se restarem payloads, o job volta à fila durável; `COMPLETED` só é gravado quando a verificação não encontra mais dados para compactar.
 - **Cleanup não concorre com worker ativo** (`ImportCleanupJob`, `ImportUnitTransaction.lockRunnableJob`): `commit` rejeita `READY` após `expiresAt`; uma vez aceito, `IMPORTING` pode terminar mesmo depois do prazo original. Revalidação atrasada que devolve o root a `RESOLVING` cria uma versão nova e renova `expiresAt` por 24h. O cleanup UTC varre jobs/arquivos expirados a cada 15 minutos por padrão (`app.import.cleanup.cron` configurável); remoção acontece fora da transação e o tamanho reservado só é zerado depois de `delete` confirmado. No cleanup via outbox, o job associado precisa estar ausente ou irreversivelmente terminal antes de apagar o arquivo; estados ativos e falhas ainda retentáveis adiam a tarefa. Falha de remoção conserva os bytes e reprograma a tarefa. Um `FAILED` com fase executável continua retendo o arquivo para retry; uploads que falharam antes de obter fase não podem ser reativados.
 
-## Opiniões de conteúdo (V80/V80_1)
+## Opiniões de conteúdo (V80/V80_1/V98)
 
 - **Ratings e reviews de longa duração ficam restritos a séries e temporadas** (`V80__create-content-opinions-and-diary-projections.sql`, `ContentReview.scoreAtPublication`): `content_ratings` aceita um rating por usuário/conteúdo, score inteiro de 1–10 e somente `SERIES`/`SEASON`. Toda `ContentReview` é `WRITTEN_REVIEW`, exige texto e `watch_number` positivo. Uma passada de `SEASON` aceita no máximo uma review escrita, enquanto `SERIES` pode ter várias. A nota `score_at_publication` não é incluída em updates JPA para preservar o snapshot quando o comentário é editado.
+- **Ratings são guardados por passada completa e projetados para os leitores atuais** (`ContentRatingServiceImpl.set`, `writePassRating`, `remove`; `DiaryViewServiceImpl`): `ContentRatingPass` mantém uma nota por usuário/conteúdo/`watchNumber`; editar a mesma passada substitui sua nota e uma passada completa posterior cria outra linha. `ContentRating` continua como projeção única e versão global do usuário/conteúdo; somente ela entra nos agregados públicos, então rewatches não multiplicam votos. Se há uma passada incompleta posterior, a edição permitida continua ligada à passada atualmente avaliada. Excluir a nota atual remove só essa passada, revela a nota anterior mais recente ou apaga a projeção se não houver fallback. Ratings existentes antes da V98 são copiados como snapshots legados sem passada conhecida; se a evidência atual não identificar uma passada completa, uma edição permitida mantém essa identidade legada sem inventar um `watchNumber`.
+- **O estado compacto da avaliação não monta a página do conteúdo** (`ContentRatingController.getCurrent`, `ContentRatingServiceImpl.getCurrent`): `GET /contents/{contentId}/my-rating` valida a referência local e lê apenas a nota atual e sua versão. Sem nota, ambos os campos retornam nulos; `MOVIE`/`EPISODE` e temporada 0 são rejeitados. O fluxo evita carregar `ContentPageDTO` ou consultar o TMDB apenas para obter `expectedVersion`.
 - **Ratings e reviews separados preservam o diário legado de MOVIE/EPISODE** (`ContentRatingController`, `ContentReviewController`, `ContentRatingServiceImpl`): `/contents/{id}/my-rating` e a publicação em `/contents/{id}/reviews` aceitam somente SERIES/SEASON. MOVIE/EPISODE continuam usando `DiaryEntry.score` e `DiaryEntry.comment`; a escrita B4 não cria ratings globais para esses tipos.
 - **Elegibilidade consulta calendário e histórico antes do lock e revalida sob `content-state`** (`OpinionEvidenceService.capture`/`revalidate`, `ContentRatingServiceImpl.set`, `ContentReviewServiceImpl.publish`): um rating novo ou review manual exige uma passada concluída atual, com todos os episódios regulares do escopo em um mesmo `watchNumber` e agenda completa. Um rating já elegível pode ser editado com episódios pendentes se ainda houver evidência assistida; sem qualquer evidência não é editável. O snapshot de revisão do histórico e a versão da agenda/projeção são comparados novamente dentro de `UserContentMutationLock`; nenhuma chamada remota ocorre enquanto esse lock está adquirido. O contexto público nunca vem do DTO.
 - **Publicação manual é idempotente e atômica** (`ContentReviewServiceImpl.create`, `UserActionExecutorImpl`): `Idempotency-Key` é obrigatório e limitado a 128 caracteres. A review, eventual atualização do rating atual e recibo são confirmados na mesma transação. Repetir chave e payload retorna o mesmo recurso; reutilizar a chave com outro conteúdo, texto, nota ou versão retorna 409.
@@ -196,6 +198,16 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   `ContentViewerStateService` somente quando uma faceta de viewer foi pedida e mantém `contentId` nulo
   quando a coordenada ainda não existe em `Content`. Nenhuma leitura de card chama
   `ContentService.getOrCreateReference` ou grava uma linha `Content`.
+- **IDs locais de avaliação acompanham as respostas visuais existentes** (`TrendingServiceImpl`,
+  `WatchlistEntryServiceImpl.getWatchlistView`, `UserListDetailViewServiceImpl`,
+  `DiaryEntryServiceImpl.resolveBulkCompletionReferences`, `DiaryViewGroupingSql`): Trending propaga
+  o `contentId` já resolvido pelo assembler; Watchlist e detalhe de lista usam o `Content.id` da relação
+  persistida (o ID da linha Watchlist/UserListItem permanece outro campo). O bulk de diário inclui o ID
+  que acabou de criar/reutilizar em cada `CompletionDescriptor`, evitando uma busca de referência depois
+  do POST já existente; recibos anteriores à mudança recuperam IDs ausentes por uma consulta local em lote.
+  Diário agrupado mantém `content` como card visual de série e expõe
+  `ratingContentId` separado: SERIES aponta à série, SEASON só recebe alvo quando uma única temporada
+  está representada; grupos multi-temporada ou EPISODE não oferecem rating. GETs não criam referências.
 - **Facetas são seletivas** (`ContentCardFieldSet`/`ContentCardAssembler`): `BASIC_METADATA` usa o
   metadata canônico leve; `TMDB_VOTE_AVERAGE` reutiliza essa mesma consulta TMDB. `STATS`,
   `VIEWER_STATE`, `WATCHLIST_MEMBERSHIP`, `WATCHLIST_PROGRESS` e `SOCIAL_METADATA` só são carregados
@@ -250,14 +262,17 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Estado de temporadas nos cards de página usa o histórico de episódios do viewer**
   (`ContentPageSeasonStateService`): em `sections.seasons` de páginas SERIES e SEASON, a assistência
   e a última visualização são derivadas em lote de `DiaryEntry` de episódios do viewer autenticado.
-  Sem eventos para uma temporada, `watchStatus=UNWATCHED` e `lastWatchedDate=null`; eventos repetidos
-  contam uma vez para o estado, mas a data é o maior `watchedDate`, recorrendo à data de criação.
-  Com histórico, um calendário completo e vigente valida quais episódios regulares já foram
-  lançados: cobertura vazia/parcial/integral resulta em `UNWATCHED`/`PARTIALLY_WATCHED`/`WATCHED`.
-  Calendário ausente, vencido ou incompleto resulta em `UNKNOWN` e refresh assíncrono, a menos que
-  uma projeção atual de conclusão da referência local já confirme `WATCHED`. Tentativas sem resultado
-  remoto recebem cooldown curto e limitado em memória; elas não marcam o calendário como completo nem
-  apagam snapshots. O rating vem da
+  Um calendário completo e vigente fornece o denominador mesmo sem eventos: cobertura vazia/parcial/
+  integral entre episódios regulares lançados resulta em `UNWATCHED`/`PARTIALLY_WATCHED`/`WATCHED`,
+  com `watchedEpisodeCount` e `releasedEpisodeCount` coerentes; episódios futuros não entram.
+  Replays do mesmo episódio contam uma vez, mas a data é o maior `watchedDate`, recorrendo à data de
+  criação. Uma projeção de conclusão só mantém `WATCHED` quando a agenda não dá contagens confiáveis;
+  agenda confiável mais recente decide o estado mesmo quando contradiz a projeção. Séries agregam
+  somente pares de contagens confiáveis das temporadas, sem usar `airedEpisodeCount` de catálogo como
+  total substituto. Calendário ausente, vencido ou incompleto não inventa o denominador; eventos sem
+  calendário confiável podem disparar refresh assíncrono. Tentativas sem resultado remoto recebem
+  cooldown curto e limitado em memória; elas não marcam o calendário como completo nem apagam
+  snapshots. A consulta por coordenada também resolve cards sem referência `Content`. O rating vem da
   referência `Content` local via resolução de viewer em lote; sem essa referência `myRating=null`.
 - **Imagens da página usam a hierarquia de mídia** (`ContentDetailsServiceImpl` e `ContentPageServiceImpl`): `EPISODE.posterPath`
   usa o poster da temporada e `EPISODE.backdropPath` usa o still do próprio episódio; `SEASON.posterPath`
@@ -280,6 +295,20 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   Specials da temporada 0; `releasedEpisodeCount` conta somente episódios regulares já lançados. Uma
   `DiaryCompletionProjection` atual pode confirmar `WATCHED` sem criar eventos nem preencher contagens
   que não estejam comprovadas. MOVIE e EPISODE usam somente eventos diretos.
+- **Progresso de temporadas e séries usa calendários confiáveis em lote**
+  (`ContentWatchProgressRepository`, `ContentViewerStateServiceImpl`, `ContentPageSeasonStateService`): cards
+  e páginas contam coordenadas distintas de episódios regulares com `releaseDate <= hoje`, cruzadas com os
+  eventos do viewer autenticado. Reprises e temporada 0 não aumentam os contadores; episódios futuros ficam
+  fora do denominador e, quando lançados, podem mudar `WATCHED` para `PARTIALLY_WATCHED` sem nova escrita no
+  diário. O calendário precisa ter marcador completo, coordenadas e datas consistentes, `nextCheckAt` vigente,
+  além de corresponder à região/idioma do viewer. A série só agrega temporadas com marcadores completos cujo
+  total esperado corresponde ao marcador SERIES. Calendário confiável sem lançamentos resulta em `UNWATCHED`
+  com `0/0`; ausência de evidência confiável preserva `UNKNOWN`, salvo uma projeção atual de conclusão, que
+  confirma `WATCHED` sem inventar contagens. As consultas são feitas uma vez por lote de coordenadas e a
+  projeção de passada deixa de sobrepor contagens atuais comprovadas. `ContentDetailsServiceImpl` só publica
+  um marcador SERIES completo quando o resumo atual contém todas as temporadas regulares e cada agenda
+  correspondente foi recebida remotamente e representada integralmente; leituras parciais preservam a
+  validade anterior do calendário em vez de rebaixá-la.
 - **As estatísticas da página respeitam privacidade e tipo de opinião** (`ContentStatsServiceImpl`,
   `ContentPageStatsServiceImpl`, `ContentRatingRepository`): MOVIE/EPISODE continuam agregando eventos
   `DiaryEntry`; SERIES/SEASON usam um `ContentRating` atual por perfil público, reviews com texto e
@@ -1636,13 +1665,14 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 
 ### Regras da resposta detalhada e dos snapshots
 
-> Regra vigente: `lastWatchedDate` é apenas o critério padrão. A ordenação aceita `sortBy=LAST_WATCHED`, `LAST_RELEASED`, `REMAINING_EPISODES` ou `REMAINING_RUNTIME`, com `direction=ASC` ou `DESC`, aplicada antes da paginação e com desempate final por `seriesTmdbId ASC`.
+> Regra vigente: séries com total lançado positivo e progresso global de 100% ficam depois de todas as demais, independentemente de `sortBy`; o critério escolhido e `direction` ordenam os dois grupos antes da paginação. `lastWatchedDate` é apenas o critério padrão. A ordenação aceita `sortBy=LAST_WATCHED`, `LAST_RELEASED`, `REMAINING_EPISODES` ou `REMAINING_RUNTIME`, com `direction=ASC` ou `DESC`, e desempate final por `seriesTmdbId ASC`.
 
 - `series_progress_metadata` guarda o agregado da série e `series_progress_season_metadata` guarda os agregados por temporada. Um snapshot é considerado fresco somente quando `refreshedAt` é hoje e `runtimeVerifiedAt` não é nulo; nessa situação, `GET /users/{userId}/series-in-progress` não chama o TMDB. Snapshot ausente ou stale é hidratado pelo detalhe da série e pelas temporadas regulares, com single-flight por série.
 - Snapshot stale é servido imediatamente enquanto o refresh único roda em segundo plano; ao persistir uma nova carga, as linhas antigas de `series_progress_season_metadata` são removidas e descarregadas antes das novas linhas serem inseridas, preservando a unicidade `(seriesTmdbId, seasonNumber)`.
 - Se o TMDB falha e existe snapshot válido, a leitura continua usando o snapshot. Sem snapshot válido, a falha retorna `502`; a falha transitória não é persistida como snapshot. Runtime incompleto não é inventado: `totalKnownRuntime` e `remainingRuntimeMinutes` permanecem `null`.
 - `aggregate` e `totalElements` são calculados sobre todas as séries elegíveis antes do recorte da página, mesmo quando uma série tem `watchedPercentage=100`. `sortBy` aceita `LAST_WATCHED`, `LAST_RELEASED`, `REMAINING_EPISODES` e `REMAINING_RUNTIME`; `direction` aceita `ASC` e `DESC`; o desempate final é `seriesTmdbId ASC`. A temporada 0, temporadas regulares sem episódio lançado positivo e temporadas com `watchedPercentage=100` ficam fora de `seasonProgress`.
 - A apresentação da página é enriquecida sem persistência de metadados TMDB: `seriesTitle` e `seriesPosterPath` vêm do detalhe da série no idioma preferido do usuário, `lastWatchedEpisodeTitle` vem das coordenadas de `lastWatchedSeasonNumber`/`lastWatchedEpisodeNumber`, e `nextEpisode` é o primeiro episódio regular não assistido em ordem de temporada/episódio. Temporadas já completas são puladas, a temporada 0 é ignorada, episódios futuros podem aparecer com `availableToWatch=false` e uma falha opcional de apresentação deixa os campos enriquecidos nulos sem descartar o progresso numérico. O resolver reutiliza as coordenadas assistidas carregadas em lote e o cache Caffeine; não cria `Content` durante o GET.
+- O envelope paginado expõe somente `backdropPath` da primeira série em `content`, reutilizando o detalhe TMDB já carregado pela apresentação. Página vazia, série não encontrada ou backdrop ausente resulta em `null`; o caminho permanece cru, sem URL ou fallback para poster.
 
 ## UserList
 
@@ -1963,6 +1993,13 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Séries e temporadas retornam todos os itens da lista, inclusive 0%, parciais e 100%**
    (`SeriesProgressReaderImpl`/`SeriesProgressAssembler`) — a contagem de episódios deduplica coordenadas,
    ignora rewatches e Specials, e reaproveita as mesmas regras de progresso da tela `Progress`.
+- **A resposta de progresso da lista inclui apresentação de série e envelope de uma página**
+  (`SeriesProgressReaderImpl`, `SeriesProgressAssembler`, `UserListServiceImpl.getUserListProgress`): cada
+  série recebe título, pôster, último episódio assistido, próximo episódio e temporadas completas separadas
+  em `completedSeasonProgress`. `backdropPath` vem da primeira série na ordem da lista. Os metadados
+  `page`/`size`/`totalPages` descrevem a lista inteira, que continua sendo retornada sem recorte ou parâmetros
+  de paginação. Um item SEASON ainda recebe o progresso da temporada mesmo quando ela está em
+  `completedSeasonProgress` da série; falhas opcionais de apresentação TMDB deixam esses campos nulos.
 - **Leitura de progresso de séries é deduplicada e cacheada** (`SeriesProgressReaderImpl`/
    `SeriesProgressMetadataRefreshService`) — uma lista com várias referências à mesma série usa um único lote
    de IDs e um único carregamento de snapshots; temporadas sem uma linha `Content` própria do tipo `SERIES`
@@ -2478,7 +2515,10 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Backdrop principal fica no primeiro filme do agregado** (`TrendingServiceImpl`): `GET /trending`
   expõe o `backdropPath` TMDB somente em `movies[0]`. Se a lista estiver vazia ou o primeiro filme
   não tiver backdrop, nenhum card recebe um valor; a rota de continuação não faz enriquecimento extra.
-
+- **Cards Trending incluem a referência local sem persistir durante a leitura** (`TrendingServiceImpl`,
+  `ContentCardAssembler`): `contentId` corresponde ao `Content.id` já existente para o par tipo/TMDB;
+  fica nulo quando a referência ainda não foi criada. TMDB `tmdbId` continua sendo uma identidade
+  diferente e nunca substitui o UUID local nas rotas de avaliação.
 ## Summary
 
 - **Nota TMDB na Home é distinta da média comunitária** (`ContentCardAssembler`, `HomeNextEpisodeAssembler`) —
@@ -2644,8 +2684,12 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   Campos de metadata podem ser null quando o dado correspondente não vem do TMDB/cache; `totalEpisodeCount` pode ser
   null quando o snapshot não fornece o total.
 - **O mapa pagina depois de calcular a ordem e os totais globais** (`SummaryServiceImpl.getEpisodeRatingsMap`) —
-  `page` é 1-based, padrão 1; `size` padrão 12 e aceita de 1 a 100. A ordenação é por proporção assistida decrescente,
-  episódios distintos assistidos decrescentes e `seriesTmdbId` crescente. `totalWatchedEpisodeCount` e
+  `page` é 1-based, padrão 1; `size` padrão 12 e aceita de 1 a 100. Primeiro vêm as séries com total conhecido e positivo
+  cujo número de episódios assistidos seja igual ou maior que o total. Dentro de cada grupo, a ordem usa a `watchedDate`
+  mais recente entre episódios regulares, decrescente; datas ausentes ficam por último e `seriesTmdbId` crescente desempata.
+  `backdropPath` é preenchido somente no primeiro item da página e reaproveita a metadata TMDB já resolvida; nos demais,
+  retorna null.
+  `totalWatchedEpisodeCount` e
   `totalEpisodeCount` referem-se a todas as séries, não só à página; o total geral de episódios é null se algum snapshot
   estiver sem esse dado.
 - **Ambos os endpoints respeitam a visibilidade do Summary** (`SummaryServiceImpl.assertCanViewSummary`) — perfil
@@ -3554,4 +3598,4 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Watchlist importada só acrescenta filmes/séries elegíveis** (`ImportWatchlistWriterImpl`, `WatchlistEntryServiceImpl.appendImportedEntries`, `ContentWatchEligibilityServiceImpl`): inserções são globais ao fim da ordem e revalidam duplicatas/assistidos sob `UserContentMutationLock` e lock consultivo. O lote verifica evidência de diário e `ImportedWatchAssertion` em consultas agrupadas; registros marcados como assistidos na origem também são ignorados. Temporada/episódio não vira série automaticamente.
 - **Exclusão local de membro importado impede ressurreição** (`UserListItemServiceImpl.deleteAndCloseGap`, `WatchlistEntryServiceImpl.deleteAndCloseGap`, `ImportLedger.markDeletedByTarget`): apagar um item importado transforma o vínculo de origem em `TOMBSTONE`; reimportar o mesmo arquivo não o recria. Apagar a lista também tombstoneia o vínculo de identidade `USER_LIST`.
 
-- **Agrupamento e paginação da view do diário** (`DiaryViewServiceImpl.getGroupedView`, `DiaryViewGroupingSql.cte`): `grouped=true` forma sequências contíguas por série, passada e data efetiva. Filmes interrompem; datas ausentes usam criação do evento/âncora. Para `hasReview` diferente de true, o cursor limita cada resposta a 30 linhas e 300 itens representados (eventos + conclusões derivadas). Grupos nunca são partidos: se o próximo grupo não cabe, começa inteiro na próxima página; um grupo de série com mais de 300 itens é retornado inteiro, sozinho se necessário. Episódios, temporadas e suas contagens vêm dos eventos reais; `seasonEpisodeCounts` informa os episódios assistidos por temporada, inclusive temporadas parciais. Conclusões contam no orçamento, mas não duplicam `episodeCount` ou as contagens por temporada. O front carrega por lote somente os IDs dos membros retornados; filtros, cursor e ordenação são vinculados para impedir uso com parâmetros diferentes. `hasReview=true` preserva o formato paginado não agrupado. Resumos mantêm backdrop em lote, singleton mantém forma/opiniões originais, e autorização de perfil/bloqueios antecede as consultas.
+- **Agrupamento e paginação da view do diário** (`DiaryViewServiceImpl.getGroupedView`, `DiaryViewGroupingSql.cte`): `grouped=true` forma sequências contíguas por série, passada e data efetiva. Filmes interrompem; datas ausentes usam criação do evento/âncora. Para `hasReview` diferente de true, o cursor limita cada resposta a 30 linhas e 300 itens representados (eventos + conclusões derivadas). Grupos nunca são partidos: se o próximo grupo não cabe, começa inteiro na próxima página; um grupo da mesma série com mais de 300 itens é retornado inteiro, sozinho se necessário. Episódios, temporadas e suas contagens vêm dos eventos reais; `seasonEpisodeCounts` informa os episódios assistidos por temporada, inclusive temporadas parciais. Conclusões contam no orçamento, mas não duplicam `episodeCount` ou as contagens por temporada. O front carrega por lote somente os IDs dos membros retornados; filtros, cursor e ordenação são vinculados para impedir uso com parâmetros diferentes. `hasReview=true` preserva o formato paginado não agrupado. Resumos mantêm backdrop em lote, singleton mantém forma/opiniões originais, e autorização de perfil/bloqueios antecede as consultas.

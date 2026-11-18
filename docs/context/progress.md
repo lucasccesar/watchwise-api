@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-11-12.
+Última atualização: 2026-11-17.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -5974,11 +5974,30 @@ SEASON no diário individual e `WATCHED` na página da temporada e no card da p�
 projeção SERIES. A bateria focal passou com 321 testes, e as regressões de query-count, repositório e
 página também passaram.
 
+## 2026-11-14 — Ratings de séries e temporadas por passada
+
+Ratings de SERIES/SEASON agora preservam uma nota por passada completa em `ContentRatingPass`, enquanto
+`ContentRating` segue como projeção atual única e versão usada pelos agregados públicos. Editar a mesma
+passada substitui sua nota; uma passada posterior mantém a anterior no histórico. Excluir a nota vigente
+remove somente sua passada e recua para a nota anterior, quando existir. Ratings antigos foram migrados
+como snapshots sem passada identificável. O diário derivado mostra a nota correspondente a cada passada.
+
+`GET /contents/{contentId}/my-rating` agora retorna apenas nota e versão, sem montar a página completa
+ou consultar o TMDB; quando não existe nota, ambos os campos são nulos. Reviews e restaurações de opinião
+escrita/importada usam o mesmo gravador por passada.
+
+As respostas visuais existentes agora carregam os IDs locais que os fluxos pós-conclusão precisam:
+Trending propaga a referência já resolvida, Watchlist e detalhe de lista preservam `Content.id`, o
+bulk de diário devolve o ID das referências de conclusão que criou/reutilizou e grupos do diário têm
+`ratingContentId`. Grupos com várias temporadas não oferecem um alvo de rating de temporada. O flow
+compartilhado usa somente esse ID para buscar a nota; nenhuma chamada nova do frontend foi adicionada.
+Recibos idempotentes antigos do bulk recuperam o ID local ausente por uma consulta em lote antes de responder.
+
 ## 2026-11-15 — Orçamento e cursor para grupos do diário
 
 Quando `grouped=true` e `hasReview` não é true, `/diary/view` usa cursor com no máximo 30 linhas e
 orçamento de 300 itens representados por resposta. Os grupos são indivisíveis; o próximo grupo que
-ultrapassar o espaço restante passa inteiro para a próxima resposta. Um único grupo de uma série que
+ultrapassar o espaço restante passa inteiro para a próxima resposta. Um grupo da mesma série que
 ultrapasse 300 é permitido inteiro, ocupando sozinho a resposta quando necessário. A seleção é feita
 antes do enriquecimento; só os IDs dos episódios pertencentes às linhas retornadas são hidratados pelo
 novo POST `/users/{userId}/diary/batch`, em lotes de até 500.
@@ -5988,3 +6007,47 @@ Cursor e filtros abrangem tipo, datas, faixa de nota, série, cinema e ordenaç�
 uma página por vez, retém somente seus dados e os cursores visitados; avançar carrega sob demanda e
 voltar reconsulta a página anterior sem acumular todos os episódios já vistos na memória. Maven compile
 e build Angular passaram; os testes automatizados não foram executados nesta alteração.
+
+## 2026-11-16 — Progresso após bulk independente da avaliação
+
+As respostas de páginas e cards para SERIES/SEASON agora derivam o estado e as contagens de episódios a
+partir de calendários locais completos e vigentes e dos eventos do viewer. A leitura em lote exclui
+episódios futuros, especiais e rewatches do total, respeita região/idioma, e mostra `0/0` como
+`UNWATCHED` quando o calendário confiável ainda não tem episódios lançados. A temporada atual e a raiz
+da série mantêm contagens coerentes; cards por coordenada também recebem contagens sem exigir uma
+referência `Content`. Uma nova estreia pode atualizar o estado para parcial sem nova gravação. A
+projeção atual de conclusão continua confirmando `WATCHED` quando as contagens não são comprováveis,
+e a raiz da série agrega temporadas somente quando todas fornecem contagens confiáveis.
+
+Na página de temporada, o progresso visual usa a quantidade lançada retornada pela API e só calcula um
+fallback local quando a lista completa de episódios contém datas conhecidas. O convite para avaliar usa
+o descritor de uma passada de conclusão e seu `watchNumber`; o fechamento não escreve avaliação ou
+resenha. Foram adicionados testes de integração do fluxo POST→GET e da alteração para parcial após
+excluir um evento, testes de contagem por calendário e testes dos helpers de página.
+O cenário integrado também cobre uma temporada de 24 episódios com 18 já lançados e 6 futuros, uma
+passada repetida, outro viewer sem eventos e o estado `17/18` após excluir os eventos de um episódio.
+O marcador SERIES completo permanece vigente após a leitura da página, e o `EXPLAIN (ANALYZE, BUFFERS)`
+da consulta em lote é anexado ao relatório do teste.
+
+`GET /users/{userId}/series-in-progress` agora mantém séries com progresso global de 100% depois de
+todas as demais em todas as opções de `sortBy`, aplicando o critério e a direção escolhidos também
+entre as completas antes da paginação. A detecção exige total positivo de episódios lançados. O
+envelope também inclui `backdropPath` somente para a primeira série da página, reaproveitando os
+detalhes TMDB já consultados; páginas vazias ou sem backdrop retornam null.
+
+## 2026-11-17 — Ordenação e backdrop do mapa de avaliações de episódios
+
+`GET /users/{userId}/episode-ratings-map` agora prioriza séries cujo total conhecido e positivo de episódios já foi
+assistido. Dentro dos grupos completo e incompleto, a lista usa a data assistida mais recente dos episódios regulares,
+com datas ausentes por último e `seriesTmdbId` crescente para desempates. A consulta do diário retorna a contagem
+deduplicada e a última `watchedDate` por série na mesma agregação; totais e paginação continuam globais. O primeiro item
+de cada página também recebe o `backdropPath` já resolvido pela consulta de metadata TMDB; os demais retornam `null`.
+
+## 2026-11-18 — Progresso enriquecido nas listas
+
+`GET /lists/{listId}/progress` agora inclui os metadados de uma página única para a lista inteira e o
+`backdropPath` da primeira série na ordem dos itens. O progresso dos itens SERIES também recebe título,
+pôster, último episódio assistido, próximo episódio e temporadas completas em `completedSeasonProgress`.
+Itens SEASON continuam recebendo seus próprios detalhes mesmo quando a temporada completa foi separada
+do progresso da série. A leitura reutiliza o enriquecimento de séries existente e mantém os itens sem
+paginação HTTP, na ordem original.

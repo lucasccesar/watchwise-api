@@ -1842,10 +1842,13 @@ paths:
         incluindo séries já concluídas. `watchedEpisodeCount` conta pares distintos de
         temporada/episódio, ignorando rewatches e a temporada 0 (Specials). `totalEpisodeCount`
         vem dos snapshots compartilhados de progresso e soma somente episódios regulares com
-        `air_date` válida até hoje, sem episódios futuros ou sem data. A lista inteira é ordenada por
-        proporção assistida decrescente, depois quantidade assistida decrescente e `seriesTmdbId`
-        crescente; paginação não altera os totais globais. Título, ano e pôster dos itens da página
-        são resolvidos pelo backend via TMDB. `totalEpisodeCount` global é null se algum snapshot de
+        `air_date` válida até hoje, sem episódios futuros ou sem data. A lista inteira prioriza séries com total
+        conhecido e positivo cujo `watchedEpisodeCount` seja igual ou maior que `totalEpisodeCount`. Dentro dos
+        grupos completo e incompleto, ordena pela `watchedDate` mais recente registrada para episódios regulares,
+        em ordem decrescente; datas ausentes ficam por último e `seriesTmdbId` crescente desempata. A paginação
+        não altera os totais globais. Título, ano e pôster dos itens da página
+        são resolvidos pelo backend via TMDB. Somente o primeiro item da página recebe `backdropPath`;
+        nos demais itens, esse campo é null. `totalEpisodeCount` global é null se algum snapshot de
         série não tiver o total disponível; os campos de metadata podem ser null quando os dados
         disponíveis do TMDB não os incluem. Se metadata ou snapshot necessário não puder ser
         carregado, retorna 502.
@@ -3105,15 +3108,36 @@ paths:
         "409": { description: Versão de rating obsoleta, passada de SEASON já revisada ou chave idempotente reutilizada com outro payload }
 
   /contents/{contentId}/my-rating:
+    get:
+      tags: [Diary]
+      summary: Ler nota e versão atuais do usuário para uma série ou temporada
+      description: >
+        Aceita somente SERIES e SEASON. Retorna apenas o estado da projeção atual, sem montar a página
+        de conteúdo nem consultar o TMDB. Sem nota, score e version são null. version é a versão
+        otimista da projeção única por usuário/conteúdo, não uma versão individual da passada.
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+      responses:
+        "200":
+          description: Estado atual, inclusive quando ainda não existe nota.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentRatingState" }
+        "400": { description: Tipo fora de escopo; retorna ApiError }
+        "401": { description: Não autenticado }
+        "404": { description: Conteúdo não encontrado }
     put:
       tags: [Diary]
-      summary: Criar ou atualizar o rating atual próprio de uma série ou temporada
+      summary: Criar ou atualizar a nota própria da passada elegível mais recente
       description: >
         Aceita somente SERIES e SEASON. Um rating novo exige passada atualmente completa. Um rating
-        previamente elegível pode ser editado com episódios pendentes enquanto ainda houver evidência
-        assistida. Para rating existente, expectedVersion é obrigatório e deve ser a versão recebida
-        na leitura do diário ou em `viewerState.currentRatingVersion` dos cards de série retornados
-        pelo Summary do próprio perfil; a resposta não expõe evidência privada.
+        de uma mesma passada substitui sua nota anterior. A primeira passada completa posterior cria
+        outra nota preservando a anterior. Se uma passada posterior estiver incompleta, um rating
+        previamente elegível continua editável na passada atualmente avaliada enquanto houver
+        evidência assistida. Para rating existente, expectedVersion é obrigatório e corresponde à
+        versão da projeção atual, recebida por este recurso, pelo diário ou por
+        `viewerState.currentRatingVersion` nos cards do Summary próprio; a resposta não expõe evidência
+        privada. Agregados públicos continuam contando somente a projeção atual por perfil/conteúdo.
       parameters:
         - $ref: "#/components/parameters/contentId"
       requestBody:
@@ -3123,7 +3147,7 @@ paths:
             schema: { $ref: "#/components/schemas/ContentRatingUpsert" }
       responses:
         "200":
-          description: Rating atual criado ou atualizado.
+          description: Rating da passada atual criado ou atualizado; retorna a projeção vigente.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ContentRatingResponse" }
@@ -3134,8 +3158,11 @@ paths:
         "409": { description: Rating foi removido ou expectedVersion está ausente/obsoleto }
     delete:
       tags: [Diary]
-      summary: Remover o rating atual próprio
-      description: Remove somente ContentRating; reviews escritas e snapshots scoreAtPublication permanecem.
+      summary: Remover a nota da passada atualmente avaliada
+      description: >
+        Remove somente a nota da passada apontada pela projeção atual e recua para a nota da passada
+        anterior, se houver; sem fallback, remove a projeção. Reviews escritas e snapshots
+        scoreAtPublication permanecem.
       parameters:
         - $ref: "#/components/parameters/contentId"
       responses:
@@ -3741,8 +3768,13 @@ paths:
         autenticado que visualiza a lista, nunca para o dono dela. Todos os itens de uma lista de conteúdo
         são retornados na ordem da lista. Filmes e episódios não expõem estado individual de assistência:
         a resposta informa somente watchedItems, totalItems e watchedPercentage. Séries e temporadas incluem
-        progresso detalhado, inclusive itens com 0%, progresso parcial e 100%. Listas de listas retornam 400.
-        A leitura de séries usa snapshots compartilhados de progresso e deduplica seriesTmdbId.
+        progresso detalhado, inclusive itens com 0%, progresso parcial e 100%. Séries incluem título, pôster,
+        último episódio assistido, próximo episódio e temporadas completas separadas em completedSeasonProgress.
+        O envelope descreve a lista inteira como uma página: page é 1, size e totalElements são o número de
+        itens, totalPages é 1 quando há itens e 0 quando vazia, e hasNext é sempre false. backdropPath usa a
+        primeira série na ordem da lista; é null quando não há série ou o TMDB não fornece a imagem.
+        Listas de listas retornam 400. A leitura de séries usa snapshots compartilhados de progresso e deduplica
+        seriesTmdbId.
       parameters:
         - $ref: "#/components/parameters/listId"
       responses:
@@ -3782,6 +3814,7 @@ paths:
         SEASON/EPISODE usam o backdrop da série-pai. Página vazia, lista aninhada em primeiro lugar
         ou imagem indisponível retorna null. Se o primeiro item for uma temporada, a metadata da
         série-pai é resolvida pelo cache compartilhado de cards.
+        Para itens de conteúdo, `card.contentId` é o ID local de Content; `UserListDetailItem.id` continua sendo o ID do item da lista.
         Cada card também expõe `viewerState.inWatchlist` para o usuário autenticado: false significa
         que o conteúdo não está na Watchlist. Essa faceta não preenche `dropped` nem o progresso de
         episódios.
@@ -4362,19 +4395,22 @@ paths:
   /users/{userId}/series-in-progress:
     get:
       tags: [Diary]
-      summary: Séries que o usuário está assistindo mas ainda não terminou
+      summary: Séries iniciadas pelo usuário
       description: >
         Sem entidade própria — derivado de DiaryEntry/Content: uma série entra na lista quando
         há pelo menos uma DiaryEntry de EPISODE daquele seriesTmdbId e nenhuma DiaryEntry de
         SERIES correspondente nem DroppedEntry de SERIES. A resposta é uma página detalhada:
         content contém somente a página solicitada, enquanto aggregate e totalElements representam
         todas as séries elegíveis, inclusive as que ficaram fora da página e as que têm
-        watchedPercentage=100. Dentro de cada série, seasonProgress omite temporadas com
+        watchedPercentage=100. Séries cujo progresso global é 100% ficam ao final, depois das demais,
+        em todos os critérios sortBy; o mesmo critério sortBy e direction ordena cada grupo antes da
+        paginação. Dentro de cada série, seasonProgress omite temporadas com
         watchedPercentage=100 e completedSeasonProgress lista o detalhamento dessas temporadas;
         uma porcentagem null permanece em seasonProgress quando o total da temporada é desconhecido.
         A ordenação é aplicada no banco antes da paginação; sortBy aceita LAST_WATCHED,
         LAST_RELEASED, REMAINING_EPISODES e REMAINING_RUNTIME, e direction aceita ASC ou DESC. O
-        desempate final é seriesTmdbId ASC.
+        desempate final é seriesTmdbId ASC. backdropPath é o caminho cru do TMDB para a série no topo
+        da página; é null quando a página está vazia ou a imagem está indisponível.
         Os snapshots compartilhados de series_progress_metadata e
         series_progress_season_metadata são usados sem chamada ao TMDB quando estão frescos no dia
         atual e com runtime verificado. Snapshot ausente ou stale é hidratado pelo TMDB; falha fria
@@ -4387,7 +4423,7 @@ paths:
         - name: sortBy
           in: query
           required: false
-          description: "Critério global antes da paginação: LAST_WATCHED, LAST_RELEASED, REMAINING_EPISODES ou REMAINING_RUNTIME."
+          description: "Critério aplicado dentro dos grupos incompletas/completas antes da paginação: LAST_WATCHED, LAST_RELEASED, REMAINING_EPISODES ou REMAINING_RUNTIME."
           schema: { type: string, enum: [LAST_WATCHED, LAST_RELEASED, REMAINING_EPISODES, REMAINING_RUNTIME], default: LAST_WATCHED }
         - name: direction
           in: query
@@ -7161,10 +7197,20 @@ components:
 
     WatchlistCard:
       type: object
-      description: Watchlist screen row with the visual card and owner-context release/status data. ContentCard.numberOfEpisodes and tmdbVoteAverage come from TMDB and may be null; stats.averageScore is the existing public community aggregate and is null without public scores. TMDB metadata is not stored on Content.
+      description: >
+        Watchlist screen row with the visual card and owner-context release/status data. `id` is the WatchlistEntry ID;
+        `card.contentId` is the local Content ID and is present because this row references a persisted Content.
+        ContentCard.numberOfEpisodes and tmdbVoteAverage come from TMDB and may be null; stats.averageScore is the
+        existing public community aggregate and is null without public scores. TMDB metadata is not stored on Content.
       properties:
         id: { type: string, format: uuid }
-        card: { $ref: "#/components/schemas/ContentCard" }
+        card:
+          allOf:
+            - $ref: "#/components/schemas/ContentCard"
+            - type: object
+              required: [contentId]
+              properties:
+                contentId: { type: string, format: uuid }
         position: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         releaseDate: { type: string, format: date, nullable: true }
@@ -7231,9 +7277,18 @@ components:
     ContentRatingResponse:
       type: object
       required: [score, version]
+      description: Projeção atual única do usuário para o conteúdo; version protege atualizações concorrentes.
       properties:
         score: { type: integer, minimum: 1, maximum: 10 }
         version: { type: integer, format: int64, minimum: 0 }
+
+    ContentRatingState:
+      type: object
+      required: [score, version]
+      description: Estado compacto da nota atual; ambos os campos são null quando não há nota.
+      properties:
+        score: { type: integer, minimum: 1, maximum: 10, nullable: true }
+        version: { type: integer, format: int64, minimum: 0, nullable: true }
 
     ContentReviewCreation:
       type: object
@@ -7796,6 +7851,7 @@ components:
         title: { type: string, nullable: true }
         releaseYear: { type: integer, nullable: true }
         posterPath: { type: string, nullable: true, description: Caminho cru do poster TMDB, como /poster.jpg. }
+        backdropPath: { type: string, nullable: true, description: Caminho cru do backdrop TMDB; preenchido somente no primeiro item de cada página. }
         customPosterUrl:
           type: string
           format: uri-reference
@@ -7920,8 +7976,15 @@ components:
 
     ContentViewerStateDTO:
       type: object
+      description: >
+        Para SERIES e SEASON, o progresso usa episódios regulares distintos lançados até hoje. Calendário
+        local completo e vigente fornece watchedEpisodeCount e releasedEpisodeCount; episódios futuros são
+        excluídos. Quando o calendário não comprova as contagens, os campos podem ser null e uma projeção
+        atual de conclusão pode confirmar watchStatus WATCHED sem contagens inferidas.
       properties:
-        watchStatus: { $ref: "#/components/schemas/WatchStatus" }
+        watchStatus:
+          allOf: [{ $ref: "#/components/schemas/WatchStatus" }]
+          description: Progresso atual do viewer; conclusões SERIES/SEASON não exigem avaliação.
         myRating: { type: integer, nullable: true, description: Current SERIES/SEASON rating; MOVIE/EPISODE keeps the latest diary-entry score. }
         myReview: { type: string, nullable: true, description: Latest non-empty review text for this content. }
         lastWatchedDate: { type: string, format: date, nullable: true }
@@ -7936,8 +7999,8 @@ components:
         lists:
           type: array
           items: { $ref: "#/components/schemas/ContentListMembershipDTO" }
-        watchedEpisodeCount: { type: integer, nullable: true }
-        releasedEpisodeCount: { type: integer, nullable: true }
+        watchedEpisodeCount: { type: integer, nullable: true, description: Episódios regulares distintos lançados e assistidos pelo viewer. }
+        releasedEpisodeCount: { type: integer, nullable: true, description: Episódios regulares distintos lançados até hoje no calendário confiável. }
         currentRatingVersion: { type: integer, format: int64, nullable: true, description: Optimistic version of the current SERIES/SEASON rating. }
         reviewsCount: { type: integer, format: int32, minimum: 0, description: Number of non-empty reviews owned by the viewer for this content. }
         reviewIds:
@@ -7966,7 +8029,9 @@ components:
       description: >
         Viewer-specific facet resolved after shared metadata. It is never part of a shared TMDB/card
         metadata cache. Members may be null when the card request selected only WATCHLIST_PROGRESS or
-        when the relevant state is not available.
+        when the relevant state is not available. SERIES/SEASON counts include only distinct regular
+        episodes released by today; upcoming episodes are excluded. VIEWER_STATE and WATCHLIST_PROGRESS
+        may both include these episode counts when a trusted calendar is available.
       properties:
         watchStatus: { type: string, enum: [UNWATCHED, PARTIALLY_WATCHED, WATCHED, UNKNOWN], nullable: true }
         myRating: { type: integer, nullable: true }
@@ -7983,8 +8048,8 @@ components:
             independently through WATCHLIST_MEMBERSHIP, or together with other watchlist fields through
             WATCHLIST_PROGRESS.
         dropped: { type: boolean, nullable: true }
-        watchedEpisodeCount: { type: integer, nullable: true }
-        releasedEpisodeCount: { type: integer, nullable: true }
+        watchedEpisodeCount: { type: integer, nullable: true, description: Regular released episodes watched by the viewer. }
+        releasedEpisodeCount: { type: integer, nullable: true, description: Distinct regular episodes released by today in a trusted calendar. }
         currentRatingVersion: { type: integer, format: int64, nullable: true, description: Optimistic version of the current SERIES/SEASON rating. }
         reviewsCount: { type: integer, format: int32, minimum: 0, nullable: true, description: Number of non-empty reviews owned by the viewer for this content; null when only rating state is resolved. }
         reviewIds:
@@ -8766,12 +8831,17 @@ components:
       description: >
         UserListDetailItemDTO contém exatamente um card de conteúdo ou detalhe de lista aninhada.
         Cards preservam os campos do ContentCard e previewStatus AVAILABLE, PARTIAL ou UNAVAILABLE;
-        itens parciais/indisponíveis permanecem na resposta.
+        itens parciais/indisponíveis permanecem na resposta. `card.contentId` é não nulo para itens de conteúdo,
+        pois cada UserListItem aponta para uma referência local; itens aninhados usam `card: null`.
       properties:
         id: { type: string, format: uuid }
         card:
           allOf:
             - $ref: "#/components/schemas/ContentCard"
+            - type: object
+              required: [contentId]
+              properties:
+                contentId: { type: string, format: uuid }
           nullable: true
         nestedList:
           allOf:
@@ -8824,8 +8894,9 @@ components:
         das séries da lista. remainingRuntimeMinutes de seriesProgressAggregate é null se qualquer
         série incluída tiver runtime restante desconhecido. O payload não inclui contentState: MOVIE
         e EPISODE expõem somente os agregados da lista; SERIES e SEASON recebem progresso detalhado.
-        Listas de listas aninhadas retornam 400.
-      required: [id, name, visibility, totalItems, watchedItems, watchedPercentage, items, movieProgress, seriesProgressAggregate]
+        A paginação representa a lista inteira em uma página, sem parâmetros HTTP de page/size. backdropPath
+        é da primeira série na ordem da lista. Listas de listas aninhadas retornam 400.
+      required: [id, name, visibility, totalItems, watchedItems, watchedPercentage, items, movieProgress, seriesProgressAggregate, page, size, totalElements, totalPages, hasNext, backdropPath]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -8862,6 +8933,15 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/UserListProgressItem" }
+        page: { type: integer, description: Sempre 1; todos os itens da lista são retornados juntos. }
+        size: { type: integer, description: Quantidade de itens retornados. }
+        totalElements: { type: integer, format: int64, description: Total de itens de conteúdo da lista. }
+        totalPages: { type: integer, description: 1 quando há itens e 0 quando a lista está vazia. }
+        hasNext: { type: boolean, enum: [false] }
+        backdropPath:
+          type: string
+          nullable: true
+          description: Caminho cru do backdrop TMDB da primeira série na ordem da lista; null quando não há série ou backdrop disponível.
 
     UserListProgressMovieAggregate:
       type: object
@@ -8892,7 +8972,7 @@ components:
           allOf:
             - $ref: "#/components/schemas/SeriesInProgress"
           nullable: true
-          description: Preenchido somente quando content.type = SERIES; inclui séries 0%, parciais e 100%.
+          description: Preenchido somente quando content.type = SERIES; inclui séries 0%, parciais e 100%, com detalhes de apresentação e completedSeasonProgress.
         seasonProgress:
           allOf:
             - $ref: "#/components/schemas/UserListSeasonProgress"
@@ -9416,7 +9496,9 @@ components:
         Progresso de uma série que o usuário começou. Uma série ainda pode ter watchedPercentage
         igual a 100; nesse caso, seasonProgress omite as temporadas com watchedPercentage igual a 100,
         que são retornadas em completedSeasonProgress. Temporadas com porcentagem null permanecem em
-        seasonProgress quando o total lançado é desconhecido.
+        seasonProgress quando o total lançado é desconhecido. completedSeasonProgress é incluído em
+        GET /users/{userId}/series-in-progress e no seriesProgress de itens SERIES em
+        GET /lists/{listId}/progress.
       properties:
         seriesTmdbId: { type: string }
         maxSeasonNumber: { type: integer, description: Maior número de temporada com pelo menos um episódio assistido. }
@@ -9502,6 +9584,7 @@ components:
 
     SeriesInProgressPage:
       type: object
+      required: [backdropPath]
       properties:
         content:
           type: array
@@ -9512,6 +9595,10 @@ components:
         totalPages: { type: integer }
         hasNext: { type: boolean }
         aggregate: { $ref: "#/components/schemas/SeriesInProgressAggregate" }
+        backdropPath:
+          type: string
+          nullable: true
+          description: Caminho cru do backdrop TMDB da primeira série da página; null quando não há série ou backdrop disponível.
 
     SeriesInProgressPreview:
       type: object
@@ -9632,7 +9719,7 @@ components:
 
     DiaryCompletionDescriptor:
       type: object
-      required: [content, pass]
+      required: [content, contentId, pass]
       properties:
         content:
           type: object
@@ -9642,6 +9729,10 @@ components:
             tmdbId: { type: string, nullable: true }
             seriesTmdbId: { type: string, nullable: true }
             seasonNumber: { type: integer, nullable: true }
+        contentId:
+          type: string
+          format: uuid
+          description: Local Content ID created or reused by the same bulk diary request for this completed scope.
         pass:
           type: object
           required: [watchNumber, anchorDiaryEntryId, orderedAt]
@@ -10068,6 +10159,11 @@ components:
         shared TMDB page/cache lookup and may be null.
       properties:
         tmdbId: { type: string }
+        contentId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing local Content ID for this TMDB coordinate; null when no local reference exists.
         type: { type: string, enum: [MOVIE, SERIES] }
         title: { type: string, nullable: true }
         posterUrl: { type: string, nullable: true, description: Caminho cru do poster TMDB, como /poster.jpg. }
