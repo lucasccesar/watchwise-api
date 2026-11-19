@@ -21,6 +21,7 @@ public record ImportJobDTO(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         LocalDateTime expiresAt,
-        ImportInventory inventory
+        ImportInventory inventory,
+        ImportProgressDTO progress
 ) {
 }

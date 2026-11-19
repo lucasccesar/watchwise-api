@@ -32,7 +32,7 @@ public class PicksTemplateImportTerminalListener implements ImportUnitTerminalLi
 
         boolean applied = "APPLIED".equals(item.getOutcome());
         for (ImportItem child : children) {
-            child.setOutcome(applied ? "APPLIED" : "SKIPPED");
+            context.transitionOutcome(child, applied ? "APPLIED" : "SKIPPED");
             child.setIssue(null);
         }
         items.saveAll(children);

@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.platformimport.model.SourceApplicationDecisio
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
+import com.watchwise.watchwise_api.platformimport.service.ImportApplyProgress;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.ImportUnitApplier;
 import com.watchwise.watchwise_api.platformimport.service.ImportUnitTerminalListener;
@@ -75,23 +76,45 @@ public class ImportUnitTransaction {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean initializeApplyProgress(ImportExecutionContext context) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
+        if (job == null || !"APPLY".equals(job.getWorkPhase())) return false;
+        if (job.getProgressTotalItems() != null) return true;
+
+        ImportItemRepository.ApplyProgressCounts counts = itemRepository.countApplyProgress(
+                context.jobId(), context.planGeneration());
+        job.replaceApplyProgress(counts.getTotalItems(), counts.getAppliedItems(), counts.getSkippedItems());
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean apply(ImportExecutionContext context, UUID unitId) {
         ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
         if (job == null) return false;
+        if (job.getProgressTotalItems() == null) {
+            ImportItemRepository.ApplyProgressCounts counts = itemRepository.countApplyProgress(
+                    context.jobId(), context.planGeneration());
+            job.replaceApplyProgress(counts.getTotalItems(), counts.getAppliedItems(), counts.getSkippedItems());
+        }
         ImportItem item = itemRepository.findById(unitId).orElse(null);
         if (item == null || !item.getJobId().equals(context.jobId())
                 || item.getPlanGeneration() != context.planGeneration()) return false;
         if ("APPLIED".equals(item.getOutcome()) || "SKIPPED".equals(item.getOutcome())) return true;
 
+        ImportApplyProgress progress = new ImportApplyProgress();
+        ImportExecutionContext applying = context.withApplyProgress(progress);
+
         ImportUnitApplier applier = applierFor(item);
-        ImportSourceKey sourceKey = applier.sourceKey(context, item);
-        SourceApplicationDecision sourceDecision = eventDeduplicator.decide(context.ownerId(), context.jobId(),
+        ImportSourceKey sourceKey = applier.sourceKey(applying, item);
+        SourceApplicationDecision sourceDecision = eventDeduplicator.decide(applying.ownerId(), applying.jobId(),
                 sourceKey, applier.payloadHash(context, item));
         if (sourceDecision == SourceApplicationDecision.SKIP_CONSUMED) {
-            item.setOutcome("SKIPPED");
+            applying.transitionOutcome(item, "SKIPPED");
             item.setIssue("SOURCE_ALREADY_CONSUMED");
             itemRepository.save(item);
-            notifyTerminal(context, item);
+            notifyTerminal(applying, item);
+            progress.applyTo(job);
             checkpointAfterUnit(job, item);
             return true;
         }
@@ -105,9 +128,10 @@ public class ImportUnitTransaction {
                 || item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
                 || "deferred_opinion_replay".equals(item.getObjectKind()))) {
             try {
-                watchedSummaryImportApplier.applyConfirmedScope(context, item.getId());
+                watchedSummaryImportApplier.applyConfirmedScope(applying, item.getId());
             } catch (WatchedSummaryImportApplier.WatchScopeConfirmationException exception) {
                 pauseForNormalizationIssue(job, item, exception.getMessage());
+                progress.applyTo(job);
                 return true;
             }
         }
@@ -116,35 +140,41 @@ public class ImportUnitTransaction {
                 && "deferred_opinion_replay".equals(item.getObjectKind());
         if (item.getDecision() == ImportDecision.SKIP_ITEM && !deferredOpinionSkip) {
             ledger.markSkipped(context.ownerId(), sourceKey, null, null, "USER_SKIPPED");
-            item.setOutcome("SKIPPED");
+            applying.transitionOutcome(item, "SKIPPED");
             item.setIssue(null);
         } else {
             try {
-                applier.apply(context, item.getId());
+                applier.apply(applying, item.getId());
             } catch (WatchEventImportApplier.PassAssignmentRequiredException exception) {
                 pauseForPassAssignment(job, item, exception.getMessage(), exception.decision());
+                progress.applyTo(job);
                 return true;
             } catch (LetterboxdSeriesExpansionPlanner.SeriesExpansionIssueException exception) {
                 pauseForExpansionIssue(job, item, exception.getMessage());
+                progress.applyTo(job);
                 return true;
             } catch (ListItemCountMismatchException exception) {
                 pauseForListIssue(job, item, exception.getMessage());
+                progress.applyTo(job);
                 return true;
             } catch (WatchedSummaryImportApplier.WatchScopeConfirmationException exception) {
                 pauseForNormalizationIssue(job, item, exception.getMessage());
+                progress.applyTo(job);
                 return true;
             } catch (OpinionImportApplier.DeferredOpinionPendingException exception) {
                 pauseForNormalizationIssue(job, item, exception.getMessage());
+                progress.applyTo(job);
                 return true;
             }
             if (deferredOpinionSkip) {
-                item.setOutcome("SKIPPED");
+                applying.transitionOutcome(item, "SKIPPED");
                 item.setIssue(null);
             }
-            if (!applier.isComplete(context, item.getId())) {
-                if (!"EXPANDING".equals(item.getOutcome())) item.setOutcome("MATCHED");
+            if (!applier.isComplete(applying, item.getId())) {
+                if (!"EXPANDING".equals(item.getOutcome())) applying.transitionOutcome(item, "MATCHED");
                 itemRepository.save(item);
                 job.setCheckpoint(Long.toString(item.getOrdinal()));
+                progress.applyTo(job);
                 renew(job);
                 return true;
             }
@@ -152,13 +182,14 @@ public class ImportUnitTransaction {
                 throw new IllegalStateException("Import unit did not commit its source ledger transition");
             }
             if (!"SKIPPED".equals(item.getOutcome())) {
-                item.setOutcome("APPLIED");
+                applying.transitionOutcome(item, "APPLIED");
                 item.setIssue(null);
             }
         }
 
         itemRepository.save(item);
-        notifyTerminal(context, item);
+        notifyTerminal(applying, item);
+        progress.applyTo(job);
         checkpointAfterUnit(job, item);
         return true;
     }
@@ -436,6 +467,7 @@ public class ImportUnitTransaction {
         } catch (ArithmeticException exception) {
             throw new ConflictException("Import preview version is exhausted");
         }
+        job.clearApplyProgress();
         LocalDateTime now = now();
         job.setPreviewVersion(nextVersion);
         job.setExpiresAt(now.plusHours(24));

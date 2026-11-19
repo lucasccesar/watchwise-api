@@ -162,7 +162,7 @@ public class ImportListWriterImpl implements ImportListWriter {
         if (identity.state() == ImportLinkState.TOMBSTONE || identity.state() == ImportLinkState.SKIPPED) {
             skipAllMembers(context, metadataItem, "SOURCE_LIST_TOMBSTONED");
             ledger.markSkipped(context.ownerId(), plan.operationKey(), null, null, "SOURCE_LIST_TOMBSTONED");
-            metadataItem.setOutcome("SKIPPED");
+            context.transitionOutcome(metadataItem, "SKIPPED");
             metadataItem.setIssue("SOURCE_LIST_TOMBSTONED");
             return null;
         }
@@ -176,7 +176,7 @@ public class ImportListWriterImpl implements ImportListWriter {
         if (listId == null) {
             skipAllMembers(context, metadataItem, "SOURCE_LIST_TOMBSTONED");
             ledger.markSkipped(context.ownerId(), plan.operationKey(), null, null, "SOURCE_LIST_TOMBSTONED");
-            metadataItem.setOutcome("SKIPPED");
+            context.transitionOutcome(metadataItem, "SKIPPED");
             metadataItem.setIssue("SOURCE_LIST_TOMBSTONED");
             return null;
         }
@@ -267,7 +267,7 @@ public class ImportListWriterImpl implements ImportListWriter {
                 continue;
             }
             if (!firstRows.contains(item.getId())) {
-                item.setOutcome("SKIPPED");
+                context.transitionOutcome(item, "SKIPPED");
                 item.setIssue("DUPLICATE_LIST_MEMBER");
                 continue;
             }
@@ -275,7 +275,7 @@ public class ImportListWriterImpl implements ImportListWriter {
                     ImportEventDeduplicator.payloadHash(item.getPayloadJson()));
             if (reservation.state() == ImportLinkState.TOMBSTONE || reservation.state() == ImportLinkState.SKIPPED
                     || reservation.state() == ImportLinkState.APPLIED) {
-                item.setOutcome("SKIPPED");
+                context.transitionOutcome(item, "SKIPPED");
                 item.setIssue(reservation.state() == ImportLinkState.TOMBSTONE
                         ? "SOURCE_MEMBER_TOMBSTONED" : "SOURCE_MEMBER_ALREADY_CONSUMED");
                 continue;
@@ -317,12 +317,12 @@ public class ImportListWriterImpl implements ImportListWriter {
             ImportSourceKey sourceKey = memberKeys.get(item.getId());
             if (write.inserted()) {
                 ledger.markApplied(context.ownerId(), sourceKey, "USER_LIST_ITEM", write.itemId());
-                item.setOutcome("APPLIED");
+                context.transitionOutcome(item, "APPLIED");
                 item.setIssue(null);
             } else {
                 ledger.markSkipped(context.ownerId(), sourceKey, "USER_LIST_ITEM", write.itemId(),
                         "CONTENT_ALREADY_IN_LIST");
-                item.setOutcome("SKIPPED");
+                context.transitionOutcome(item, "SKIPPED");
                 item.setIssue("CONTENT_ALREADY_IN_LIST");
             }
         }
@@ -417,7 +417,7 @@ public class ImportListWriterImpl implements ImportListWriter {
                 && (reservation.owningJobId() == null || reservation.owningJobId().equals(context.jobId()))) {
             ledger.markSkipped(context.ownerId(), key, null, null, reason);
         }
-        item.setOutcome("SKIPPED");
+        context.transitionOutcome(item, "SKIPPED");
         item.setIssue(reason);
     }
 

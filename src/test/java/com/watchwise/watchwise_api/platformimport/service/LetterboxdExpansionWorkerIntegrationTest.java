@@ -139,7 +139,11 @@ class LetterboxdExpansionWorkerIntegrationTest {
 
         ImportItem stagedParent = items.findById(parent.getId()).orElseThrow();
         assertThat(stagedParent.getOutcome()).isEqualTo("EXPANDING");
-        assertThat(jobs.findById(firstJob.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.IMPORTING);
+        ImportJob expanding = jobs.findById(firstJob.getId()).orElseThrow();
+        assertThat(expanding.getState()).isEqualTo(ImportJobState.IMPORTING);
+        assertThat(expanding.getProgressTotalItems()).isEqualTo(3);
+        assertThat(expanding.getProgressAppliedItems()).isZero();
+        assertThat(expanding.getProgressSkippedItems()).isZero();
         assertThat(jdbc.queryForObject("SELECT state FROM external_import_links WHERE user_id=? AND source_namespace=? AND source_id=?",
                 String.class, owner.getId(), firstJob.getSourceNamespace(), parentUri)).isEqualTo("IN_PROGRESS");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM diary_entries WHERE user_id=?", Long.class,
@@ -155,7 +159,11 @@ class LetterboxdExpansionWorkerIntegrationTest {
 
         worker.runAvailable(1);
 
-        assertThat(jobs.findById(firstJob.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.COMPLETED);
+        ImportJob completed = jobs.findById(firstJob.getId()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(completed.getProgressTotalItems()).isEqualTo(3);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(3);
+        assertThat(completed.getProgressSkippedItems()).isZero();
         assertThat(items.findById(parent.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
         assertThat(jdbc.queryForObject("SELECT state FROM external_import_links WHERE user_id=? AND source_namespace=? AND source_id=?",
                 String.class, owner.getId(), firstJob.getSourceNamespace(), parentUri)).isEqualTo("APPLIED");
@@ -181,7 +189,11 @@ class LetterboxdExpansionWorkerIntegrationTest {
         ImportJob replayJob = createJob(owner.getId());
         ImportItem replayParent = createParent(replayJob, series, parentUri, "changed parent", 10, 10);
         worker.runAvailable(1);
-        assertThat(jobs.findById(replayJob.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.COMPLETED);
+        ImportJob replayed = jobs.findById(replayJob.getId()).orElseThrow();
+        assertThat(replayed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(replayed.getProgressTotalItems()).isEqualTo(1);
+        assertThat(replayed.getProgressAppliedItems()).isZero();
+        assertThat(replayed.getProgressSkippedItems()).isEqualTo(1);
         assertThat(items.findById(replayParent.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM diary_entries WHERE user_id=?", Long.class, owner.getId()))
                 .isEqualTo(2L);

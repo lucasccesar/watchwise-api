@@ -95,7 +95,7 @@ public class CollectionImportApplier implements ImportUnitApplier {
         }
         if (standalone.isStandaloneList(context)) {
             if (standalone.apply(context, plan) == null) {
-                item.setOutcome("SKIPPED");
+                context.transitionOutcome(item, "SKIPPED");
                 item.setIssue("SEMANTIC_LIST_TOMBSTONED");
             }
         } else listWriter.apply(context, plan);

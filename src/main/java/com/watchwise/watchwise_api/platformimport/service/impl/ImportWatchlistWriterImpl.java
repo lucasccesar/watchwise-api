@@ -91,7 +91,7 @@ public class ImportWatchlistWriterImpl implements ImportWatchlistWriter {
                     ImportEventDeduplicator.payloadHash(item.getPayloadJson()));
             if (reservation.state() == ImportLinkState.APPLIED || reservation.state() == ImportLinkState.SKIPPED
                     || reservation.state() == ImportLinkState.TOMBSTONE) {
-                item.setOutcome("SKIPPED");
+                context.transitionOutcome(item, "SKIPPED");
                 item.setIssue(reservation.state() == ImportLinkState.TOMBSTONE
                         ? "SOURCE_WATCHLIST_ITEM_TOMBSTONED" : "SOURCE_WATCHLIST_ITEM_ALREADY_CONSUMED");
                 continue;
@@ -140,7 +140,7 @@ public class ImportWatchlistWriterImpl implements ImportWatchlistWriter {
             ImportedWatchlistWriteResult result = resultByContentId.get(contentId);
             if (result.outcome() == ImportedWatchlistWriteResult.Outcome.INSERTED) {
                 ledger.markApplied(context.ownerId(), record.sourceKey(), "WATCHLIST_ENTRY", result.entryId());
-                item.setOutcome("APPLIED");
+                context.transitionOutcome(item, "APPLIED");
                 item.setIssue(null);
                 inserted++;
             } else {
@@ -163,7 +163,7 @@ public class ImportWatchlistWriterImpl implements ImportWatchlistWriter {
             ledger.markSkipped(context.ownerId(), sourceKey, targetId == null ? null : "WATCHLIST_ENTRY",
                     targetId, reason);
         }
-        item.setOutcome("SKIPPED");
+        context.transitionOutcome(item, "SKIPPED");
         item.setIssue(reason);
     }
 

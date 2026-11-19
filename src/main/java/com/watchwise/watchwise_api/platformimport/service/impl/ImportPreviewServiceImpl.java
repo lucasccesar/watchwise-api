@@ -52,15 +52,12 @@ import tools.jackson.databind.node.ObjectNode;
 import tools.jackson.databind.node.NullNode;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -143,6 +140,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         String storedSelection = serializeStoredPlan(selection, nextGeneration);
         LocalDateTime now = LocalDateTime.now(clock);
 
+        job.clearApplyProgress();
         job.setPreviewVersion(nextVersion);
         job.setSelectionJson(storedSelection);
         job.setCheckpoint(null);
@@ -201,6 +199,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         validateTemplateEligibilityPlan(decisions, itemsById);
         importItemRepository.saveAll(changedItems(decisions, itemsById));
 
+        job.clearApplyProgress();
         long nextVersion = nextVersion(job.getPreviewVersion());
         LocalDateTime now = LocalDateTime.now(clock);
         job.setPreviewVersion(nextVersion);
@@ -1498,18 +1497,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private ImportPlanVersion version(ImportJob job, long version) {
-        return new ImportPlanVersion(version, digest(job.getId(), version, job.getSelectionJson()));
-    }
-
-    private String digest(UUID jobId, long version, String selectionJson) {
-        String canonical = "{\"jobId\":\"" + jobId + "\",\"previewVersion\":" + version
-                + ",\"selection\":" + selectionJson + "}";
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        return ImportPlanVersion.from(job.getId(), version, job.getSelectionJson());
     }
 
     private int parseInteger(String value, String label) {

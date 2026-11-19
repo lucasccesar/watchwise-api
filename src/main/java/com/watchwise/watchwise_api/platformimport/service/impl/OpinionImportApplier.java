@@ -95,7 +95,7 @@ public class OpinionImportApplier implements ImportUnitApplier {
         ImportDeferredRecord replayRecord = deferredRecordForUpdate(context, item);
         if ("deferred_opinion_replay".equals(item.getObjectKind()) && replayRecord == null) {
             ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, "DEFERRED_OPINION_ALREADY_RESOLVED");
-            item.setOutcome("SKIPPED");
+            context.transitionOutcome(item, "SKIPPED");
             item.setIssue("DEFERRED_OPINION_ALREADY_RESOLVED");
             return;
         }

@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepositor
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransaction;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
@@ -74,6 +75,7 @@ class ImportCollectionWritersIntegrationTest {
     @Autowired private ImportJobRepository jobs;
     @Autowired private ImportItemRepository items;
     @Autowired private ImportUnitTransaction unitTransaction;
+    @Autowired private ImportWorker worker;
     @Autowired private UserListRepository userLists;
     @Autowired private UserListItemRepository userListItems;
     @Autowired private WatchlistEntryRepository watchlistEntries;
@@ -117,6 +119,35 @@ class ImportCollectionWritersIntegrationTest {
         assertThat(items.findById(first.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
         assertThat(items.findById(second.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
         assertThat(items.findById(duplicate.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        ImportJob progressed = jobs.findById(job.getId()).orElseThrow();
+        assertThat(progressed.getProgressTotalItems()).isEqualTo(4);
+        assertThat(progressed.getProgressAppliedItems()).isEqualTo(3);
+        assertThat(progressed.getProgressSkippedItems()).isEqualTo(1);
+    }
+
+    @Test
+    void countsListItemsOnceWhenWorkerPageAlsoContainsMembers() throws Exception {
+        User owner = createUser();
+        createMovie("51021");
+        createMovie("51022");
+        ImportJob job = createJob(owner);
+        ImportItem metadata = createListMetadata(job, "letterboxd-list-worker-page",
+                "Worker list", "List processed by a worker page", 0);
+        createListItem(job, "worker-page-one", "letterboxd-list-worker-page", "51021", 1);
+        createListItem(job, "worker-page-two", "letterboxd-list-worker-page", "51022", 2);
+        ImportJob queued = jobs.findById(job.getId()).orElseThrow();
+        queued.setLeaseUntil(LocalDateTime.now().minusSeconds(1));
+        queued.setNextRunAt(LocalDateTime.now().minusSeconds(1));
+        jobs.saveAndFlush(queued);
+
+        worker.runAvailable(1);
+
+        ImportJob completed = jobs.findById(job.getId()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(items.findById(metadata.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
+        assertThat(completed.getProgressTotalItems()).isEqualTo(3);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(3);
+        assertThat(completed.getProgressSkippedItems()).isZero();
     }
 
     @Test
@@ -141,6 +172,10 @@ class ImportCollectionWritersIntegrationTest {
         assertThat(items.findById(firstNew.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
         assertThat(items.findById(duplicate.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
         assertThat(items.findById(sourceWatched.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        ImportJob progressed = jobs.findById(job.getId()).orElseThrow();
+        assertThat(progressed.getProgressTotalItems()).isEqualTo(5);
+        assertThat(progressed.getProgressAppliedItems()).isEqualTo(1);
+        assertThat(progressed.getProgressSkippedItems()).isEqualTo(3);
     }
 
     @Test

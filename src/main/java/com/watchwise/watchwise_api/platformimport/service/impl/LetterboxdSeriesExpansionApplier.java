@@ -100,7 +100,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         ObjectNode payload = parsePayload(parent.getPayloadJson());
         JsonNode stored = expansionMetadata(payload);
         if (stored != null) {
-            parent.setOutcome("EXPANDING");
+            context.transitionOutcome(parent, "EXPANDING");
             return;
         }
 
@@ -118,15 +118,17 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         List<ImportItem> batch = new ArrayList<>(STAGING_BATCH_SIZE);
         for (int index = 0; index < plan.children().size(); index++) {
             WatchEventCommand command = plan.children().get(index);
-            batch.add(childItem(context, parent, plan, command, nextOrdinal + index + 1,
-                    plan.childPassIssues().get(index), false));
+            ImportItem child = childItem(context, parent, plan, command, nextOrdinal + index + 1,
+                    plan.childPassIssues().get(index), false);
+            context.stageApplyItem(child);
+            batch.add(child);
             if (batch.size() == STAGING_BATCH_SIZE) persistBatch(batch);
         }
         if (!batch.isEmpty()) persistBatch(batch);
 
         payload.set(EXPANSION_FIELD, expansionMetadata(plan, nextOrdinal));
         parent.setPayloadJson(writeJson(payload));
-        parent.setOutcome("EXPANDING");
+        context.transitionOutcome(parent, "EXPANDING");
     }
 
     @Override
@@ -175,7 +177,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         payload.set(EXPANSION_FIELD, expansionMetadata(plan, nextOrdinal));
         parent.setPayloadJson(writeJson(payload));
         parent.setIssue(null);
-        parent.setOutcome("EXPANSION_PREPARED");
+        context.transitionOutcome(parent, "EXPANSION_PREPARED");
         itemRepository.saveAndFlush(parent);
         return issueCount;
     }
@@ -186,7 +188,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
                 .orElseThrow(() -> new IllegalStateException("Staged series expansion was not found"));
         validateContext(context, parent);
         if (hasPreparedPlan(parent)) return;
-        parent.setOutcome("NORMALIZATION_ISSUE");
+        context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(issue);
         itemRepository.saveAndFlush(parent);
     }
@@ -199,7 +201,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         if (!hasPreparedPlan(parent)) return false;
         ObjectNode effective = effectiveParentPayload(parsePayload(parent.getPayloadJson()));
         if (!effective.path(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_MARKER).asBoolean(false)) return false;
-        parent.setOutcome("NORMALIZATION_ISSUE");
+        context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
                 + ": Edit the review to 20,000 characters or fewer; the original text is preserved.");
         itemRepository.saveAndFlush(parent);
@@ -315,11 +317,11 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         Content entity = contentRepository.findByTmdbIdAndType(series.tmdbId(), ContentType.SERIES)
                 .orElseThrow(() -> new IllegalStateException("Resolved series content is missing"));
         ledger.markApplied(context.ownerId(), parentKey(parent), "CONTENT", entity.getId());
-        parent.setOutcome("APPLIED");
+        context.transitionOutcome(parent, "APPLIED");
     }
 
     private void pauseParentForIssue(ImportExecutionContext context, ImportItem parent, String issue) {
-        parent.setOutcome("NORMALIZATION_ISSUE");
+        context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(issue);
         itemRepository.save(parent);
         var job = jobRepository.findByIdForUpdate(context.jobId()).orElseThrow();

@@ -132,7 +132,7 @@ public class WatchedSummaryImportApplier implements ImportUnitApplier {
             String reason = item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER
                     ? "DETAIL_HISTORY_COVERS_WATCH_MARKER" : "DETAIL_HISTORY_COVERS_SUMMARY";
             ledger.markSkipped(context.ownerId(), sourceKey(item), null, null, reason);
-            item.setOutcome("SKIPPED");
+            context.transitionOutcome(item, "SKIPPED");
             item.setIssue(reason);
             itemRepository.save(item);
             return;

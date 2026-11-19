@@ -54,6 +54,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -62,6 +63,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -108,7 +110,7 @@ class ImportControllerIntegrationTest {
     @Autowired
     private ImportJobRepository importJobRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private ImportItemRepository importItemRepository;
 
     @Autowired
@@ -252,10 +254,34 @@ class ImportControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getImport] Should Return Stored Apply Progress - When Owner Reads Job")
+    void shouldReturnStoredApplyProgressWhenOwnerReadsJob() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob job = importJobRepository.findById(jobId).orElseThrow();
+        job.setState(ImportJobState.COMPLETED);
+        job.replaceApplyProgress(1000, 220, 30);
+        importJobRepository.saveAndFlush(job);
+        clearInvocations(importItemRepository);
+
+        mockMvc.perform(get("/imports/{importId}", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.progress.totalItems").value(1000))
+                .andExpect(jsonPath("$.progress.processedItems").value(250))
+                .andExpect(jsonPath("$.progress.appliedItems").value(220))
+                .andExpect(jsonPath("$.progress.skippedItems").value(30));
+        verifyNoInteractions(importItemRepository);
+    }
+
+    @Test
     @DisplayName("[selectImport] Should Advance Preview Version And Return Digest - When Owner Saves Selection")
     void shouldAdvancePreviewVersionAndReturnDigestWhenOwnerSavesSelection() throws Exception {
         RegisteredUser owner = createUser();
         UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob job = importJobRepository.findById(jobId).orElseThrow();
+        job.replaceApplyProgress(10, 4, 1);
+        importJobRepository.saveAndFlush(job);
 
         mockMvc.perform(put("/imports/{importId}/selection", jobId)
                         .cookie(owner.accessToken(), owner.csrfToken())
@@ -266,7 +292,8 @@ class ImportControllerIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.previewVersion").value(1))
-                .andExpect(jsonPath("$.previewDigest").isNotEmpty());
+                .andExpect(jsonPath("$.previewDigest").isNotEmpty())
+                .andExpect(jsonPath("$.progress").value(nullValue()));
     }
 
     @Test

@@ -16,8 +16,26 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
+    interface ApplyProgressCounts {
+        long getTotalItems();
+        long getAppliedItems();
+        long getSkippedItems();
+    }
+
     long countByJobId(UUID jobId);
     long countByJobIdAndPlanGeneration(UUID jobId, long planGeneration);
+
+    @Query(value = """
+            SELECT COUNT(*) AS "totalItems",
+                   COUNT(*) FILTER (WHERE outcome = 'APPLIED') AS "appliedItems",
+                   COUNT(*) FILTER (WHERE outcome = 'SKIPPED') AS "skippedItems"
+            FROM import_items
+            WHERE job_id = :jobId AND plan_generation = :generation
+              AND (outcome IS NULL OR outcome NOT IN
+                   ('ABSORBED', 'AUXILIARY_EVIDENCE', 'AUXILIARY_UNRESOLVED'))
+            """, nativeQuery = true)
+    ApplyProgressCounts countApplyProgress(@Param("jobId") UUID jobId,
+                                          @Param("generation") long generation);
 
     @Query("SELECT COALESCE(MAX(item.ordinal), -1) FROM ImportItem item WHERE item.jobId = :jobId AND item.planGeneration = :generation")
     long findMaxOrdinal(@Param("jobId") UUID jobId, @Param("generation") long generation);

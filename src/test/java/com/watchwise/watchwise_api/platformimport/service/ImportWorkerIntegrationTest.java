@@ -410,6 +410,9 @@ class ImportWorkerIntegrationTest {
         assertThat(factCount(owner.getId())).isEqualTo(1);
         ImportJob afterCrash = jobRepository.findById(job.getId()).orElseThrow();
         assertThat(afterCrash.getCheckpoint()).isEqualTo("0");
+        assertThat(afterCrash.getProgressTotalItems()).isEqualTo(2);
+        assertThat(afterCrash.getProgressAppliedItems()).isEqualTo(1);
+        assertThat(afterCrash.getProgressSkippedItems()).isZero();
         assertThat(itemRepository.findById(items.get(0).getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
         assertThat(itemRepository.findById(items.get(1).getId()).orElseThrow().getOutcome()).isNull();
 
@@ -424,6 +427,105 @@ class ImportWorkerIntegrationTest {
         assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
         assertThat(completed.isWorkPending()).isFalse();
         assertThat(completed.getCheckpoint()).isEqualTo("1");
+        assertThat(completed.getProgressTotalItems()).isEqualTo(2);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(2);
+        assertThat(completed.getProgressSkippedItems()).isZero();
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Roll Back Progress With The Unit - When Failure Happens After Outcome Change")
+    void shouldRollBackProgressWithTheUnitWhenFailureHappensAfterOutcomeChange() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 1);
+        ImportItem item = createItems(job, 1, "progress-rollback").getFirst();
+        testApplier.crashAfterOutcomeOnceOn(item.getSourceId());
+
+        assertThatThrownBy(() -> worker.runAvailable(1)).isInstanceOf(SimulatedWorkerCrash.class);
+
+        ImportJob rolledBack = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(rolledBack.getProgressTotalItems()).isEqualTo(1);
+        assertThat(rolledBack.getProgressAppliedItems()).isZero();
+        assertThat(itemRepository.findById(item.getId()).orElseThrow().getOutcome()).isNull();
+        assertThat(factCount(owner.getId())).isZero();
+
+        jdbc.update("UPDATE import_jobs SET lease_until = ? WHERE id = ?",
+                LocalDateTime.now(clock).minusSeconds(1), job.getId());
+        worker.runAvailable(1);
+
+        ImportJob completed = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(completed.getProgressTotalItems()).isEqualTo(1);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(1);
+        assertThat(factCount(owner.getId())).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Count Applied And Skipped Units - When Plan Finishes")
+    void shouldCountAppliedAndSkippedUnitsWhenPlanFinishes() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 2);
+        List<ImportItem> items = createItems(job, 2, "mixed-result");
+        items.getFirst().setDecision(com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM);
+        itemRepository.saveAndFlush(items.getFirst());
+
+        worker.runAvailable(1);
+
+        ImportJob completed = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(completed.getProgressTotalItems()).isEqualTo(2);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(1);
+        assertThat(completed.getProgressSkippedItems()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Count Only Active Actionable Plan Items - When APPLY Starts")
+    void shouldCountOnlyActiveActionablePlanItemsWhenApplyStarts() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 5);
+        List<ImportItem> items = createItems(job, 5, "progress-filter");
+        items.get(0).setOutcome("APPLIED");
+        items.get(1).setOutcome("SKIPPED");
+        items.get(2).setOutcome("ABSORBED");
+        items.get(3).setOutcome("AUXILIARY_EVIDENCE");
+        itemRepository.saveAllAndFlush(items);
+        itemRepository.saveAndFlush(ImportItem.builder()
+                .jobId(job.getId())
+                .planGeneration(0)
+                .normalizedKind(ImportRecordKind.DIARY_EVENT)
+                .sourceNamespace(job.getSourceNamespace())
+                .objectKind("diary_event")
+                .sourceId("old-generation-item")
+                .outcome("APPLIED")
+                .ordinal(0)
+                .build());
+
+        worker.runAvailable(1);
+
+        ImportJob completed = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(completed.getProgressTotalItems()).isEqualTo(3);
+        assertThat(completed.getProgressAppliedItems()).isEqualTo(2);
+        assertThat(completed.getProgressSkippedItems()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Initialize Apply Progress Once - When The Worker Rechecks A Job")
+    void shouldInitializeApplyProgressOnlyOnceWhenTheWorkerRechecksAJob() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 2);
+        createItems(job, 2, "progress-initialize");
+        job.setLeaseToken(UUID.randomUUID());
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
+        jobRepository.saveAndFlush(job);
+        ImportExecutionContext context = new ImportExecutionContext(owner.getId(), job.getId(),
+                job.getPreviewVersion(), 1, job.getSourceNamespace(), job.getLeaseToken());
+
+        assertThat(unitTransaction.initializeApplyProgress(context)).isTrue();
+        assertThat(unitTransaction.initializeApplyProgress(context)).isTrue();
+
+        ImportJob initialized = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(initialized.getProgressTotalItems()).isEqualTo(2);
+        assertThat(initialized.getProgressAppliedItems()).isZero();
+        assertThat(initialized.getProgressSkippedItems()).isZero();
     }
 
     @Test
@@ -1014,6 +1116,7 @@ class ImportWorkerIntegrationTest {
         private final java.util.concurrent.ConcurrentMap<String, AtomicInteger> attempts =
                 new java.util.concurrent.ConcurrentHashMap<>();
         private final AtomicReference<String> crashSourceId = new AtomicReference<>();
+        private final AtomicReference<String> crashAfterOutcomeSourceId = new AtomicReference<>();
         private final AtomicReference<String> blockSourceId = new AtomicReference<>();
         private final AtomicReference<CountDownLatch> blockedUnitEntered =
                 new AtomicReference<>(new CountDownLatch(1));
@@ -1053,11 +1156,18 @@ class ImportWorkerIntegrationTest {
                     context.ownerId(), item.getSourceId());
             ledger.markApplied(context.ownerId(), sourceKey, "TEST_FACT", UUID.nameUUIDFromBytes(
                     item.getSourceId().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            String crashAfterOutcomeId = crashAfterOutcomeSourceId.get();
+            if (item.getSourceId().equals(crashAfterOutcomeId)
+                    && crashAfterOutcomeSourceId.compareAndSet(crashAfterOutcomeId, null)) {
+                context.transitionOutcome(item, "APPLIED");
+                throw new SimulatedWorkerCrash();
+            }
         }
 
         void reset() {
             attempts.clear();
             crashSourceId.set(null);
+            crashAfterOutcomeSourceId.set(null);
             blockSourceId.set(null);
             blockedUnitEntered.set(new CountDownLatch(1));
             releaseBlockedUnit.set(new CountDownLatch(1));
@@ -1065,6 +1175,10 @@ class ImportWorkerIntegrationTest {
 
         void crashOnceOn(String sourceId) {
             crashSourceId.set(sourceId);
+        }
+
+        void crashAfterOutcomeOnceOn(String sourceId) {
+            crashAfterOutcomeSourceId.set(sourceId);
         }
 
         void blockOnceOn(String sourceId) {

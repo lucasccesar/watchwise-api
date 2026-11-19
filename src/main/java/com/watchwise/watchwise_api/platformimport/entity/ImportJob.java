@@ -24,6 +24,9 @@ public class ImportJob {
  @Column(nullable=false, length=100) private String timezone;
  @Column(name="storage_key", nullable=false, length=500) private String storageKey;
  @Setter @Column(name="upload_size_bytes", nullable=false) private long uploadSizeBytes;
+ @Column(name="progress_total_items") private Long progressTotalItems;
+ @Column(name="progress_applied_items") private Long progressAppliedItems;
+ @Column(name="progress_skipped_items") private Long progressSkippedItems;
  @Setter @Column(columnDefinition="TEXT") private String checkpoint;
  @Column(name="work_phase", length=40) @Setter private String workPhase;
  @Column(name="work_pending", nullable=false) @Setter private boolean workPending;
@@ -33,4 +36,35 @@ public class ImportJob {
  @Column(name="created_at", nullable=false) private LocalDateTime createdAt;
  @Column(name="updated_at", nullable=false) @Setter private LocalDateTime updatedAt;
  @Setter @Column(name="expires_at") private LocalDateTime expiresAt;
+
+ public void clearApplyProgress() {
+  progressTotalItems = null;
+  progressAppliedItems = null;
+  progressSkippedItems = null;
+ }
+
+ public void replaceApplyProgress(long totalItems, long appliedItems, long skippedItems) {
+  validateApplyProgress(totalItems, appliedItems, skippedItems);
+  progressTotalItems = totalItems;
+  progressAppliedItems = appliedItems;
+  progressSkippedItems = skippedItems;
+ }
+
+ public void adjustApplyProgress(long totalDelta, long appliedDelta, long skippedDelta) {
+  if (progressTotalItems == null || progressAppliedItems == null || progressSkippedItems == null) {
+   throw new IllegalStateException("Import progress has not been initialized");
+  }
+  replaceApplyProgress(Math.addExact(progressTotalItems, totalDelta),
+          Math.addExact(progressAppliedItems, appliedDelta),
+          Math.addExact(progressSkippedItems, skippedDelta));
+ }
+
+ private void validateApplyProgress(long totalItems, long appliedItems, long skippedItems) {
+  if (totalItems < 0 || appliedItems < 0 || skippedItems < 0
+          || appliedItems > totalItems || skippedItems > totalItems
+          || appliedItems > totalItems - skippedItems) {
+   throw new IllegalArgumentException("Import progress counts are inconsistent");
+  }
+ }
+
 }

@@ -68,7 +68,7 @@ public class ImportWorker {
             RETURNING job.id, job.user_id, job.preview_version, job.selection_json,
                 job.source_namespace, job.input_kind, job.source_format, job.storage_key,
                 job.upload_size_bytes, job.zip_digest, job.timezone, job.state, job.work_phase,
-                job.checkpoint, job.lease_token
+                job.checkpoint, job.lease_token, job.progress_total_items IS NULL AS progress_missing
             """;
 
     private final JdbcTemplate jdbc;
@@ -175,7 +175,8 @@ public class ImportWorker {
                         ImportJobState.valueOf(result.getString("state")),
                         result.getString("work_phase"),
                         result.getString("checkpoint"),
-                        result.getObject("lease_token", UUID.class)),
+                        result.getObject("lease_token", UUID.class),
+                        result.getBoolean("progress_missing")),
                 now, now, now, maxJobs, leaseUntil, now));
     }
 
@@ -581,6 +582,7 @@ public class ImportWorker {
     }
 
     private void apply(ClaimedJob job, ImportExecutionContext context) {
+        if (job.progressMissing() && !unitTransaction.initializeApplyProgress(context)) return;
         modeRegistry.prepareForApply(modeKey(job), context);
         List<ImportItem> units = itemRepository.findApplyPending(
                 job.id(), context.planGeneration(), PageRequest.of(0, MAX_BATCH_SIZE));
@@ -651,7 +653,8 @@ public class ImportWorker {
                               com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat sourceFormat,
                               String storageKey, long uploadSizeBytes, String zipDigest,
                               String timezone, ImportJobState state,
-                              String workPhase, String checkpoint, UUID leaseToken) { }
+                              String workPhase, String checkpoint, UUID leaseToken,
+                              boolean progressMissing) { }
 
     private static final class RecordLimitExceededException extends RuntimeException { }
 

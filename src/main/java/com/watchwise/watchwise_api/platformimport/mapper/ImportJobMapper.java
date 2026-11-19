@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.platformimport.mapper;
 
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportProgressDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -20,5 +21,13 @@ public interface ImportJobMapper {
     @Mapping(source = "job.updatedAt", target = "updatedAt")
     @Mapping(source = "job.expiresAt", target = "expiresAt")
     @Mapping(target = "inventory", ignore = true)
+    @Mapping(target = "progress", expression = "java(toProgress(job))")
     ImportJobDTO toDto(ImportJob job, String digest);
+
+    default ImportProgressDTO toProgress(ImportJob job) {
+        if (job.getProgressTotalItems() == null) return null;
+        long applied = job.getProgressAppliedItems();
+        long skipped = job.getProgressSkippedItems();
+        return new ImportProgressDTO(job.getProgressTotalItems(), applied + skipped, applied, skipped);
+    }
 }

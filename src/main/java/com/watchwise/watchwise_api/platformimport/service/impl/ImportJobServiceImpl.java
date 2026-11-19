@@ -135,7 +135,8 @@ public class ImportJobServiceImpl implements ImportJobService {
     @Transactional(readOnly = true)
     public ImportJobDTO get(UUID ownerId, UUID jobId) {
         ImportJob job = findOwned(ownerId, jobId);
-        ImportPlanVersion version = importPreviewService.currentVersion(ownerId, jobId);
+        ImportPlanVersion version = ImportPlanVersion.from(
+                job.getId(), job.getPreviewVersion(), job.getSelectionJson());
         return mapDto(job, version.digest());
     }
 
@@ -166,7 +167,8 @@ public class ImportJobServiceImpl implements ImportJobService {
         if (commit == null) throw new BadRequestException("Import commit is required");
         ImportJob job = importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)
                 .orElseThrow(() -> new NotFoundException("Import job not found"));
-        ImportPlanVersion currentVersion = importPreviewService.currentVersion(ownerId, jobId);
+        ImportPlanVersion currentVersion = ImportPlanVersion.from(
+                job.getId(), job.getPreviewVersion(), job.getSelectionJson());
         if (commit.previewVersion() != job.getPreviewVersion()
                 || !currentVersion.digest().equalsIgnoreCase(commit.digest())) {
             throw new ConflictException("Import preview has changed");
@@ -204,7 +206,7 @@ public class ImportJobServiceImpl implements ImportJobService {
     public ImportJobDTO cancel(UUID ownerId, UUID jobId) {
         ImportJob job = importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)
                 .orElseThrow(() -> new NotFoundException("Import job not found"));
-        if (job.getState() == ImportJobState.CANCELLED) return toDto(ownerId, job);
+        if (job.getState() == ImportJobState.CANCELLED) return toDto(job);
         if (job.getState() == ImportJobState.COMPLETED || job.getState() == ImportJobState.COMPLETED_WITH_WARNINGS
                 || job.getState() == ImportJobState.FAILED || job.getState() == ImportJobState.EXPIRED) {
             throw new ConflictException("Import job cannot be cancelled in its current state");
@@ -216,7 +218,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         job.setLeaseUntil(null);
         job.setWorkPhase(null);
         job.setUpdatedAt(LocalDateTime.now(clock));
-        return toDto(ownerId, job);
+        return toDto(job);
     }
 
     @Override
@@ -258,8 +260,9 @@ public class ImportJobServiceImpl implements ImportJobService {
                 items.getContent(), items.getNumber(), items.getSize(), items.getTotalElements(), items.getTotalPages());
     }
 
-    private ImportJobDTO toDto(UUID ownerId, ImportJob job) {
-        ImportPlanVersion version = importPreviewService.currentVersion(ownerId, job.getId());
+    private ImportJobDTO toDto(ImportJob job) {
+        ImportPlanVersion version = ImportPlanVersion.from(
+                job.getId(), job.getPreviewVersion(), job.getSelectionJson());
         return mapDto(job, version.digest());
     }
 
@@ -275,7 +278,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         }
         return new ImportJobDTO(dto.id(), dto.inputKind(), dto.sourceFormat(), dto.platform(), dto.state(),
                 dto.version(), dto.previewVersion(), dto.previewDigest(), dto.createdAt(), dto.updatedAt(),
-                dto.expiresAt(), inventory);
+                dto.expiresAt(), inventory, dto.progress());
     }
 
     private ImportJob findOwned(UUID ownerId, UUID jobId) {
