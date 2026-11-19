@@ -6051,3 +6051,31 @@ pôster, último episódio assistido, próximo episódio e temporadas completas 
 Itens SEASON continuam recebendo seus próprios detalhes mesmo quando a temporada completa foi separada
 do progresso da série. A leitura reutiliza o enriquecimento de séries existente e mantém os itens sem
 paginação HTTP, na ordem original.
+
+`GET /users/{userId}/series-in-progress` agora inclui todas as séries iniciadas por pelo menos um evento
+EPISODE regular, mesmo que a série tenha uma conclusão atual ou esteja marcada como dropped. A página,
+`totalElements` e `aggregate` usam esse mesmo conjunto; a Home mantém a filtragem de séries concluídas e
+abandonadas ao montar as candidatas de continuação. `GET /lists/{listId}/progress` continua incluindo
+todas as séries da lista, mesmo sem eventos de diário, com progresso 0%.
+
+Os cards de detalhe de lista, Trending e Watchlist agora expõem `viewerState.myReview` junto ao estado
+do viewer. Na Watchlist, a nota, review e assistência pertencem a quem consulta, enquanto `status`
+continua classificando a entrada; estado pessoal segue fora do cache TMDB.
+
+## 2026-11-19 — Contagens do progresso de importação
+
+`GET /imports/{importId}` agora retorna `progress` na fase de aplicação. O total é agregado uma vez
+para a geração do plano quando o worker inicia APPLY. `processedItems` soma os itens aplicados e
+ignorados. As contagens são atualizadas na mesma transação do resultado e checkpoint, incluindo
+membros de lista/watchlist e filhos de expansão de série. A leitura de status não consulta itens de
+importação. Alterar o plano reinicializa o resumo; retry e retomada preservam resultados confirmados.
+
+## 2026-11-19 — Progresso de resolução e fila incremental de revisão
+
+`GET /imports/{importId}` inclui `resolutionProgress` com fase, total e itens identificados durante
+`MATCHING`, além da contagem/revisão da fila. O percentual só é determinado para um total positivo;
+validações e retries continuam indeterminados. `GET /imports/{importId}/review-items` pagina alterações
+`UPSERT`/`REMOVE` por cursor e geração, sem contar todas as pendências em cada polling. Mudanças do cartão,
+remoções e deltas de contagem são gravados na transação do worker. `PATCH /resolutions` aceita
+`expectedReviewRevisions` para rejeitar uma decisão baseada em um cartão desatualizado, e commit não
+prossegue enquanto restarem pendências.

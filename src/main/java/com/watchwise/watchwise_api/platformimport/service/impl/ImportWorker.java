@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportReadContext;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedHistoryPlan;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
@@ -85,6 +86,7 @@ public class ImportWorker {
     private final Clock clock;
     private final ImportLimits importLimits;
     private final StandaloneListIdentityResolver standaloneListIdentityResolver;
+    private final ImportReviewPolicy reviewPolicy;
     private final boolean enabled;
 
     public ImportWorker(JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
@@ -96,6 +98,7 @@ public class ImportWorker {
                         WatchScopeSnapshotPreparer watchScopeSnapshotPreparer,
                         ObjectMapper objectMapper, Clock clock,
                         ImportLimits importLimits, StandaloneListIdentityResolver standaloneListIdentityResolver,
+                        ImportReviewPolicy reviewPolicy,
                         @Value("${app.import.worker.enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -111,6 +114,7 @@ public class ImportWorker {
         this.clock = clock;
         this.importLimits = importLimits;
         this.standaloneListIdentityResolver = standaloneListIdentityResolver;
+        this.reviewPolicy = reviewPolicy;
         this.enabled = enabled;
     }
 
@@ -267,19 +271,22 @@ public class ImportWorker {
     }
 
     private void resolve(ClaimedJob job, ImportExecutionContext context) {
+        if (!unitTransaction.initializeResolutionProgress(context)
+                || !unitTransaction.setResolutionProgressPhase(context, ResolutionProgressPhase.MATCHING)) return;
         boolean unavailable = false;
         while (true) {
             var pendingPage = itemRepository.findResolutionPending(
                     job.id(), context.planGeneration(), PageRequest.of(0, MAX_BATCH_SIZE));
             if (pendingPage.isEmpty()) break;
             List<PlatformContentResolver.ResolutionResult> results =
-                    contentResolver.resolve(context, pendingPage.getContent());
+                    contentResolver.resolve(context, pendingPage);
             unavailable |= results.stream().anyMatch(PlatformContentResolver.ResolutionResult::unavailable);
             if (unavailable) break;
         }
 
         ImportSelection selection = selection(job.selectionJson());
         if (!unavailable) {
+            if (!unitTransaction.setResolutionProgressPhase(context, ResolutionProgressPhase.VALIDATING)) return;
             markCollectionLengthIssues(context);
             if (job.inputKind() == ImportInputKind.SINGLE_LIST) {
                 resolveStandaloneListIdentities(job, context, selection);
@@ -306,6 +313,10 @@ public class ImportWorker {
                 state = ImportUnitTransaction.ResolutionState.WAITING_FOR_USER;
             }
         }
+        if (state != ImportUnitTransaction.ResolutionState.RETRY
+                && unitTransaction.reviewQueueHasPendingItems(context).orElse(false)) {
+            state = ImportUnitTransaction.ResolutionState.WAITING_FOR_USER;
+        }
         unitTransaction.settleResolution(context, state);
     }
 
@@ -319,6 +330,7 @@ public class ImportWorker {
             if (page.isEmpty()) break;
             afterOrdinal = page.getLast().getOrdinal();
             afterId = page.getLast().getId();
+            List<ImportUnitTransaction.StandaloneListIdentityUpdate> updates = new ArrayList<>();
             for (ImportItem item : page) {
                 JsonNode root;
                 try {
@@ -329,9 +341,12 @@ public class ImportWorker {
                 if (root.path("issueCode").asString().equals("LIST_ITEM_EXPORT_REQUIRED")) continue;
                 var result = standaloneListIdentityResolver.resolve(context.ownerId(), job.id(),
                         job.sourceFormat(), selection.metadata(), item.getId());
+                String outcome = item.getOutcome();
+                String issue = item.getIssue();
+                String payloadJson = item.getPayloadJson();
                 if (result.issueCode() != null) {
-                    item.setOutcome("NORMALIZATION_ISSUE");
-                    item.setIssue(result.issueCode());
+                    outcome = "NORMALIZATION_ISSUE";
+                    issue = result.issueCode();
                 } else {
                     ObjectNode payload = (ObjectNode) root;
                     ObjectNode resolution = payload.path("resolution").isObject()
@@ -341,18 +356,25 @@ public class ImportWorker {
                     identity.put("objectKind", result.key().objectKind());
                     identity.put("sourceId", result.key().sourceId());
                     try {
-                        item.setPayloadJson(objectMapper.writeValueAsString(payload));
+                        payloadJson = objectMapper.writeValueAsString(payload);
                     } catch (JacksonException exception) {
                         throw new IllegalStateException("Resolved list identity could not be stored", exception);
                     }
-                    if ("NEEDS_LIST_NAME".equals(item.getIssue())
-                            || "NEEDS_SOURCE_ACCOUNT".equals(item.getIssue())) {
-                        item.setOutcome("RESOLVED");
-                        item.setIssue(null);
+                    if ("NEEDS_LIST_NAME".equals(issue) || "NEEDS_SOURCE_ACCOUNT".equals(issue)) {
+                        outcome = "RESOLVED";
+                        issue = null;
                     }
                 }
+                if (!java.util.Objects.equals(outcome, item.getOutcome())
+                        || !java.util.Objects.equals(issue, item.getIssue())
+                        || !java.util.Objects.equals(payloadJson, item.getPayloadJson())) {
+                    updates.add(new ImportUnitTransaction.StandaloneListIdentityUpdate(
+                            item.getId(), payloadJson, outcome, issue));
+                }
             }
-            itemRepository.saveAll(page);
+            if (!updates.isEmpty() && !unitTransaction.saveStandaloneListIdentityResolutions(context, updates)) {
+                throw new StaleImportExecutionException();
+            }
         }
     }
 
@@ -471,6 +493,7 @@ public class ImportWorker {
                 if (page.isEmpty()) break;
                 afterOrdinal = page.getLast().getOrdinal();
                 afterId = page.getLast().getId();
+                List<ImportUnitTransaction.CollectionLengthIssueUpdate> updates = new ArrayList<>();
                 for (ImportItem item : page) {
                     if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
                         continue;
@@ -481,19 +504,28 @@ public class ImportWorker {
                     boolean collectionIssue = item.getIssue() != null
                             && (item.getIssue().startsWith("LIST_ITEM_DESCRIPTION_TOO_LONG")
                             || item.getIssue().startsWith("LIST_METADATA_FIELDS_TOO_LONG"));
+                    String outcome = item.getOutcome();
+                    String updatedIssue = item.getIssue();
                     if (issue != null) {
-                        item.setOutcome("NORMALIZATION_ISSUE");
-                        item.setIssue(issue);
+                        outcome = "NORMALIZATION_ISSUE";
+                        updatedIssue = issue;
                     } else if (missingListName && !hasListName(item)) {
-                        item.setOutcome("NORMALIZATION_ISSUE");
-                        item.setIssue("NEEDS_LIST_NAME");
+                        outcome = "NORMALIZATION_ISSUE";
+                        updatedIssue = "NEEDS_LIST_NAME";
                     } else if ((collectionIssue || missingListName)
                             && "NORMALIZATION_ISSUE".equals(item.getOutcome())) {
-                        item.setOutcome("RESOLVED");
-                        item.setIssue(null);
+                        outcome = "RESOLVED";
+                        updatedIssue = null;
+                    }
+                    if (!java.util.Objects.equals(outcome, item.getOutcome())
+                            || !java.util.Objects.equals(updatedIssue, item.getIssue())) {
+                        updates.add(new ImportUnitTransaction.CollectionLengthIssueUpdate(
+                                item.getId(), outcome, updatedIssue));
                     }
                 }
-                itemRepository.saveAll(page);
+                if (!updates.isEmpty() && !unitTransaction.saveCollectionLengthIssues(context, updates)) {
+                    throw new StaleImportExecutionException();
+                }
             }
         }
     }
@@ -553,6 +585,8 @@ public class ImportWorker {
     }
 
     private boolean hasWaitingForUser(ImportExecutionContext context) {
+        var indexedCount = unitTransaction.reviewQueueHasPendingItems(context);
+        if (indexedCount.isPresent()) return indexedCount.get();
         long afterOrdinal = -1;
         UUID afterId = new UUID(0, 0);
         while (true) {
@@ -561,21 +595,7 @@ public class ImportWorker {
             for (ImportItem item : page) {
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
-                boolean templateOptionNeedsChoice = item.getNormalizedKind() == ImportRecordKind.TEMPLATE_OPTION
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.REMOVE_NOMINEE
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM;
-                if ("NORMALIZATION_ISSUE".equals(item.getOutcome())
-                        && (templateOptionNeedsChoice
-                        || item.getNormalizedKind() != ImportRecordKind.TEMPLATE_OPTION
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.RESOLVE_TARGET)) {
-                    return true;
-                }
-                if (isCandidateEnvelope(item.getResolvedTargetJson())
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.RESOLVE_TARGET
-                        && item.getDecision() != com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
-                    return true;
-                }
+                if (reviewPolicy.classify(item).pending()) return true;
             }
             if (page.size() < MAX_BATCH_SIZE) return false;
         }
@@ -591,16 +611,6 @@ public class ImportWorker {
         }
         boolean moreUnits = itemRepository.existsApplyPending(job.id(), context.planGeneration());
         unitTransaction.finishApplyChunk(context, moreUnits);
-    }
-
-    private boolean isCandidateEnvelope(String value) {
-        if (value == null || value.isBlank()) return false;
-        try {
-            JsonNode node = objectMapper.readTree(value);
-            return node.isObject() && node.has("schemaVersion") && node.has("candidates");
-        } catch (JacksonException exception) {
-            return false;
-        }
     }
 
     private ImportModeKey modeKey(ClaimedJob job) {

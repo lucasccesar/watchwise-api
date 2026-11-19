@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportCommitDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportResolutionDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewPageDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportSelectionDTO;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
@@ -73,6 +74,13 @@ public class ImportController {
                                              @RequestParam(defaultValue = "0") int page,
                                              @RequestParam(defaultValue = "20") int size) {
         return importJobService.preview(ownerId(), importId, page, size);
+    }
+
+    @GetMapping("/{importId}/review-items")
+    public ImportReviewPageDTO getImportReviewItems(@PathVariable UUID importId,
+                                                   @RequestParam(required = false) String after,
+                                                   @RequestParam(defaultValue = "40") int limit) {
+        return importJobService.reviewItems(ownerId(), importId, after, limit);
     }
 
     @PostMapping("/{importId}/commit")

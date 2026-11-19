@@ -12,8 +12,10 @@ import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEviden
 import com.watchwise.watchwise_api.diaryentry.dto.WatchEventCommand;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
+import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
 import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
 import com.watchwise.watchwise_api.platformimport.model.SeriesExpansionPlan;
 import com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository;
@@ -47,6 +49,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
 
     private final ImportItemRepository itemRepository;
     private final ImportJobRepository jobRepository;
+    private final ImportReviewQueue reviewQueue;
     private final ExternalImportLinkRepository linkRepository;
     private final ContentRepository contentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
@@ -61,6 +64,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
 
     public LetterboxdSeriesExpansionApplier(ImportItemRepository itemRepository,
                                             ImportJobRepository jobRepository,
+                                            ImportReviewQueue reviewQueue,
                                             ExternalImportLinkRepository linkRepository,
                                             ContentRepository contentRepository,
                                             DiaryEntryRepository diaryEntryRepository,
@@ -74,6 +78,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
                                             Clock clock) {
         this.itemRepository = itemRepository;
         this.jobRepository = jobRepository;
+        this.reviewQueue = reviewQueue;
         this.linkRepository = linkRepository;
         this.contentRepository = contentRepository;
         this.diaryEntryRepository = diaryEntryRepository;
@@ -145,6 +150,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int stageForPreview(ImportExecutionContext context, UUID parentId, SeriesExpansionPlan plan) {
+        ImportJob job = lockJobForReview(context);
         ImportItem parent = itemRepository.findById(parentId)
                 .orElseThrow(() -> new IllegalStateException("Staged series expansion was not found"));
         validateContext(context, parent);
@@ -170,31 +176,41 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
             if (childIssue != null) issueCount++;
             batch.add(childItem(context, parent, plan, plan.children().get(index), nextOrdinal + index + 1,
                     childIssue, true));
-            if (batch.size() == STAGING_BATCH_SIZE) persistBatch(batch);
+            if (batch.size() == STAGING_BATCH_SIZE) {
+                reviewQueue.synchronize(job, batch, true);
+                persistBatch(batch);
+            }
         }
-        if (!batch.isEmpty()) persistBatch(batch);
+        if (!batch.isEmpty()) {
+            reviewQueue.synchronize(job, batch, true);
+            persistBatch(batch);
+        }
 
         payload.set(EXPANSION_FIELD, expansionMetadata(plan, nextOrdinal));
         parent.setPayloadJson(writeJson(payload));
         parent.setIssue(null);
         context.transitionOutcome(parent, "EXPANSION_PREPARED");
+        reviewQueue.synchronize(job, List.of(parent), true);
         itemRepository.saveAndFlush(parent);
         return issueCount;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markPreviewIssue(ImportExecutionContext context, UUID parentId, String issue) {
+        ImportJob job = lockJobForReview(context);
         ImportItem parent = itemRepository.findById(parentId)
                 .orElseThrow(() -> new IllegalStateException("Staged series expansion was not found"));
         validateContext(context, parent);
         if (hasPreparedPlan(parent)) return;
         context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(parent), true);
         itemRepository.saveAndFlush(parent);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean markOversizedReviewIssue(ImportExecutionContext context, UUID parentId) {
+        ImportJob job = lockJobForReview(context);
         ImportItem parent = itemRepository.findById(parentId)
                 .orElseThrow(() -> new IllegalStateException("Staged series expansion was not found"));
         validateContext(context, parent);
@@ -204,6 +220,7 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
                 + ": Edit the review to 20,000 characters or fewer; the original text is preserved.");
+        reviewQueue.synchronize(job, List.of(parent), true);
         itemRepository.saveAndFlush(parent);
         return true;
     }
@@ -321,15 +338,40 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
     }
 
     private void pauseParentForIssue(ImportExecutionContext context, ImportItem parent, String issue) {
+        var job = lockJobForReview(context);
         context.transitionOutcome(parent, "NORMALIZATION_ISSUE");
         parent.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(parent), true);
         itemRepository.save(parent);
-        var job = jobRepository.findByIdForUpdate(context.jobId()).orElseThrow();
         job.setState(com.watchwise.watchwise_api.platformimport.model.ImportJobState.READY);
+        if (job.getResolutionProgressGeneration() == null) {
+            job.initializeResolutionProgress(context.planGeneration(), -1, 0, 0);
+        }
+        job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
         job.setWorkPending(false);
         job.setNextRunAt(null);
         job.setLeaseToken(null);
         job.setLeaseUntil(null);
+    }
+
+    private ImportJob lockJobForReview(ImportExecutionContext context) {
+        var job = jobRepository.findByIdForUpdate(context.jobId()).orElseThrow();
+        if (!job.getUserId().equals(context.ownerId()) || !context.leaseToken().equals(job.getLeaseToken())
+                || job.getPreviewVersion() != context.previewVersion()
+                || planGeneration(job.getSelectionJson()) != context.planGeneration()) {
+            throw new IllegalStateException("Series expansion belongs to a stale import execution");
+        }
+        return job;
+    }
+
+    private long planGeneration(String selectionJson) {
+        try {
+            JsonNode plan = objectMapper.readTree(selectionJson);
+            JsonNode generation = plan.get("planGeneration");
+            return generation == null ? 0 : generation.asLong(-1);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Stored import plan is invalid", exception);
+        }
     }
 
     private ImportItem childItem(ImportExecutionContext context, ImportItem parent, SeriesExpansionPlan plan,

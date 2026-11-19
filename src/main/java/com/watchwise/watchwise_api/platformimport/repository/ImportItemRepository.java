@@ -22,6 +22,12 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
         long getSkippedItems();
     }
 
+    interface ResolutionProgressCounts {
+        long getLastOrdinal();
+        long getTotalItems();
+        long getExaminedItems();
+    }
+
     long countByJobId(UUID jobId);
     long countByJobIdAndPlanGeneration(UUID jobId, long planGeneration);
 
@@ -36,6 +42,28 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
             """, nativeQuery = true)
     ApplyProgressCounts countApplyProgress(@Param("jobId") UUID jobId,
                                           @Param("generation") long generation);
+
+    @Query(value = """
+            SELECT COALESCE(MAX(ordinal), -1) AS "lastOrdinal",
+                   COUNT(*) AS "totalItems",
+                   COUNT(*) FILTER (WHERE outcome IS NOT NULL AND outcome <> 'UNAVAILABLE') AS "examinedItems"
+            FROM import_items
+            WHERE job_id = :jobId AND plan_generation = :generation
+            """, nativeQuery = true)
+    ResolutionProgressCounts countResolutionProgress(@Param("jobId") UUID jobId,
+                                                     @Param("generation") long generation);
+
+    @Query(value = """
+            SELECT * FROM import_items
+            WHERE job_id = :jobId AND plan_generation = :generation
+              AND review_revision IS NOT NULL
+              AND (review_revision, id) > (:afterRevision, :afterId)
+            ORDER BY review_revision ASC, id ASC
+            """, nativeQuery = true)
+    List<ImportItem> findReviewChanges(@Param("jobId") UUID jobId,
+                                       @Param("generation") long generation,
+                                       @Param("afterRevision") long afterRevision,
+                                       @Param("afterId") UUID afterId, Pageable pageable);
 
     @Query("SELECT COALESCE(MAX(item.ordinal), -1) FROM ImportItem item WHERE item.jobId = :jobId AND item.planGeneration = :generation")
     long findMaxOrdinal(@Param("jobId") UUID jobId, @Param("generation") long generation);
@@ -210,8 +238,8 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
               AND (item.outcome IS NULL OR item.outcome = 'UNAVAILABLE')
             ORDER BY item.ordinal ASC, item.id ASC
             """)
-    Page<ImportItem> findResolutionPending(@Param("jobId") UUID jobId,
-                                          @Param("generation") long generation, Pageable pageable);
+    List<ImportItem> findResolutionPending(@Param("jobId") UUID jobId,
+                                           @Param("generation") long generation, Pageable pageable);
 
     @Query("""
             SELECT item FROM ImportItem item, ImportJob job

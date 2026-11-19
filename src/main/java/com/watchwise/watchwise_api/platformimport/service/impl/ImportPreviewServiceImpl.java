@@ -12,6 +12,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportWatchScopePreviewDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewChangeDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewPageDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportDeferredRecord;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
@@ -28,6 +30,8 @@ import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportResolutionOperation;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
+import com.watchwise.watchwise_api.platformimport.model.ImportReviewCursor;
+import com.watchwise.watchwise_api.platformimport.model.ReviewChangeType;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
@@ -92,6 +96,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     private final ImportLimits importLimits;
     private final Clock clock;
     private final PageRequestFactory pageRequestFactory;
+    private final ImportReviewQueue reviewQueue;
+    private final ImportReviewPolicy reviewPolicy;
 
     public ImportPreviewServiceImpl(
             ImportJobRepository importJobRepository,
@@ -107,7 +113,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             ImportedReviewTextNormalizer reviewTextNormalizer,
             ImportLimits importLimits,
             Clock clock,
-            PageRequestFactory pageRequestFactory) {
+            PageRequestFactory pageRequestFactory,
+            ImportReviewQueue reviewQueue,
+            ImportReviewPolicy reviewPolicy) {
         this.importJobRepository = importJobRepository;
         this.importItemRepository = importItemRepository;
         this.deferredRecordRepository = deferredRecordRepository;
@@ -122,6 +130,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         this.importLimits = importLimits;
         this.clock = clock;
         this.pageRequestFactory = pageRequestFactory;
+        this.reviewQueue = reviewQueue;
+        this.reviewPolicy = reviewPolicy;
     }
 
     @Override
@@ -141,6 +151,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         LocalDateTime now = LocalDateTime.now(clock);
 
         job.clearApplyProgress();
+        job.clearResolutionProgress();
         job.setPreviewVersion(nextVersion);
         job.setSelectionJson(storedSelection);
         job.setCheckpoint(null);
@@ -161,6 +172,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     @Transactional
     public ImportPlanVersion resolve(UUID ownerId, UUID jobId, List<ImportResolutionOperation> decisions,
                                      long expectedVersion) {
+        return resolve(ownerId, jobId, decisions, expectedVersion, Map.of());
+    }
+
+    @Override
+    @Transactional
+    public ImportPlanVersion resolve(UUID ownerId, UUID jobId, List<ImportResolutionOperation> decisions,
+                                     long expectedVersion, Map<UUID, Long> expectedReviewRevisions) {
         requireOwnerAndJob(ownerId, jobId);
         ImportJob job = lockOwnedJob(ownerId, jobId);
         requireExpectedVersion(job, expectedVersion);
@@ -174,13 +192,25 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         if (decisions.size() > MAX_RESOLUTION_OPERATIONS) {
             throw new BadRequestException("A resolution request cannot contain more than 200 operations");
         }
+        if (expectedReviewRevisions == null) expectedReviewRevisions = Map.of();
 
         long generation = readPlanGeneration(job.getSelectionJson());
         LinkedHashSet<UUID> requestedIds = collectItemIds(decisions);
+        if (!requestedIds.containsAll(expectedReviewRevisions.keySet())) {
+            throw new BadRequestException("Review revisions must match operation item identifiers");
+        }
         Map<UUID, ImportItem> itemsById = loadAndValidateItems(jobId, generation, requestedIds);
+        for (Map.Entry<UUID, Long> expectedReviewRevision : expectedReviewRevisions.entrySet()) {
+            ImportItem item = itemsById.get(expectedReviewRevision.getKey());
+            if (item == null || !item.isReviewPending() || item.getReviewRevision() == null
+                    || !item.getReviewRevision().equals(expectedReviewRevision.getValue())) {
+                throw new ConflictException("Review item has changed");
+            }
+        }
         Set<UUID> changedItemIds = new LinkedHashSet<>();
         Map<UUID, PreparedTargetResolution> preparedTargets = new LinkedHashMap<>();
         Map<UUID, ConfirmedWatchScopeSnapshot> confirmedWatchScopes = new LinkedHashMap<>();
+        List<ImportItem> relatedChangedItems = new ArrayList<>();
         for (ImportResolutionOperation decision : decisions) {
             if (!changedItemIds.add(decision.itemId())) {
                 throw new BadRequestException("Only one resolution per item is allowed in a request");
@@ -194,10 +224,15 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
         for (ImportResolutionOperation decision : decisions) {
             applyDecision(ownerId, job, decision, itemsById, preparedTargets.get(decision.itemId()),
-                    confirmedWatchScopes.get(decision.itemId()));
+                    confirmedWatchScopes.get(decision.itemId()), relatedChangedItems);
         }
         validateTemplateEligibilityPlan(decisions, itemsById);
-        importItemRepository.saveAll(changedItems(decisions, itemsById));
+        LinkedHashMap<UUID, ImportItem> allChangedById = new LinkedHashMap<>();
+        changedItems(decisions, itemsById).forEach(item -> allChangedById.put(item.getId(), item));
+        relatedChangedItems.forEach(item -> allChangedById.put(item.getId(), item));
+        List<ImportItem> allChangedItems = List.copyOf(allChangedById.values());
+        reviewQueue.synchronize(job, allChangedItems, true);
+        importItemRepository.saveAll(allChangedItems);
 
         job.clearApplyProgress();
         long nextVersion = nextVersion(job.getPreviewVersion());
@@ -205,6 +240,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         job.setPreviewVersion(nextVersion);
         job.setState(ImportJobState.RESOLVING);
         job.setWorkPhase("RESOLVE");
+        if (job.getResolutionProgressGeneration() != null) {
+            job.setResolutionProgressPhase(com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase.VALIDATING);
+        }
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
@@ -224,6 +262,32 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         return importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
                         jobId, generation, pageable)
                 .map(item -> toPreviewItem(job, item));
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public ImportReviewPageDTO reviewItems(UUID ownerId, UUID jobId, String encodedCursor, int limit) {
+        requireOwnerAndJob(ownerId, jobId);
+        if (limit < 1 || limit > 100) throw new BadRequestException("Review page size must be between 1 and 100");
+        ImportJob job = importJobRepository.findOwnedById(jobId, ownerId)
+                .orElseThrow(() -> new NotFoundException("Import job not found"));
+        long generation = readPlanGeneration(job.getSelectionJson());
+        ImportReviewCursor cursor = encodedCursor == null || encodedCursor.isBlank()
+                ? ImportReviewCursor.first(generation)
+                : ImportReviewCursor.decode(encodedCursor);
+        if (cursor.generation() != generation) throw new ConflictException("Review cursor belongs to another plan");
+        if (cursor.revision() > job.getReviewRevision()) throw new BadRequestException("Review cursor is ahead of the job");
+
+        List<ImportItem> rows = importItemRepository.findReviewChanges(jobId, generation,
+                cursor.revision(), cursor.itemId(), PageRequest.of(0, limit + 1));
+        boolean hasMore = rows.size() > limit;
+        List<ImportItem> delivered = hasMore ? rows.subList(0, limit) : rows;
+        List<ImportReviewChangeDTO> changes = delivered.stream()
+                .map(item -> toReviewChange(job, item)).toList();
+        String nextCursor = delivered.isEmpty() ? cursor.encode()
+                : new ImportReviewCursor(generation, delivered.getLast().getReviewRevision(), delivered.getLast().getId()).encode();
+        return new ImportReviewPageDTO(jobId, job.getState(), job.getPreviewVersion(), generation,
+                job.getReviewRevision(), changes, nextCursor, hasMore);
     }
 
     @Override
@@ -1021,7 +1085,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private void applyDecision(UUID ownerId, ImportJob job, ImportResolutionOperation operation,
                                Map<UUID, ImportItem> items, PreparedTargetResolution preparedTarget,
-                               ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot) {
+                               ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot,
+                               List<ImportItem> relatedChangedItems) {
         ImportItem item = items.get(operation.itemId());
         ResolutionMetadata metadata = resolutionMetadata(operation);
         if (operation instanceof ImportResolutionOperation.ResolveTarget) {
@@ -1083,13 +1148,15 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 || operation instanceof ImportResolutionOperation.ConfirmWatchScope)
                 && (item.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
                 || item.getNormalizedKind() == ImportRecordKind.WATCHED_MARKER)) {
-            stageDeferredReplayForSourceDecision(ownerId, job, item, operation, confirmedWatchScopeSnapshot);
+            stageDeferredReplayForSourceDecision(ownerId, job, item, operation,
+                    confirmedWatchScopeSnapshot, relatedChangedItems);
         }
     }
 
     private void stageDeferredReplayForSourceDecision(UUID ownerId, ImportJob job, ImportItem sourceItem,
                                                       ImportResolutionOperation operation,
-                                                      ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot) {
+                                                      ConfirmedWatchScopeSnapshot confirmedWatchScopeSnapshot,
+                                                      List<ImportItem> relatedChangedItems) {
         ImportDeferredRecord deferred = deferredRecordRepository.findPendingBySourceIdentityForUpdate(ownerId,
                 sourceItem.getSourceNamespace(), sourceItem.getObjectKind(), sourceItem.getSourceId()).orElse(null);
         if (deferred == null) return;
@@ -1129,7 +1196,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
         replay.setOutcome("RESOLVED");
         replay.setIssue(null);
-        importItemRepository.save(replay);
+        relatedChangedItems.add(replay);
     }
 
     private String appendConfirmedWatchScopeSnapshot(String payload,
@@ -1288,6 +1355,25 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 itemTitle.truncated(), itemDescription.text(), itemDescription.length(),
                 itemDescription.truncated(), reviewText.text(), reviewText.length(),
                 reviewText.truncated(), watchScopePreview(job, item));
+    }
+
+    private ImportReviewChangeDTO toReviewChange(ImportJob job, ImportItem item) {
+        if (!item.isReviewPending()) {
+            return new ImportReviewChangeDTO(item.getId(), ReviewChangeType.REMOVE,
+                    item.getReviewRevision(), null, null, List.of(), List.of());
+        }
+        ImportReviewPolicy.ReviewState reviewState = reviewPolicy.classify(item);
+        ImportPreviewItemDTO previewItem = toPreviewItem(job, item);
+        String title = previewItem.itemTitle();
+        if (title == null) {
+            JsonNode source = sourcePayload(readPayload(item.getPayloadJson()));
+            title = textual(source.path("title"));
+            if (title == null) title = textual(source.path("name"));
+            if (title != null && title.length() > 255) title = title.substring(0, 255);
+        }
+        return new ImportReviewChangeDTO(item.getId(), ReviewChangeType.UPSERT,
+                item.getReviewRevision(), title, previewItem,
+                reviewState.allowedOperations(), reviewState.editableFields());
     }
 
     private UUID previewParentItemId(ImportJob job, ImportItem item) {

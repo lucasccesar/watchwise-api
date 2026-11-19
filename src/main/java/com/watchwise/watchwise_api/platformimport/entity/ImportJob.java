@@ -3,6 +3,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -27,6 +28,14 @@ public class ImportJob {
  @Column(name="progress_total_items") private Long progressTotalItems;
  @Column(name="progress_applied_items") private Long progressAppliedItems;
  @Column(name="progress_skipped_items") private Long progressSkippedItems;
+ @Enumerated(EnumType.STRING) @Column(name="resolution_progress_phase", length=32) private ResolutionProgressPhase resolutionProgressPhase;
+ @Column(name="resolution_progress_generation") private Long resolutionProgressGeneration;
+ @Column(name="resolution_progress_last_ordinal") private Long resolutionProgressLastOrdinal;
+ @Column(name="resolution_progress_total") private Long resolutionProgressTotal;
+ @Column(name="resolution_progress_examined") private Long resolutionProgressExamined;
+ @Setter @Column(name="resolution_progress_legacy", nullable=false) private boolean resolutionProgressLegacy;
+ @Column(name="review_required_count", nullable=false) private long reviewRequiredCount;
+ @Column(name="review_revision", nullable=false) private long reviewRevision;
  @Setter @Column(columnDefinition="TEXT") private String checkpoint;
  @Column(name="work_phase", length=40) @Setter private String workPhase;
  @Column(name="work_pending", nullable=false) @Setter private boolean workPending;
@@ -65,6 +74,55 @@ public class ImportJob {
           || appliedItems > totalItems - skippedItems) {
    throw new IllegalArgumentException("Import progress counts are inconsistent");
   }
+ }
+
+ public void initializeResolutionProgress(long generation, long lastOrdinal, long total, long examined) {
+  if (generation < 0 || lastOrdinal < -1 || total < 0 || examined < 0 || examined > total) {
+   throw new IllegalArgumentException("Import resolution progress counts are inconsistent");
+  }
+  resolutionProgressPhase = ResolutionProgressPhase.MATCHING;
+  resolutionProgressLegacy = false;
+  resolutionProgressGeneration = generation;
+  resolutionProgressLastOrdinal = lastOrdinal;
+  resolutionProgressTotal = total;
+  resolutionProgressExamined = examined;
+ }
+
+ public void setResolutionProgressPhase(ResolutionProgressPhase phase) {
+  if (resolutionProgressGeneration == null || phase == null) {
+   throw new IllegalStateException("Import resolution progress has not been initialized");
+  }
+  resolutionProgressPhase = phase;
+ }
+
+ public void adjustResolutionExamined(long delta) {
+  if (resolutionProgressExamined == null || resolutionProgressTotal == null) {
+   throw new IllegalStateException("Import resolution progress has not been initialized");
+  }
+  long next = Math.addExact(resolutionProgressExamined, delta);
+  if (next < 0 || next > resolutionProgressTotal) {
+   throw new IllegalArgumentException("Import resolution progress counts are inconsistent");
+  }
+  resolutionProgressExamined = next;
+ }
+
+ public long nextReviewRevision(long reviewRequiredDelta) {
+  long nextReviewCount = Math.addExact(reviewRequiredCount, reviewRequiredDelta);
+  if (nextReviewCount < 0) throw new IllegalArgumentException("Review queue count is inconsistent");
+  reviewRequiredCount = nextReviewCount;
+  reviewRevision = Math.addExact(reviewRevision, 1);
+  return reviewRevision;
+ }
+
+ public void clearResolutionProgress() {
+  resolutionProgressPhase = null;
+  resolutionProgressGeneration = null;
+  resolutionProgressLastOrdinal = null;
+  resolutionProgressTotal = null;
+  resolutionProgressExamined = null;
+  resolutionProgressLegacy = false;
+  reviewRequiredCount = 0;
+  reviewRevision = 0;
  }
 
 }

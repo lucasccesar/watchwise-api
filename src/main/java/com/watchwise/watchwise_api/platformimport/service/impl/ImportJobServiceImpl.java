@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportResolutionDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewPageDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportSelectionDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.mapper.ImportJobMapper;
@@ -151,7 +152,8 @@ public class ImportJobServiceImpl implements ImportJobService {
     @Override
     public ImportJobDTO resolve(UUID ownerId, UUID jobId, ImportResolutionDTO resolution) {
         if (resolution == null) throw new BadRequestException("Import resolution is required");
-        importPreviewService.resolve(ownerId, jobId, resolution.operations(), resolution.previewVersion());
+        importPreviewService.resolve(ownerId, jobId, resolution.operations(), resolution.previewVersion(),
+                resolution.expectedReviewRevisions());
         return get(ownerId, jobId);
     }
 
@@ -159,6 +161,11 @@ public class ImportJobServiceImpl implements ImportJobService {
     @Transactional(readOnly = true)
     public ImportPreviewDTO preview(UUID ownerId, UUID jobId, int page, int size) {
         return previewPage(ownerId, jobId, page, size);
+    }
+
+    @Override
+    public ImportReviewPageDTO reviewItems(UUID ownerId, UUID jobId, String cursor, int limit) {
+        return importPreviewService.reviewItems(ownerId, jobId, cursor, limit);
     }
 
     @Override
@@ -180,6 +187,9 @@ public class ImportJobServiceImpl implements ImportJobService {
         }
         if (job.getState() != ImportJobState.READY) {
             throw new ConflictException("Import preview is not ready to commit");
+        }
+        if (job.getReviewRequiredCount() > 0) {
+            throw new ConflictException("Import still has items awaiting review");
         }
         LocalDateTime now = LocalDateTime.now(clock);
         if (job.getExpiresAt() != null && !job.getExpiresAt().isAfter(now)) {
@@ -278,7 +288,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         }
         return new ImportJobDTO(dto.id(), dto.inputKind(), dto.sourceFormat(), dto.platform(), dto.state(),
                 dto.version(), dto.previewVersion(), dto.previewDigest(), dto.createdAt(), dto.updatedAt(),
-                dto.expiresAt(), inventory, dto.progress());
+                dto.expiresAt(), inventory, dto.resolutionProgressAvailable(), dto.progress(), dto.resolutionProgress());
     }
 
     private ImportJob findOwned(UUID ownerId, UUID jobId) {

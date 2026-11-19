@@ -1,12 +1,14 @@
 package com.watchwise.watchwise_api.platformimport.service;
 
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewPageDTO;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlanVersion;
 import com.watchwise.watchwise_api.platformimport.model.ImportResolutionOperation;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import org.springframework.data.domain.Page;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public interface ImportPreviewService {
@@ -14,7 +16,12 @@ public interface ImportPreviewService {
 
     ImportPlanVersion resolve(UUID ownerId, UUID jobId, List<ImportResolutionOperation> decisions, long expectedVersion);
 
+    ImportPlanVersion resolve(UUID ownerId, UUID jobId, List<ImportResolutionOperation> decisions,
+                              long expectedVersion, Map<UUID, Long> expectedReviewRevisions);
+
     Page<ImportPreviewItemDTO> preview(UUID ownerId, UUID jobId, int page, int size);
+
+    ImportReviewPageDTO reviewItems(UUID ownerId, UUID jobId, String cursor, int limit);
 
     ImportPlanVersion currentVersion(UUID ownerId, UUID jobId);
 }

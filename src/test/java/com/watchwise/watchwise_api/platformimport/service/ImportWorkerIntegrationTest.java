@@ -5,8 +5,10 @@ import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportResolutionDTO;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
 import com.watchwise.watchwise_api.platformimport.model.ImportListInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportCategoryInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
@@ -15,6 +17,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
 import com.watchwise.watchwise_api.platformimport.model.ImportReadContext;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
+import com.watchwise.watchwise_api.platformimport.model.ImportResolutionOperation;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.platformimport.model.AliasQuery;
@@ -30,6 +33,7 @@ import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransaction;
+import com.watchwise.watchwise_api.platformimport.service.impl.PlatformContentResolver;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.service.impl.WatchEventImportApplier;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
@@ -67,6 +71,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -84,9 +89,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -131,6 +138,7 @@ class ImportWorkerIntegrationTest {
     @Autowired private ImportWorker worker;
     @MockitoSpyBean private ImportModeRegistry registry;
     @MockitoSpyBean private ImportUnitTransaction unitTransaction;
+    @MockitoSpyBean private PlatformContentResolver contentResolverSpy;
     @MockitoBean private WatchEventImportApplier watchEventImportApplier;
     @MockitoSpyBean private ImportItemRepository itemRepositorySpy;
     @Autowired private ImportCleanupJob cleanupJob;
@@ -526,6 +534,186 @@ class ImportWorkerIntegrationTest {
         assertThat(initialized.getProgressTotalItems()).isEqualTo(2);
         assertThat(initialized.getProgressAppliedItems()).isZero();
         assertThat(initialized.getProgressSkippedItems()).isZero();
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Advance Resolution And Publish Ambiguous Review - When A Batch Resolves")
+    void shouldAdvanceResolutionAndPublishAmbiguousReviewWhenABatchResolves() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 3);
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setLeaseToken(UUID.randomUUID());
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
+        jobRepository.saveAndFlush(job);
+
+        List<ImportItem> staged = createItems(job, 3, "resolution-progress");
+        staged.get(0).setOutcome("MATCHED");
+        staged.get(1).setOutcome("UNAVAILABLE");
+        staged.get(2).setOutcome("AUXILIARY_EVIDENCE");
+        itemRepository.saveAllAndFlush(staged);
+        ImportExecutionContext context = new ImportExecutionContext(owner.getId(), job.getId(),
+                job.getPreviewVersion(), 1, job.getSourceNamespace(), job.getLeaseToken());
+
+        assertThat(unitTransaction.initializeResolutionProgress(context)).isTrue();
+        assertThat(unitTransaction.setResolutionProgressPhase(context, ResolutionProgressPhase.MATCHING)).isTrue();
+        assertThat(unitTransaction.saveResolution(context, List.of(new ImportUnitTransaction.ResolutionUpdate(
+                staged.get(1).getId(), "AMBIGUOUS",
+                "{\"schemaVersion\":1,\"query\":{},\"candidates\":[{\"candidateId\":\"movie-1\"}]}",
+                "MOVIE|sample", null, "Several matches were found.")))).isTrue();
+
+        ImportJob progressed = jobRepository.findById(job.getId()).orElseThrow();
+        ImportItem reviewItem = itemRepository.findById(staged.get(1).getId()).orElseThrow();
+        assertThat(progressed.getResolutionProgressTotal()).isEqualTo(3);
+        assertThat(progressed.getResolutionProgressExamined()).isEqualTo(3);
+        assertThat(progressed.getReviewRequiredCount()).isEqualTo(1);
+        assertThat(progressed.getReviewRevision()).isEqualTo(1);
+        assertThat(reviewItem.isReviewPending()).isTrue();
+        assertThat(reviewItem.getReviewRevision()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldDiscardAnOldResolutionBatchWhenTheReviewPatchWinsTheJobLock() throws Exception {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{" +
+                "\"history\":false,\"watchlist\":false,\"listIds\":[]}}");
+        job.initializeResolutionProgress(1, 2, 2, 1);
+        job.setResolutionProgressPhase(ResolutionProgressPhase.MATCHING);
+        job.nextReviewRevision(1);
+        jobRepository.saveAndFlush(job);
+
+        ImportItem reviewItem = ImportItem.builder()
+                .id(UUID.randomUUID()).jobId(job.getId()).planGeneration(1)
+                .normalizedKind(ImportRecordKind.WATCHED_SUMMARY)
+                .sourceNamespace(job.getSourceNamespace()).objectKind("watched_summary")
+                .sourceId("reviewable-summary").payloadJson("{\"source\":{\"title\":\"Example\"}}")
+                .outcome("NORMALIZATION_ISSUE")
+                .issue("OPINION_EVIDENCE_PENDING: Skip or confirm this source summary.")
+                .ordinal(1).reviewPending(true).reviewRevision(1L).build();
+        ImportItem resolvingItem = ImportItem.builder()
+                .id(UUID.randomUUID()).jobId(job.getId()).planGeneration(1)
+                .normalizedKind(ImportRecordKind.DIARY_EVENT)
+                .sourceNamespace(job.getSourceNamespace()).objectKind("diary_event")
+                .sourceId("unavailable-event").sourceEventKey("unavailable-event")
+                .payloadJson("{\"sourceQuery\":{\"kind\":\"CONTENT\",\"title\":\"Race title\",\"year\":2020,\"contentType\":\"MOVIE\"}}")
+                .outcome("UNAVAILABLE").ordinal(2).build();
+        itemRepository.saveAllAndFlush(List.of(reviewItem, resolvingItem));
+
+        CountDownLatch resolverStarted = new CountDownLatch(1);
+        CountDownLatch releaseResolver = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            resolverStarted.countDown();
+            assertThat(releaseResolver.await(10, TimeUnit.SECONDS)).isTrue();
+            return invocation.callRealMethod();
+        }).when(contentResolverSpy).resolve(any(ImportExecutionContext.class), anyList());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Integer> workerRun = executor.submit(() -> worker.runAvailable(1));
+            assertThat(resolverStarted.await(10, TimeUnit.SECONDS)).isTrue();
+
+            jobService.resolve(owner.getId(), job.getId(), new ImportResolutionDTO(job.getPreviewVersion(),
+                    List.of(new ImportResolutionOperation.SkipItem(reviewItem.getId())),
+                    Map.of(reviewItem.getId(), 1L)));
+            releaseResolver.countDown();
+            assertThat(workerRun.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+        } finally {
+            releaseResolver.countDown();
+            executor.shutdownNow();
+        }
+
+        ImportJob after = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(after.getReviewRequiredCount()).isZero();
+        assertThat(after.getResolutionProgressExamined()).isEqualTo(1);
+        assertThat(after.getPreviewVersion()).isEqualTo(job.getPreviewVersion() + 1);
+        assertThat(itemRepository.findById(reviewItem.getId()).orElseThrow().getDecision())
+                .isEqualTo(com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM);
+        assertThat(itemRepository.findById(resolvingItem.getId()).orElseThrow().getOutcome())
+                .isEqualTo("UNAVAILABLE");
+    }
+
+    @Test
+    void shouldPublishMissingStandaloneListNameToTheReviewQueue() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 1);
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{" +
+                "\"history\":false,\"watchlist\":false,\"listIds\":[]}}");
+        jobRepository.saveAndFlush(job);
+        ImportItem list = ImportItem.builder()
+                .id(UUID.randomUUID())
+                .jobId(job.getId())
+                .planGeneration(1)
+                .normalizedKind(ImportRecordKind.LIST_METADATA)
+                .sourceNamespace(job.getSourceNamespace())
+                .objectKind("list_metadata")
+                .sourceId("list-without-name")
+                .payloadJson("{\"source\":{}}")
+                .outcome("RESOLVED")
+                .ordinal(1)
+                .build();
+        itemRepository.saveAndFlush(list);
+
+        worker.runAvailable(1);
+
+        ImportJob paused = jobRepository.findById(job.getId()).orElseThrow();
+        ImportItem pending = itemRepository.findById(list.getId()).orElseThrow();
+        assertThat(paused.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(paused.getResolutionProgressPhase()).isEqualTo(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        assertThat(paused.getReviewRequiredCount()).isEqualTo(1);
+        assertThat(pending.isReviewPending()).isTrue();
+        assertThat(pending.getIssue()).isEqualTo("NEEDS_LIST_NAME");
+        verify(itemRepositorySpy, never()).findWaitingItemsAfter(any(), any(), anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
+    void shouldPublishLatePassAssignmentAsAReviewableReadyJob() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 1);
+        UUID lease = UUID.randomUUID();
+        job.setLeaseToken(lease);
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
+        job.initializeResolutionProgress(1, 0, 1, 1);
+        job.replaceApplyProgress(1, 0, 0);
+        jobRepository.saveAndFlush(job);
+        ImportItem item = createItems(job, 1, "late-pass-review").getFirst();
+        item.setOutcome("MATCHED");
+        itemRepository.saveAndFlush(item);
+        testApplier.passAssignmentOnceOn(item.getSourceId());
+        ImportExecutionContext context = new ImportExecutionContext(owner.getId(), job.getId(),
+                job.getPreviewVersion(), 1, job.getSourceNamespace(), lease);
+
+        assertThat(unitTransaction.apply(context, item.getId())).isTrue();
+
+        ImportJob paused = jobRepository.findById(job.getId()).orElseThrow();
+        ImportItem pending = itemRepository.findById(item.getId()).orElseThrow();
+        assertThat(paused.getState()).isEqualTo(ImportJobState.READY);
+        assertThat(paused.getReviewRequiredCount()).isEqualTo(1);
+        assertThat(paused.getResolutionProgressPhase()).isEqualTo(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        assertThat(pending.isReviewPending()).isTrue();
+        assertThat(pending.getDecision()).isEqualTo(com.watchwise.watchwise_api.platformimport.model.ImportDecision.ASSIGN_PASS);
+    }
+
+    @Test
+    void shouldKeepResolutionProgressUnavailableForAPreMigrationGeneration() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 0);
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{" +
+                "\"history\":false,\"watchlist\":false,\"listIds\":[]}}");
+        job.setResolutionProgressLegacy(true);
+        jobRepository.saveAndFlush(job);
+
+        worker.runAvailable(1);
+
+        ImportJob completed = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.READY);
+        assertThat(completed.getResolutionProgressGeneration()).isNull();
+        assertThat(completed.isResolutionProgressLegacy()).isTrue();
     }
 
     @Test
@@ -1118,6 +1306,7 @@ class ImportWorkerIntegrationTest {
         private final AtomicReference<String> crashSourceId = new AtomicReference<>();
         private final AtomicReference<String> crashAfterOutcomeSourceId = new AtomicReference<>();
         private final AtomicReference<String> blockSourceId = new AtomicReference<>();
+        private final AtomicReference<String> passAssignmentSourceId = new AtomicReference<>();
         private final AtomicReference<CountDownLatch> blockedUnitEntered =
                 new AtomicReference<>(new CountDownLatch(1));
         private final AtomicReference<CountDownLatch> releaseBlockedUnit =
@@ -1148,6 +1337,12 @@ class ImportWorkerIntegrationTest {
                 blockedUnitEntered.get().countDown();
                 await(releaseBlockedUnit.get());
             }
+            String assignmentId = passAssignmentSourceId.get();
+            if (item.getSourceId().equals(assignmentId)
+                    && passAssignmentSourceId.compareAndSet(assignmentId, null)) {
+                throw new WatchEventImportApplier.PassAssignmentRequiredException(
+                        "PASS_ASSIGNMENT_REQUIRED: Choose a viewing pass for this event.");
+            }
 
             ImportSourceKey sourceKey = new ImportSourceKey(
                     item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
@@ -1169,6 +1364,7 @@ class ImportWorkerIntegrationTest {
             crashSourceId.set(null);
             crashAfterOutcomeSourceId.set(null);
             blockSourceId.set(null);
+            passAssignmentSourceId.set(null);
             blockedUnitEntered.set(new CountDownLatch(1));
             releaseBlockedUnit.set(new CountDownLatch(1));
         }
@@ -1183,6 +1379,10 @@ class ImportWorkerIntegrationTest {
 
         void blockOnceOn(String sourceId) {
             blockSourceId.set(sourceId);
+        }
+
+        void passAssignmentOnceOn(String sourceId) {
+            passAssignmentSourceId.set(sourceId);
         }
 
         boolean awaitBlockedUnit() throws InterruptedException {

@@ -9,6 +9,9 @@ import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
+import com.watchwise.watchwise_api.platformimport.model.ImportReviewCursor;
+import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
 import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTaskRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
@@ -261,6 +264,9 @@ class ImportControllerIntegrationTest {
         ImportJob job = importJobRepository.findById(jobId).orElseThrow();
         job.setState(ImportJobState.COMPLETED);
         job.replaceApplyProgress(1000, 220, 30);
+        job.initializeResolutionProgress(1, 999, 1200, 430);
+        job.setResolutionProgressPhase(ResolutionProgressPhase.MATCHING);
+        job.nextReviewRevision(3);
         importJobRepository.saveAndFlush(job);
         clearInvocations(importItemRepository);
 
@@ -270,8 +276,132 @@ class ImportControllerIntegrationTest {
                 .andExpect(jsonPath("$.progress.totalItems").value(1000))
                 .andExpect(jsonPath("$.progress.processedItems").value(250))
                 .andExpect(jsonPath("$.progress.appliedItems").value(220))
-                .andExpect(jsonPath("$.progress.skippedItems").value(30));
+                .andExpect(jsonPath("$.progress.skippedItems").value(30))
+                .andExpect(jsonPath("$.resolutionProgressAvailable").value(true))
+                .andExpect(jsonPath("$.resolutionProgress.phase").value("MATCHING"))
+                .andExpect(jsonPath("$.resolutionProgress.examinedItems").value(430))
+                .andExpect(jsonPath("$.resolutionProgress.totalItems").value(1200))
+                .andExpect(jsonPath("$.resolutionProgress.reviewRequiredCount").value(3));
         verifyNoInteractions(importItemRepository);
+    }
+
+    @Test
+    void shouldMarkPreMigrationJobsAsUsingThePreviewFallback() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob job = importJobRepository.findById(jobId).orElseThrow();
+        job.setResolutionProgressLegacy(true);
+        importJobRepository.saveAndFlush(job);
+
+        mockMvc.perform(get("/imports/{importId}", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolutionProgressAvailable").value(false))
+                .andExpect(jsonPath("$.resolutionProgress").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("[getImportReviewItems] Should Page New Review Updates And Reject A Stale Card Revision")
+    void shouldPageNewReviewUpdatesAndRejectAStaleCardRevision() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID importId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        UUID firstId = new UUID(0, 1);
+        UUID secondId = new UUID(0, 2);
+        ImportJob job = importJobRepository.findById(importId).orElseThrow();
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setWorkPending(false);
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{}}");
+        job.initializeResolutionProgress(1, 431, 2, 2);
+        job.setResolutionProgressPhase(
+                com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        job.nextReviewRevision(2);
+        importJobRepository.saveAndFlush(job);
+        importItemRepository.saveAllAndFlush(List.of(
+                stagedReviewItem(job, firstId, 430, ImportRecordKind.LIST_ITEM,
+                        "NORMALIZATION_ISSUE", "LIST_ITEM_DESCRIPTION_TOO_LONG: Edit description.",
+                        "{\"title\":\"All Time Remake\",\"description\":\"long text\"}", null),
+                stagedReviewItem(job, secondId, 431, ImportRecordKind.DIARY_EVENT,
+                        "AMBIGUOUS", "Several matches were found.", "{\"title\":\"Arrival\"}",
+                        "{\"schemaVersion\":1,\"query\":{},\"candidates\":[{\"candidateId\":\"movie-1\"}]}")
+        ));
+
+        MvcResult firstPage = mockMvc.perform(get("/imports/{importId}/review-items", importId)
+                        .param("limit", "1")
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewRevision").value(1))
+                .andExpect(jsonPath("$.changes.length()").value(1))
+                .andExpect(jsonPath("$.changes[0].type").value("UPSERT"))
+                .andExpect(jsonPath("$.changes[0].itemId").value(firstId.toString()))
+                .andExpect(jsonPath("$.changes[0].allowedOperations[0]").value("EDIT_FIELD"))
+                .andExpect(jsonPath("$.changes[0].editableFields[0].field").value("DESCRIPTION"))
+                .andExpect(jsonPath("$.changes[0].editableFields[0].maxLength").value(400))
+                .andExpect(jsonPath("$.hasMore").value(true))
+                .andReturn();
+        String cursor = objectMapper.readTree(firstPage.getResponse().getContentAsString())
+                .path("nextCursor").asString();
+        mockMvc.perform(get("/imports/{importId}/review-items", importId)
+                        .param("after", cursor)
+                        .param("limit", "1")
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.changes[0].itemId").value(secondId.toString()))
+                .andExpect(jsonPath("$.changes[0].allowedOperations[0]").value("RESOLVE_TARGET"))
+                .andExpect(jsonPath("$.hasMore").value(false));
+
+        mockMvc.perform(patch("/imports/{importId}/resolutions", importId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"previewVersion":0,"operations":[{"operation":"SKIP_ITEM","itemId":"%s"}],
+                                 "expectedReviewRevisions":{"%s":2}}
+                                """.formatted(secondId, secondId)))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(patch("/imports/{importId}/resolutions", importId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"previewVersion":0,"operations":[{"operation":"SKIP_ITEM","itemId":"%s"}],
+                                 "expectedReviewRevisions":{"%s":1}}
+                                """.formatted(secondId, secondId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolutionProgress.reviewRevision").value(2))
+                .andExpect(jsonPath("$.resolutionProgress.reviewRequiredCount").value(1));
+
+        mockMvc.perform(get("/imports/{importId}/review-items", importId)
+                        .param("after", cursor)
+                        .param("limit", "1")
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.changes[0].itemId").value(secondId.toString()))
+                .andExpect(jsonPath("$.changes[0].type").value("REMOVE"));
+    }
+
+    @Test
+    void shouldScopeReviewQueueToTheOwnerAndRejectACursorFromAnOldGeneration() throws Exception {
+        RegisteredUser owner = createUser();
+        RegisteredUser other = createUser();
+        UUID importId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob job = importJobRepository.findById(importId).orElseThrow();
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setWorkPending(false);
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":2,\"selection\":{}}");
+        job.initializeResolutionProgress(2, -1, 0, 0);
+        importJobRepository.saveAndFlush(job);
+        String oldCursor = ImportReviewCursor.first(1).encode();
+
+        mockMvc.perform(get("/imports/{importId}/review-items", importId)
+                        .cookie(other.accessToken(), other.csrfToken()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/imports/{importId}/review-items", importId)
+                        .param("after", oldCursor)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andExpect(status().isConflict());
     }
 
     @Test
@@ -386,6 +516,31 @@ class ImportControllerIntegrationTest {
                         .content(body))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.state").value("IMPORTING"));
+    }
+
+    @Test
+    void shouldRejectCommitWhileReviewItemsRemain() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID jobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob readyJob = importJobRepository.findById(jobId).orElseThrow();
+        readyJob.setState(ImportJobState.READY);
+        readyJob.nextReviewRevision(1);
+        importJobRepository.saveAndFlush(readyJob);
+        String preview = mockMvc.perform(get("/imports/{importId}", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andReturn().getResponse().getContentAsString();
+        String digest = objectMapper.readTree(preview).get("previewDigest").asString();
+
+        mockMvc.perform(post("/imports/{importId}/commit", jobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previewVersion\":0,\"digest\":\"" + digest + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+
+        assertThat(importJobRepository.findById(jobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.READY);
     }
 
     @Test
@@ -824,6 +979,26 @@ class ImportControllerIntegrationTest {
         start.await();
         return mockMvc.perform(upload(owner, "list.json", "application/json", content))
                 .andReturn().getResponse().getStatus();
+    }
+
+    private ImportItem stagedReviewItem(ImportJob job, UUID itemId, long ordinal, ImportRecordKind kind,
+                                       String outcome, String issue, String payload, String resolvedTarget) {
+        return ImportItem.builder()
+                .id(itemId)
+                .jobId(job.getId())
+                .planGeneration(1)
+                .normalizedKind(kind)
+                .sourceNamespace(job.getSourceNamespace())
+                .objectKind(kind.name())
+                .sourceId(itemId.toString())
+                .payloadJson(payload)
+                .resolvedTargetJson(resolvedTarget)
+                .outcome(outcome)
+                .issue(issue)
+                .reviewPending(true)
+                .reviewRevision(1L)
+                .ordinal(ordinal)
+                .build();
     }
 
     private UUID uploadAndReturnJobId(RegisteredUser owner, byte[] content) throws Exception {

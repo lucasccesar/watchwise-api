@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportCommitDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportPreviewDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportResolutionDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportReviewPageDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportSelectionDTO;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
@@ -24,6 +25,8 @@ public interface ImportJobService {
     ImportJobDTO resolve(UUID ownerId, UUID jobId, ImportResolutionDTO resolution);
 
     ImportPreviewDTO preview(UUID ownerId, UUID jobId, int page, int size);
+
+    ImportReviewPageDTO reviewItems(UUID ownerId, UUID jobId, String cursor, int limit);
 
     ImportJobDTO commit(UUID ownerId, UUID jobId, ImportCommitDTO commit);
 

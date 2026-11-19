@@ -27,6 +27,9 @@ public class ImportItem implements Persistable<UUID> {
  @Enumerated(EnumType.STRING) @Column(length=40) @Setter private ImportDecision decision;
  @Column(length=40) @Setter private String outcome;
  @Column(columnDefinition="TEXT") @Setter private String issue;
+ @Column(name="review_pending", nullable=false) @Setter private boolean reviewPending;
+ @Column(name="review_revision") @Setter private Long reviewRevision;
+ @Column(name="review_fingerprint", length=64) @Setter private String reviewFingerprint;
  @Column(nullable=false) private long ordinal;
 
  @Override public boolean isNew() { return newEntity; }

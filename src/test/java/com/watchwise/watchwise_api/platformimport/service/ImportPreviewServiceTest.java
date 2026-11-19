@@ -36,6 +36,8 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportPreviewServiceImpl;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportedReviewTextNormalizer;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportReviewPolicy;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportReviewQueue;
 import com.watchwise.watchwise_api.platformimport.service.impl.DeferredOpinionReplayStager;
 import com.watchwise.watchwise_api.platformimport.service.ExternalContentAliasService;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
@@ -118,7 +120,9 @@ class ImportPreviewServiceTest {
                 importModeRegistry,
                 externalContentAliasService, userListRepository, userRepository,
                 objectMapper, new ImportedReviewTextNormalizer(),
-                importLimits, clock, pageRequestFactory);
+                importLimits, clock, pageRequestFactory,
+                new ImportReviewQueue(new ImportReviewPolicy(objectMapper)),
+                new ImportReviewPolicy(objectMapper));
     }
 
     @Test

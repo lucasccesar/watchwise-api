@@ -224,6 +224,39 @@ paths:
         "404": { $ref: "#/components/responses/ImportApiError" }
         "409": { $ref: "#/components/responses/ImportApiError" }
 
+  /imports/{importId}/review-items:
+    parameters:
+      - $ref: "#/components/parameters/importId"
+    get:
+      tags: [Imports]
+      summary: Consultar mudanças incrementais nos itens que exigem revisão
+      description: >
+        Retorna uma página pequena de UPSERT/REMOVE ordenada por revisão e itemId. O cursor é opaco,
+        avança somente até o último item entregue e continua válido quando previewVersion muda dentro
+        da mesma geração. Uma mudança posterior no mesmo item recebe revisão nova e reaparece depois
+        do cursor. Cursor malformado retorna 400; cursor de uma geração substituída retorna 409. A rota
+        lê o resumo do job e os itens na mesma visão repeatable-read e não conta nem percorre toda a prévia.
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: Cursor opaco retornado por uma resposta anterior; omita para iniciar a geração atual.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 40 }
+      responses:
+        "200":
+          description: Página incremental da fila e cursor para continuar a leitura.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportReviewPageDTO" }
+        "400": { $ref: "#/components/responses/ImportApiError" }
+        "401": { $ref: "#/components/responses/ImportApiError" }
+        "404": { $ref: "#/components/responses/ImportApiError" }
+        "409": { $ref: "#/components/responses/ImportApiError" }
+
   /imports/{importId}/preview:
     parameters:
       - $ref: "#/components/parameters/importId"
@@ -1388,6 +1421,9 @@ paths:
         Modelo de leitura específico da tela de Watchlist. Preserva a visibilidade do endpoint de
         watchlist, aplica type e genre antes de status/ordenação/paginação e devolve cards de conteúdo
         já enriquecidos pelo backend. `ALL`, `NEW`, `IN_PROGRESS` e `UPCOMING` são estados derivados;
+        `card.viewerState` é resolvido para o viewer autenticado e inclui nota e review próprias quando
+        existem. O `status` da linha continua sendo a categoria da entrada na watchlist e não substitui
+        `viewerState.watchStatus`.
         `TITLE` e `RATING` podem rejeitar conjuntos filtrados acima do limite de materialização
         configurado. A resposta não é cacheada como envelope por usuário: estatísticas e estado
         contextual podem mudar sem mutação da watchlist. A leitura não chama ContentService nem cria
@@ -4398,10 +4434,12 @@ paths:
       summary: Séries iniciadas pelo usuário
       description: >
         Sem entidade própria — derivado de DiaryEntry/Content: uma série entra na lista quando
-        há pelo menos uma DiaryEntry de EPISODE daquele seriesTmdbId e nenhuma DiaryEntry de
-        SERIES correspondente nem DroppedEntry de SERIES. A resposta é uma página detalhada:
-        content contém somente a página solicitada, enquanto aggregate e totalElements representam
-        todas as séries elegíveis, inclusive as que ficaram fora da página e as que têm
+        há pelo menos uma DiaryEntry de EPISODE regular (seasonNumber > 0) daquele seriesTmdbId.
+        A série continua incluída quando possui uma conclusão SERIES atual ou um DroppedEntry de
+        SERIES; o endpoint representa séries que o usuário iniciou, não apenas as incompletas.
+        A resposta é uma página detalhada: content contém somente a página solicitada, enquanto
+        aggregate e totalElements representam todas as séries iniciadas, inclusive as que ficaram
+        fora da página e as que têm
         watchedPercentage=100. Séries cujo progresso global é 100% ficam ao final, depois das demais,
         em todos os critérios sortBy; o mesmo critério sortBy e direction ordena cada grupo antes da
         paginação. Dentro de cada série, seasonProgress omite temporadas com
@@ -7200,6 +7238,7 @@ components:
       description: >
         Watchlist screen row with the visual card and owner-context release/status data. `id` is the WatchlistEntry ID;
         `card.contentId` is the local Content ID and is present because this row references a persisted Content.
+        `card.viewerState` belongs to the authenticated viewer, while custom poster metadata belongs to the watchlist owner.
         ContentCard.numberOfEpisodes and tmdbVoteAverage come from TMDB and may be null; stats.averageScore is the
         existing public community aggregate and is null without public scores. TMDB metadata is not stored on Content.
       properties:
@@ -8035,6 +8074,10 @@ components:
       properties:
         watchStatus: { type: string, enum: [UNWATCHED, PARTIALLY_WATCHED, WATCHED, UNKNOWN], nullable: true }
         myRating: { type: integer, nullable: true }
+        myReview:
+          type: string
+          nullable: true
+          description: Latest review text belonging to the authenticated viewer; DiaryEntry for MOVIE/EPISODE and ContentReview for SERIES/SEASON.
         lastWatchedDate: { type: string, format: date, nullable: true }
         lastWatchNumber: { type: integer, nullable: true }
         watchedInTheater: { type: boolean, nullable: true }
@@ -9493,7 +9536,9 @@ components:
     SeriesInProgress:
       type: object
       description: >
-        Progresso de uma série que o usuário começou. Uma série ainda pode ter watchedPercentage
+        Progresso do viewer para uma série no contexto consultado. O endpoint do usuário lista séries
+        iniciadas; o progresso da lista também pode incluir séries ainda não assistidas com 0%.
+        Uma série ainda pode ter watchedPercentage
         igual a 100; nesse caso, seasonProgress omite as temporadas com watchedPercentage igual a 100,
         que são retornadas em completedSeasonProgress. Temporadas com porcentagem null permanecem em
         seasonProgress quando o total lançado é desconhecido. completedSeasonProgress é incluído em
@@ -9574,7 +9619,7 @@ components:
 
     SeriesInProgressAggregate:
       type: object
-      description: Agregado de todas as séries elegíveis, inclusive séries cujo watchedPercentage é 100; a filtragem de 100% vale somente para seasonProgress.
+      description: Agregado de todas as séries consideradas no contexto consultado, inclusive as que têm watchedPercentage=100; a filtragem de 100% vale somente para seasonProgress.
       properties:
         totalSeriesCount: { type: integer, format: int64 }
         watchedEpisodeCount: { type: integer, format: int64 }
@@ -11825,7 +11870,7 @@ components:
 
     ImportJobDTO:
       type: object
-      required: [id, inputKind, sourceFormat, state, version, previewVersion, previewDigest, createdAt, updatedAt]
+      required: [id, inputKind, sourceFormat, state, version, previewVersion, previewDigest, createdAt, updatedAt, resolutionProgressAvailable]
       properties:
         id: { type: string, format: uuid }
         inputKind: { $ref: "#/components/schemas/ImportInputKind" }
@@ -11847,6 +11892,83 @@ components:
         inventory:
           allOf: [{ $ref: "#/components/schemas/ImportInventory" }]
           nullable: true
+        resolutionProgressAvailable:
+          type: boolean
+          description: False para jobs em execução que foram criados antes do resumo/fila incremental; mantenha o fluxo paginado de prévia.
+        progress:
+          allOf: [{ $ref: "#/components/schemas/ImportProgressDTO" }]
+          nullable: true
+        resolutionProgress:
+          allOf: [{ $ref: "#/components/schemas/ImportResolutionProgressDTO" }]
+          nullable: true
+
+    ImportProgressDTO:
+      type: object
+      required: [totalItems, processedItems, appliedItems, skippedItems]
+      description: >
+        Contagens da aplicação do plano atual. null indica que o worker ainda não iniciou a fase APPLY.
+        processedItems é a soma de appliedItems e skippedItems. O resumo é preservado em pausas,
+        falhas e cancelamentos e reinicializado quando uma alteração invalida o plano.
+      properties:
+        totalItems: { type: integer, format: int64, minimum: 0 }
+        processedItems: { type: integer, format: int64, minimum: 0 }
+        appliedItems: { type: integer, format: int64, minimum: 0 }
+        skippedItems: { type: integer, format: int64, minimum: 0 }
+
+    ImportResolutionProgressDTO:
+      type: object
+      required: [phase, examinedItems, totalItems, reviewRequiredCount, reviewGeneration, reviewRevision]
+      description: >
+        Progresso de identificação e preparação. MATCHING pode ser percentualizado quando totalItems > 0;
+        VALIDATING e RETRYING são fases indeterminadas. reviewRequiredCount mede pendências ativas.
+        Null indica geração ainda não inicializada ou job legado.
+      properties:
+        phase: { type: string, enum: [MATCHING, VALIDATING, RETRYING, WAITING_FOR_REVIEW, DONE] }
+        examinedItems: { type: integer, format: int64, minimum: 0 }
+        totalItems: { type: integer, format: int64, minimum: 0 }
+        reviewRequiredCount: { type: integer, format: int64, minimum: 0 }
+        reviewGeneration: { type: integer, format: int64, minimum: 0 }
+        reviewRevision: { type: integer, format: int64, minimum: 0 }
+
+    ImportReviewPageDTO:
+      type: object
+      required: [importId, state, previewVersion, reviewGeneration, reviewRevision, changes, nextCursor, hasMore]
+      properties:
+        importId: { type: string, format: uuid }
+        state: { $ref: "#/components/schemas/ImportJobState" }
+        previewVersion: { type: integer, format: int64, minimum: 0 }
+        reviewGeneration: { type: integer, format: int64, minimum: 0 }
+        reviewRevision: { type: integer, format: int64, minimum: 0 }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/ImportReviewChangeDTO" }
+        nextCursor: { type: string, description: Cursor opaco para buscar a próxima página. }
+        hasMore: { type: boolean }
+
+    ImportReviewChangeDTO:
+      type: object
+      required: [itemId, type, revision, allowedOperations, editableFields]
+      properties:
+        itemId: { type: string, format: uuid }
+        type: { type: string, enum: [UPSERT, REMOVE] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        displayTitle: { type: string, nullable: true }
+        item:
+          allOf: [{ $ref: "#/components/schemas/ImportPreviewItemDTO" }]
+          nullable: true
+        allowedOperations:
+          type: array
+          items: { $ref: "#/components/schemas/ImportDecision" }
+        editableFields:
+          type: array
+          items: { $ref: "#/components/schemas/ImportEditableFieldDTO" }
+
+    ImportEditableFieldDTO:
+      type: object
+      required: [field]
+      properties:
+        field: { $ref: "#/components/schemas/ImportEditableField" }
+        maxLength: { type: integer, minimum: 1, nullable: true }
 
     ImportInventory:
       type: object
@@ -11905,6 +12027,11 @@ components:
           minItems: 1
           maxItems: 200
           items: { $ref: "#/components/schemas/ImportResolutionOperation" }
+        expectedReviewRevisions:
+          type: object
+          description: Revisões dos cartões que originaram as ações; omita para operações da prévia comum.
+          maxProperties: 200
+          additionalProperties: { type: integer, format: int64, minimum: 1 }
 
     ImportCommitRequest:
       type: object

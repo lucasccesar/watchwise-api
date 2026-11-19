@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.platformimport.mapper;
 
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
 import com.watchwise.watchwise_api.platformimport.dto.ImportProgressDTO;
+import com.watchwise.watchwise_api.platformimport.dto.ImportResolutionProgressDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -21,7 +22,9 @@ public interface ImportJobMapper {
     @Mapping(source = "job.updatedAt", target = "updatedAt")
     @Mapping(source = "job.expiresAt", target = "expiresAt")
     @Mapping(target = "inventory", ignore = true)
+    @Mapping(target = "resolutionProgressAvailable", expression = "java(!job.isResolutionProgressLegacy())")
     @Mapping(target = "progress", expression = "java(toProgress(job))")
+    @Mapping(target = "resolutionProgress", expression = "java(toResolutionProgress(job))")
     ImportJobDTO toDto(ImportJob job, String digest);
 
     default ImportProgressDTO toProgress(ImportJob job) {
@@ -29,5 +32,12 @@ public interface ImportJobMapper {
         long applied = job.getProgressAppliedItems();
         long skipped = job.getProgressSkippedItems();
         return new ImportProgressDTO(job.getProgressTotalItems(), applied + skipped, applied, skipped);
+    }
+
+    default ImportResolutionProgressDTO toResolutionProgress(ImportJob job) {
+        if (job.getResolutionProgressPhase() == null) return null;
+        return new ImportResolutionProgressDTO(job.getResolutionProgressPhase(),
+                job.getResolutionProgressExamined(), job.getResolutionProgressTotal(),
+                job.getReviewRequiredCount(), job.getResolutionProgressGeneration(), job.getReviewRevision());
     }
 }

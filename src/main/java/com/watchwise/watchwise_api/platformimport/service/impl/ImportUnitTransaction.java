@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
 import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
+import com.watchwise.watchwise_api.platformimport.model.ResolutionProgressPhase;
 import com.watchwise.watchwise_api.platformimport.model.SourceApplicationDecision;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
@@ -34,6 +35,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -51,6 +53,7 @@ public class ImportUnitTransaction {
     private final List<ImportUnitTerminalListener> terminalListeners;
     private final DeferredOpinionReplayStager deferredOpinionReplayStager;
     private final WatchedSummaryImportApplier watchedSummaryImportApplier;
+    private final ImportReviewQueue reviewQueue;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -61,7 +64,7 @@ public class ImportUnitTransaction {
                                  List<ImportUnitTerminalListener> terminalListeners,
                                  DeferredOpinionReplayStager deferredOpinionReplayStager,
                                  WatchedSummaryImportApplier watchedSummaryImportApplier,
-                                 ObjectMapper objectMapper, Clock clock) {
+                                 ImportReviewQueue reviewQueue, ObjectMapper objectMapper, Clock clock) {
         this.jobRepository = jobRepository;
         this.itemRepository = itemRepository;
         this.userRepository = userRepository;
@@ -71,6 +74,7 @@ public class ImportUnitTransaction {
         this.terminalListeners = List.copyOf(terminalListeners);
         this.deferredOpinionReplayStager = deferredOpinionReplayStager;
         this.watchedSummaryImportApplier = watchedSummaryImportApplier;
+        this.reviewQueue = reviewQueue;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -86,6 +90,43 @@ public class ImportUnitTransaction {
         job.replaceApplyProgress(counts.getTotalItems(), counts.getAppliedItems(), counts.getSkippedItems());
         renew(job);
         return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean initializeResolutionProgress(ImportExecutionContext context) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        if (job.isResolutionProgressLegacy()) return true;
+        if (java.util.Objects.equals(job.getResolutionProgressGeneration(), context.planGeneration())
+                && job.getResolutionProgressTotal() != null) return true;
+
+        ImportItemRepository.ResolutionProgressCounts counts = itemRepository.countResolutionProgress(
+                context.jobId(), context.planGeneration());
+        job.initializeResolutionProgress(context.planGeneration(), counts.getLastOrdinal(),
+                counts.getTotalItems(), counts.getExaminedItems());
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean setResolutionProgressPhase(ImportExecutionContext context, ResolutionProgressPhase phase) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        if (job.isResolutionProgressLegacy() && job.getResolutionProgressGeneration() == null) return true;
+        job.setResolutionProgressPhase(phase);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Boolean> reviewQueueHasPendingItems(ImportExecutionContext context) {
+        ImportJob job = jobRepository.findById(context.jobId()).orElse(null);
+        if (job == null || !job.getUserId().equals(context.ownerId())
+                || readPlanGeneration(job.getSelectionJson()) != context.planGeneration()) {
+            return Optional.of(true);
+        }
+        if (job.isResolutionProgressLegacy()) return Optional.empty();
+        return Optional.of(job.getReviewRequiredCount() > 0);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -207,6 +248,7 @@ public class ImportUnitTransaction {
         ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
         if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
         List<ImportItem> items = records.stream().map(record -> normalizedItem(context, record, parserVersion)).toList();
+        reviewQueue.synchronize(job, items, true);
         itemRepository.saveAll(items);
         job.setCheckpoint("NORMALIZE:" + records.getLast().ordinal());
         renew(job);
@@ -236,7 +278,10 @@ public class ImportUnitTransaction {
             additions.add(deferredOpinionReplayStager.toImportItem(
                     context.jobId(), context.planGeneration(), record, ordinal++));
         }
-        if (!additions.isEmpty()) itemRepository.saveAll(additions);
+        if (!additions.isEmpty()) {
+            reviewQueue.synchronize(job, additions, true);
+            itemRepository.saveAll(additions);
+        }
         renew(job);
         return additions.size();
     }
@@ -283,14 +328,21 @@ public class ImportUnitTransaction {
         if (changedItems.size() != updates.size()) {
             throw new IllegalArgumentException("Resolution update item is outside its job generation");
         }
+        long examinedDelta = 0;
         for (ImportItem item : changedItems) {
             ResolutionUpdate update = updatesById.get(item.getId());
+            if (job.getResolutionProgressGeneration() != null
+                    && item.getOrdinal() <= job.getResolutionProgressLastOrdinal()) {
+                examinedDelta += resolutionExamined(update.outcome()) - resolutionExamined(item.getOutcome());
+            }
             item.setOutcome(update.outcome());
             item.setResolvedTargetJson(update.resolvedTargetJson());
             item.setNormalizedContentKey(update.normalizedContentKey());
             item.setResolvedContentKey(update.resolvedContentKey());
             item.setIssue(update.issue());
         }
+        if (examinedDelta != 0) job.adjustResolutionExamined(examinedDelta);
+        reviewQueue.synchronize(job, changedItems, true);
         itemRepository.saveAll(changedItems);
         renew(job);
         return true;
@@ -321,6 +373,7 @@ public class ImportUnitTransaction {
             item.setOutcome(preparation.outcome());
             item.setIssue(preparation.issue());
         }
+        reviewQueue.synchronize(job, items, true);
         itemRepository.saveAll(items);
         renew(job);
         return true;
@@ -361,6 +414,7 @@ public class ImportUnitTransaction {
             item.setOutcome(update.outcome());
             item.setIssue(update.issue());
         }
+        reviewQueue.synchronize(job, changedItems, true);
         itemRepository.saveAll(changedItems);
         renew(job);
         return true;
@@ -371,15 +425,24 @@ public class ImportUnitTransaction {
         ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
         if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
         if (state == ResolutionState.RETRY) {
+            if (job.getResolutionProgressPhase() != null) {
+                job.setResolutionProgressPhase(ResolutionProgressPhase.RETRYING);
+            }
             job.setWorkPending(true);
             job.setNextRunAt(now().plus(state.backoff()));
         } else if (state == ResolutionState.CONTINUE) {
             job.setWorkPending(true);
             job.setNextRunAt(now());
         } else if (state == ResolutionState.WAITING_FOR_USER) {
+            if (job.getResolutionProgressPhase() != null) {
+                job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+            }
             job.setWorkPending(false);
             job.setNextRunAt(null);
         } else {
+            if (job.getResolutionProgressPhase() != null) {
+                job.setResolutionProgressPhase(ResolutionProgressPhase.DONE);
+            }
             job.setState(ImportJobState.READY);
             job.setWorkPhase("APPLY");
             job.setWorkPending(false);
@@ -410,7 +473,65 @@ public class ImportUnitTransaction {
             item.setOutcome(update.outcome());
             item.setIssue(update.issue());
         }
+        reviewQueue.synchronize(job, changed, true);
         itemRepository.saveAll(changed);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveCollectionLengthIssues(ImportExecutionContext context,
+                                              List<CollectionLengthIssueUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return true;
+        if (updates.size() > NORMALIZE_BATCH_SIZE
+                || updates.stream().map(CollectionLengthIssueUpdate::itemId).distinct().count() != updates.size()) {
+            throw new IllegalArgumentException("Collection validation updates require at most 200 unique items");
+        }
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        java.util.Map<UUID, CollectionLengthIssueUpdate> byId = updates.stream()
+                .collect(java.util.stream.Collectors.toMap(CollectionLengthIssueUpdate::itemId, update -> update));
+        List<ImportItem> items = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), byId.keySet());
+        if (items.size() != updates.size()) {
+            throw new IllegalArgumentException("Collection validation item is outside the active plan");
+        }
+        for (ImportItem item : items) {
+            CollectionLengthIssueUpdate update = byId.get(item.getId());
+            item.setOutcome(update.outcome());
+            item.setIssue(update.issue());
+        }
+        reviewQueue.synchronize(job, items, true);
+        itemRepository.saveAll(items);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveStandaloneListIdentityResolutions(ImportExecutionContext context,
+                                                         List<StandaloneListIdentityUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return true;
+        if (updates.size() > NORMALIZE_BATCH_SIZE
+                || updates.stream().map(StandaloneListIdentityUpdate::itemId).distinct().count() != updates.size()) {
+            throw new IllegalArgumentException("List identity updates require at most 200 unique items");
+        }
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        java.util.Map<UUID, StandaloneListIdentityUpdate> byId = updates.stream()
+                .collect(java.util.stream.Collectors.toMap(StandaloneListIdentityUpdate::itemId, update -> update));
+        List<ImportItem> items = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), byId.keySet());
+        if (items.size() != updates.size()) {
+            throw new IllegalArgumentException("List identity update is outside the active plan");
+        }
+        for (ImportItem item : items) {
+            StandaloneListIdentityUpdate update = byId.get(item.getId());
+            item.setPayloadJson(update.payloadJson());
+            item.setOutcome(update.outcome());
+            item.setIssue(update.issue());
+        }
+        reviewQueue.synchronize(job, items, true);
+        itemRepository.saveAll(items);
         renew(job);
         return true;
     }
@@ -459,6 +580,7 @@ public class ImportUnitTransaction {
         template.setPayloadJson(writeJson(payload));
         nominee.setOutcome("NORMALIZATION_ISSUE");
         nominee.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(nominee), true);
         itemRepository.saveAll(List.of(template, nominee));
 
         long nextVersion;
@@ -473,6 +595,9 @@ public class ImportUnitTransaction {
         job.setExpiresAt(now.plusHours(24));
         job.setState(ImportJobState.RESOLVING);
         job.setWorkPhase("RESOLVE");
+        if (job.getResolutionProgressGeneration() != null) {
+            job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        }
         job.setWorkPending(false);
         job.setNextRunAt(null);
         job.setUpdatedAt(now);
@@ -637,26 +762,41 @@ public class ImportUnitTransaction {
         else releaseLease(job);
     }
 
+    private long resolutionExamined(String outcome) {
+        return outcome == null || "UNAVAILABLE".equals(outcome) ? 0 : 1;
+    }
+
     private void pauseForPassAssignment(ImportJob job, ImportItem item, String issue,
                                        SourceApplicationDecision decision) {
         if (decision != SourceApplicationDecision.MATCH_REQUIRED) {
             throw new IllegalArgumentException("Only a match-required decision can pause event application");
         }
+        ensureLateReviewProgress(job, item.getPlanGeneration());
+        item.setDecision(ImportDecision.ASSIGN_PASS);
         item.setOutcome("MATCHED");
         item.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(item), true);
         itemRepository.save(item);
         job.setState(ImportJobState.READY);
         job.setWorkPhase("APPLY");
+        if (job.getResolutionProgressGeneration() != null) {
+            job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        }
         job.setWorkPending(false);
         job.setNextRunAt(null);
         releaseLease(job);
     }
 
     private void pauseForExpansionIssue(ImportJob job, ImportItem item, String issue) {
+        ensureLateReviewProgress(job, item.getPlanGeneration());
         item.setOutcome("NORMALIZATION_ISSUE");
         item.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(item), true);
         itemRepository.save(item);
         job.setState(ImportJobState.READY);
+        if (job.getResolutionProgressGeneration() != null) {
+            job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        }
         job.setWorkPhase("APPLY");
         job.setWorkPending(false);
         job.setNextRunAt(null);
@@ -668,10 +808,15 @@ public class ImportUnitTransaction {
     }
 
     private void pauseForNormalizationIssue(ImportJob job, ImportItem item, String issue) {
+        ensureLateReviewProgress(job, item.getPlanGeneration());
         item.setOutcome("NORMALIZATION_ISSUE");
         item.setIssue(issue);
+        reviewQueue.synchronize(job, List.of(item), true);
         itemRepository.save(item);
         job.setState(ImportJobState.READY);
+        if (job.getResolutionProgressGeneration() != null) {
+            job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
+        }
         job.setWorkPending(false);
         job.setNextRunAt(null);
         releaseLease(job);
@@ -686,6 +831,13 @@ public class ImportUnitTransaction {
         } catch (JacksonException exception) {
             throw new IllegalStateException("Stored import plan is invalid", exception);
         }
+    }
+
+    private void ensureLateReviewProgress(ImportJob job, long generation) {
+        if (job.getResolutionProgressGeneration() == null) {
+            job.initializeResolutionProgress(generation, -1, 0, 0);
+        }
+        job.setResolutionProgressPhase(ResolutionProgressPhase.WAITING_FOR_REVIEW);
     }
 
     private String writeJson(Object value) {
@@ -737,6 +889,10 @@ public class ImportUnitTransaction {
     public record WatchScopePreparation(UUID itemId, String payloadJson, String outcome, String issue) { }
 
     public record TemplateResolutionIssueUpdate(UUID itemId, String outcome, String issue) { }
+
+    public record CollectionLengthIssueUpdate(UUID itemId, String outcome, String issue) { }
+
+    public record StandaloneListIdentityUpdate(UUID itemId, String payloadJson, String outcome, String issue) { }
 
     public static final class WaitForOtherJobException extends RuntimeException { }
 }
