@@ -103,6 +103,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
             ContentCardFieldSet.BASIC_METADATA,
             ContentCardFieldSet.TMDB_VOTE_AVERAGE,
             ContentCardFieldSet.STATS,
+            ContentCardFieldSet.VIEWER_STATE,
             ContentCardFieldSet.SOCIAL_METADATA);
 
     @Override
@@ -187,7 +188,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         WatchlistAggregateDTO aggregate = aggregate(filtered, sortCards);
 
         Page<ViewCandidate> page = page(sorted, pageRequest);
-        Map<ContentCoordinate, ContentCardDTO> pageCards = assemblePageCards(target, userId, page.getContent());
+        Map<ContentCoordinate, ContentCardDTO> pageCards = assemblePageCards(
+                target, userId, viewerId, page.getContent());
         List<WatchlistCardDTO> cards = page.getContent().stream().map(candidate -> {
             Content content = candidate.entry().getContent();
             ContentCardDTO card = pageCards.get(ContentCoordinate.from(content));
@@ -310,7 +312,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         if (fields.isEmpty()) {
             return Map.of();
         }
-        return assembleCards(target, ownerId, candidates, fields);
+        return assembleCards(target, ownerId, null, candidates, fields);
     }
 
     private boolean hasMissingRuntime(List<ViewCandidate> candidates) {
@@ -447,8 +449,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     }
 
     private Map<ContentCoordinate, ContentCardDTO> assemblePageCards(
-            User target, UUID ownerId, List<ViewCandidate> candidates) {
-        return assembleCards(target, ownerId, candidates, VIEW_CARD_FIELDS);
+            User target, UUID ownerId, UUID viewerId, List<ViewCandidate> candidates) {
+        return assembleCards(target, ownerId, viewerId, candidates, VIEW_CARD_FIELDS);
     }
 
     private Map<ContentCoordinate, ContentCardDTO> assembleResponseCards(
@@ -471,6 +473,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private Map<ContentCoordinate, ContentCardDTO> assembleCards(
             User target,
             UUID ownerId,
+            UUID viewerId,
             Collection<ViewCandidate> candidates,
             Set<ContentCardFieldSet> fields) {
         if (candidates.isEmpty()) {
@@ -487,7 +490,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 .toList();
         Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
                 specs,
-                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), ownerId, null),
+                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), ownerId, viewerId),
                 fields);
         return cards == null ? Map.of() : cards;
     }

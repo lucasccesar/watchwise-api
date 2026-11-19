@@ -481,6 +481,7 @@ public class ContentCardAssembler {
         return new ContentCardViewerStateDTO(
                 includeViewerState || includeWatchlistProgress ? state.watchStatus() : null,
                 includeViewerState ? state.myRating() : null,
+                includeViewerState ? state.myReview() : null,
                 includeViewerState ? state.lastWatchedDate() : null,
                 includeViewerState ? state.lastWatchNumber() : null,
                 includeViewerState ? state.watchedInTheater() : null,

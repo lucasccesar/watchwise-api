@@ -7,6 +7,7 @@ import java.util.UUID;
 public record ContentCardViewerStateDTO(
         WatchStatus watchStatus,
         Integer myRating,
+        String myReview,
         LocalDate lastWatchedDate,
         Integer lastWatchNumber,
         Boolean watchedInTheater,
@@ -26,8 +27,18 @@ public record ContentCardViewerStateDTO(
     public ContentCardViewerStateDTO(WatchStatus watchStatus, Integer myRating,
             LocalDate lastWatchedDate, Integer lastWatchNumber, Boolean watchedInTheater,
             Integer playsCount, Boolean inWatchlist, Boolean dropped,
+            Integer watchedEpisodeCount, Integer releasedEpisodeCount,
+            Long currentRatingVersion, Integer reviewsCount, List<UUID> reviewIds) {
+        this(watchStatus, myRating, null, lastWatchedDate, lastWatchNumber, watchedInTheater,
+                playsCount, inWatchlist, dropped, watchedEpisodeCount, releasedEpisodeCount,
+                currentRatingVersion, reviewsCount, reviewIds);
+    }
+
+    public ContentCardViewerStateDTO(WatchStatus watchStatus, Integer myRating,
+            LocalDate lastWatchedDate, Integer lastWatchNumber, Boolean watchedInTheater,
+            Integer playsCount, Boolean inWatchlist, Boolean dropped,
             Integer watchedEpisodeCount, Integer releasedEpisodeCount) {
-        this(watchStatus, myRating, lastWatchedDate, lastWatchNumber, watchedInTheater,
+        this(watchStatus, myRating, null, lastWatchedDate, lastWatchNumber, watchedInTheater,
                 playsCount, inWatchlist, dropped, watchedEpisodeCount, releasedEpisodeCount,
                 null, 0, List.of());
     }

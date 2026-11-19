@@ -100,7 +100,7 @@ public class PersonCreditViewAssembler {
                 ? new ContentCardStatsDTO(null, 0L, 0L, 0L)
                 : new ContentCardStatsDTO(stats.averageScore(), stats.playsCount(), stats.reviewsCount(), stats.commentsCount());
         ContentCardViewerStateDTO viewerState = new ContentCardViewerStateDTO(state.watchStatus(), state.myRating(),
-                state.lastWatchedDate(), state.lastWatchNumber(), state.watchedInTheater(), state.playsCount(),
+                state.myReview(), state.lastWatchedDate(), state.lastWatchNumber(), state.watchedInTheater(), state.playsCount(),
                 state.inWatchlist(), state.dropped(), state.watchedEpisodeCount(), state.releasedEpisodeCount(),
                 state.currentRatingVersion(), state.reviewsCount(), state.reviewIds());
         String posterUrl = TmdbImagePathBuilder.posterPath(credit.posterPath());
