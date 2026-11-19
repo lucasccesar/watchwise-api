@@ -149,6 +149,33 @@ class WatchEventImportIntegrationTest {
     }
 
     @Test
+    void shouldCreateAMissingEpisodeReferenceBeforeApplyingAnImportedWatch() throws Exception {
+        User owner = createUser();
+        MediaReference episode = MediaReference.episode("987654", 1, 1);
+        assertThat(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                episode.seriesTmdbId(), episode.seasonNumber(), episode.episodeNumber(), ContentType.EPISODE))
+                .isEmpty();
+        ImportJob job = createJob(owner.getId(), "trakt:episode-reference-test", ImportSourceFormat.TRAKT_ZIP);
+        var payload = objectMapper.createObjectNode().put("watchedDate", "2025-02-03");
+        ImportItem item = itemRepository.saveAndFlush(ImportItem.builder()
+                .jobId(job.getId()).planGeneration(1).normalizedKind(ImportRecordKind.DIARY_EVENT)
+                .sourceNamespace(job.getSourceNamespace()).objectKind("diary_event")
+                .sourceId("missing-episode-reference").sourceEventKey("missing-episode-reference")
+                .parserVersion("trakt-history-v1")
+                .resolvedContentKey("CONTENT|EPISODE|987654|1|1")
+                .resolvedTargetJson(writeJson(new ImportTarget.ContentTarget(episode)))
+                .payloadJson(writeJson(payload)).outcome("MATCHED").ordinal(0).build());
+
+        assertThatCode(() -> apply(job, item)).doesNotThrowAnyException();
+
+        Content createdEpisode = contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                episode.seriesTmdbId(), episode.seasonNumber(), episode.episodeNumber(), ContentType.EPISODE)
+                .orElseThrow();
+        assertThat(watches(owner.getId(), createdEpisode.getId())).hasSize(1);
+        completeJob(job.getId());
+    }
+
+    @Test
     void shouldSetTheaterFlagFromWholeLetterboxdCinemaTagOnlyForMovies() throws Exception {
         User owner = createUser();
         Content movie = createMovie();

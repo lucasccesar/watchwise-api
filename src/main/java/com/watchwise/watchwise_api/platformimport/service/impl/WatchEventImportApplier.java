@@ -1,9 +1,11 @@
 package com.watchwise.watchwise_api.platformimport.service.impl;
 
 import com.watchwise.watchwise_api.content.dto.MediaReference;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.diaryentry.dto.WatchEventCommand;
 import com.watchwise.watchwise_api.diaryentry.dto.WatchMutationResult;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryWatchCommandService;
@@ -36,6 +38,7 @@ public class WatchEventImportApplier implements ImportUnitApplier {
 
     private final ImportItemRepository itemRepository;
     private final ContentRepository contentRepository;
+    private final ContentService contentService;
     private final DiaryWatchCommandService diaryWatchCommandService;
     private final ImportLedger ledger;
     private final ImportPassPlanner passPlanner;
@@ -43,12 +46,14 @@ public class WatchEventImportApplier implements ImportUnitApplier {
     private final ObjectMapper objectMapper;
 
     public WatchEventImportApplier(ImportItemRepository itemRepository, ContentRepository contentRepository,
+                                   ContentService contentService,
                                    DiaryWatchCommandService diaryWatchCommandService, ImportLedger ledger,
                                    ImportPassPlanner passPlanner,
                                    TheaterTagMatcher theaterTagMatcher,
                                    ObjectMapper objectMapper) {
         this.itemRepository = itemRepository;
         this.contentRepository = contentRepository;
+        this.contentService = contentService;
         this.diaryWatchCommandService = diaryWatchCommandService;
         this.ledger = ledger;
         this.passPlanner = passPlanner;
@@ -72,6 +77,7 @@ public class WatchEventImportApplier implements ImportUnitApplier {
         }
 
         ParsedEvent event = parse(item);
+        ensureContentReference(event.media());
         Content content = findPreparedContent(event.media());
         ImportPassPlanner.Plan passPlan = passPlanner.plan(context.ownerId(), List.of(
                 new ImportPassPlanner.WatchEvent(item.getId(), content.getId(), item.getSourceNamespace(),
@@ -164,6 +170,17 @@ public class WatchEventImportApplier implements ImportUnitApplier {
             throw new IllegalStateException("Resolved content does not match the staged diary event");
         }
         return content;
+    }
+
+    private void ensureContentReference(MediaReference media) {
+        ContentRefCreationDTO reference = switch (media.type()) {
+            case MOVIE -> new ContentRefCreationDTO(media.tmdbId(), ContentType.MOVIE,
+                    null, null, null, null, null);
+            case EPISODE -> new ContentRefCreationDTO(null, ContentType.EPISODE,
+                    media.seriesTmdbId(), media.seasonNumber(), media.episodeNumber(), null, null);
+            default -> throw new IllegalStateException("Diary events support only movies and episodes");
+        };
+        contentService.getOrCreateReferenceFromVerifiedImport(reference);
     }
 
     private ImportSourceKey sourceKey(ImportItem item) {
