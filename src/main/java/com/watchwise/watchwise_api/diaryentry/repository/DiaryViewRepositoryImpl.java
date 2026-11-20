@@ -109,7 +109,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 .addValue("watchedInTheater", filter.watchedInTheater(), Types.BOOLEAN)
                 .addValue("sortBy", filter.sortBy().name(), Types.VARCHAR);
         if (cursor != null) {
-            parameters.addValue("cursorSortAt", Timestamp.from(cursor.groupSortAt()))
+            parameters.addValue("cursorSortDate", cursor.sortDate(), Types.DATE)
+                    .addValue("cursorSortAt", Timestamp.from(cursor.groupSortAt()))
                     .addValue("cursorSortId", cursor.groupSortId())
                     .addValue("cursorKindRank", cursor.kindRank())
                     .addValue("cursorContentTypeRank", cursor.contentTypeRank())
@@ -127,10 +128,10 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
     private String sourceSql(DiaryViewCursorPosition cursor, DiaryEntrySort sortBy) {
         boolean oldestFirst = sortBy == DiaryEntrySort.OLDEST;
         String entryCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "d.created_at", "d.id", "1", contentTypeRank("c.type"),
+                "COALESCE(d.watched_date, d.created_at::date)", "d.created_at", "d.id", "1", contentTypeRank("c.type"),
                 "COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at)", "d.id", oldestFirst);
         String completionCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "anchor.created_at", "anchor.id", "0", contentTypeRank("p.content_type"),
+                "COALESCE(p.completed_on, anchor.created_at::date)", "anchor.created_at", "anchor.id", "0", contentTypeRank("p.content_type"),
                 "p.ordered_at", "p.id", oldestFirst);
         return " " + """
                 SELECT 'PERSISTED_ENTRY' AS kind,
@@ -211,18 +212,13 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 + "WHEN 'EPISODE' THEN 2 ELSE 3 END";
     }
 
-    private String afterCursor(String sortAt, String sortId, String kindRank,
+    private String afterCursor(String sortDate, String sortAt, String sortId, String kindRank,
             String contentRank, String orderedAt, String targetId, boolean oldestFirst) {
-        String sortComparison = oldestFirst ? ">" : "<";
-        String rankComparison = oldestFirst ? "<" : ">";
-        String orderedComparison = oldestFirst ? ">" : "<";
-        return "(" + sortAt + " " + sortComparison + " :cursorSortAt OR (" + sortAt + " = :cursorSortAt AND ("+
-                sortId + " " + sortComparison + " :cursorSortId OR (" + sortId + " = :cursorSortId AND ("+
-                kindRank + " " + rankComparison + " :cursorKindRank OR (" + kindRank + " = :cursorKindRank AND (" +
-                contentRank + " " + rankComparison + " :cursorContentTypeRank OR (" + contentRank +
-                " = :cursorContentTypeRank AND (" + orderedAt + " " + orderedComparison + " :cursorOrderedAt OR (" +
-                orderedAt + " = :cursorOrderedAt AND " + targetId + " " + orderedComparison +
-                " :cursorTargetId))))))))))";
+        String comparison = oldestFirst ? ">" : "<";
+        return "((" + sortDate + ", " + sortAt + ", " + sortId + ", (0 - (" + kindRank + ")), " +
+                "(0 - (" + contentRank + ")), " + orderedAt + ", " + targetId + ") " + comparison + " " +
+                "(:cursorSortDate, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
+                "(0 - (:cursorContentTypeRank)), :cursorOrderedAt, :cursorTargetId))";
     }
 
     private GroupedDiaryViewKey mapGroupedRow(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -233,6 +229,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 .mapToObj(index -> new SeasonEpisodeCount(seasonNumbers.get(index), seasonEpisodeCounts.get(index)))
                 .toList();
         DiaryViewCursorPosition nextPosition = new DiaryViewCursorPosition(
+                resultSet.getObject("cursor_sort_date", LocalDate.class),
                 instant(resultSet, "cursor_sort_at"), uuid(resultSet, "cursor_sort_id"),
                 resultSet.getInt("cursor_kind_rank"), resultSet.getInt("cursor_content_type_rank"),
                 instant(resultSet, "cursor_ordered_at"), uuid(resultSet, "cursor_target_id"),

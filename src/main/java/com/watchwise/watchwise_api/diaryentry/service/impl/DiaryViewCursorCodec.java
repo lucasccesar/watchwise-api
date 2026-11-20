@@ -8,13 +8,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
 
 final class DiaryViewCursorCodec {
 
-    private static final String VERSION = "v2";
+    private static final String VERSION = "v3";
 
     private DiaryViewCursorCodec() { }
 
@@ -25,19 +26,19 @@ final class DiaryViewCursorCodec {
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
             String[] values = decoded.split("\\|", -1);
-            if (values.length != 10 || !VERSION.equals(values[0])
+            if (values.length != 11 || !VERSION.equals(values[0])
                     || !ownerId.toString().equals(values[1])
                     || !filterFingerprint(ownerId, filter).equals(values[2])) {
                 throw new BadRequestException("Diary view cursor does not match this request");
             }
-            int kindRank = Integer.parseInt(values[5]);
-            int contentTypeRank = Integer.parseInt(values[6]);
+            int kindRank = Integer.parseInt(values[6]);
+            int contentTypeRank = Integer.parseInt(values[7]);
             if ((kindRank != 0 && kindRank != 1) || contentTypeRank < 0 || contentTypeRank > 3) {
                 throw new BadRequestException("Invalid diary view cursor");
             }
-            return new DiaryViewCursorPosition(Instant.parse(values[3]), UUID.fromString(values[4]),
-                    kindRank, contentTypeRank, Instant.parse(values[7]), UUID.fromString(values[8]),
-                    values[9].isEmpty() ? null : Integer.valueOf(values[9]));
+            return new DiaryViewCursorPosition(LocalDate.parse(values[3]), Instant.parse(values[4]),
+                    UUID.fromString(values[5]), kindRank, contentTypeRank, Instant.parse(values[8]),
+                    UUID.fromString(values[9]), values[10].isEmpty() ? null : Integer.valueOf(values[10]));
         } catch (BadRequestException exception) {
             throw exception;
         } catch (IllegalArgumentException | java.time.DateTimeException exception) {
@@ -47,7 +48,7 @@ final class DiaryViewCursorCodec {
 
     static String encode(UUID ownerId, DiaryViewFilter filter, DiaryViewCursorPosition position) {
         String value = String.join("|", VERSION, ownerId.toString(), filterFingerprint(ownerId, filter),
-                position.groupSortAt().toString(), position.groupSortId().toString(),
+                position.sortDate().toString(), position.groupSortAt().toString(), position.groupSortId().toString(),
                 Integer.toString(position.kindRank()), Integer.toString(position.contentTypeRank()),
                 position.orderedAt().toString(), position.targetId().toString(),
                 position.sortScore() == null ? "" : position.sortScore().toString());

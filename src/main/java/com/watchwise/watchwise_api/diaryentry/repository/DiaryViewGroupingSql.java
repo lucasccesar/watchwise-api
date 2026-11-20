@@ -98,6 +98,8 @@ final class DiaryViewGroupingSql {
                            m.total_runtime,
                            candidate.candidate_order,
                            candidate.represented_item_count,
+                           CASE WHEN :sortBy IN ('OLDEST', 'RATING_DESC', 'RATING_ASC') THEN n.group_date
+                               ELSE last_n.group_date END AS cursor_sort_date,
                            CASE WHEN :sortBy IN ('OLDEST', 'RATING_DESC', 'RATING_ASC') THEN n.group_sort_at
                                ELSE last_n.group_sort_at END AS cursor_sort_at,
                            CASE WHEN :sortBy IN ('OLDEST', 'RATING_DESC', 'RATING_ASC') THEN n.group_sort_id
@@ -195,19 +197,17 @@ final class DiaryViewGroupingSql {
     }
 
     private static String afterNewest(String alias) {
-        return "(" + alias + ".group_sort_at < :cursorSortAt OR (" + alias + ".group_sort_at = :cursorSortAt AND (" +
-                alias + ".group_sort_id < :cursorSortId OR (" + alias + ".group_sort_id = :cursorSortId AND (" +
-                "CASE WHEN " + alias + ".kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END > :cursorKindRank OR (" +
-                "CASE WHEN " + alias + ".kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END = :cursorKindRank AND (" +
-                "CASE " + alias + ".content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 " +
-                "WHEN 'EPISODE' THEN 2 ELSE 3 END > :cursorContentTypeRank OR (CASE " + alias +
-                ".content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END " +
-                "= :cursorContentTypeRank AND (" + alias + ".ordered_at < :cursorOrderedAt OR (" +
-                alias + ".ordered_at = :cursorOrderedAt AND " + alias + ".target_id < :cursorTargetId)))))))))";
+        return "((" + alias + ".group_date, " + alias + ".group_sort_at, " + alias + ".group_sort_id, " +
+                "(0 - (CASE WHEN " + alias + ".kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END)), " +
+                "(0 - (CASE " + alias + ".content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 " +
+                "WHEN 'EPISODE' THEN 2 ELSE 3 END)), " + alias + ".ordered_at, " + alias + ".target_id) < " +
+                "(:cursorSortDate, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
+                "(0 - (:cursorContentTypeRank)), :cursorOrderedAt, :cursorTargetId))";
     }
 
     static String order() {
-        return "group_sort_at DESC NULLS LAST, group_sort_id DESC NULLS LAST, " +
+        return "COALESCE(watched_date, group_sort_at::date) DESC NULLS LAST, " +
+                "group_sort_at DESC NULLS LAST, group_sort_id DESC NULLS LAST, " +
                 "CASE WHEN kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END, " +
                 "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END, " +
                 "ordered_at DESC, target_id DESC";

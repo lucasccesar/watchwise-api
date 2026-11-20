@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -43,8 +44,15 @@ public interface DiaryViewRepository {
 
     record SeasonEpisodeCount(int seasonNumber, int episodeCount) { }
 
-    record DiaryViewCursorPosition(Instant groupSortAt, UUID groupSortId, int kindRank, int contentTypeRank,
-            Instant orderedAt, UUID targetId, Integer sortScore) { }
+    record DiaryViewCursorPosition(LocalDate sortDate, Instant groupSortAt, UUID groupSortId, int kindRank,
+            int contentTypeRank, Instant orderedAt, UUID targetId, Integer sortScore) {
+
+        public DiaryViewCursorPosition(Instant groupSortAt, UUID groupSortId, int kindRank, int contentTypeRank,
+                Instant orderedAt, UUID targetId, Integer sortScore) {
+            this(groupSortAt.atZone(ZoneOffset.UTC).toLocalDate(), groupSortAt, groupSortId,
+                    kindRank, contentTypeRank, orderedAt, targetId, sortScore);
+        }
+    }
 
     record DiaryViewKey(
             String kind,
