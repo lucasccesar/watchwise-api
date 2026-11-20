@@ -5,12 +5,17 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface ExternalImportLinkRepository extends JpaRepository<ExternalImportLink, UUID> {
     Optional<ExternalImportLink> findByUserIdAndSourceNamespaceAndObjectKindAndSourceId(
             UUID userId, String sourceNamespace, String objectKind, String sourceId);
+
+    List<ExternalImportLink> findAllByUserIdAndSourceNamespaceAndObjectKindAndSourceIdIn(
+            UUID userId, String sourceNamespace, String objectKind, Collection<String> sourceIds);
 
     @Query(value = """
             SELECT target_id FROM external_import_links

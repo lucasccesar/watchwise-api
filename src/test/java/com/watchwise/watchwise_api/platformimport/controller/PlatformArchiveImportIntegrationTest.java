@@ -41,7 +41,11 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListService;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -114,6 +118,8 @@ class PlatformArchiveImportIntegrationTest {
     @Autowired private DiaryEntryRepository diaryEntries;
     @Autowired private ContentRepository contents;
     @Autowired private UserListRepository lists;
+    @Autowired private UserListItemService listItems;
+    @Autowired private UserListService listService;
     @Autowired private WatchlistEntryRepository watchlist;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper objectMapper;
@@ -182,6 +188,120 @@ class PlatformArchiveImportIntegrationTest {
                 Long.class, created.getFirst().getId())).isEqualTo(1L);
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ? and target_type = 'USER_LIST'",
                 Long.class, owner.getId())).isEqualTo(1L);
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    void reviewsSeasonMembersThatConflictWithAListOfSeriesBeforeApplying() throws Exception {
+        User owner = createUser();
+        String seriesId = "66120";
+        seedSeries(seriesId);
+        seedSeason(seriesId, 1);
+        StringBuilder members = new StringBuilder("[");
+        for (int index = 0; index < 201; index++) {
+            if (index > 0) members.append(',');
+            members.append("{\"id\":").append(42001 + index)
+                    .append(",\"rank\":").append(index + 1)
+                    .append(",\"type\":\"show\",\"show\":{\"title\":\"Example series\",\"year\":2020,\"ids\":{\"tmdb\":")
+                    .append(seriesId).append("}}}");
+        }
+        members.append(",{\"id\":42202,\"rank\":202,\"type\":\"season\",\"season\":{\"number\":1,\"ids\":{\"trakt\":4202}},\"show\":{\"title\":\"Example series\",\"year\":2020,\"ids\":{\"tmdb\":")
+                .append(seriesId).append("}}}]");
+        byte[] archive = zip(Map.of(
+                "export/lists-lists.json",
+                "[{\"name\":\"Series list\",\"item_count\":202,\"ids\":{\"trakt\":42}}]",
+                "export/lists-list-42-series-list.json", members.toString()));
+        ImportJobDTO job = createAndInspect(owner, archive, ImportSourceFormat.TRAKT_ZIP,
+                ImportPlatform.TRAKT, null);
+        job = jobService.select(owner.getId(), job.id(), new ImportSelectionDTO(job.previewVersion(),
+                false, false, List.of("42"), objectMapper.createObjectNode().put("sourceAccount", "account-lucas")));
+        driveUntilWaitingForResolution(job.id());
+
+        ImportItem seasonItem = items.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                job.id(), 1, ImportRecordKind.LIST_ITEM, "42202").orElseThrow();
+        assertThat(seasonItem.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(seasonItem.getIssue()).startsWith("LIST_ITEM_CONTENT_GROUP_CONFLICT");
+        var reviewPage = previewService.reviewItems(owner.getId(), job.id(), null, 100);
+        assertThat(reviewPage.changes()).singleElement().satisfies(change -> {
+            assertThat(change.itemId()).isEqualTo(seasonItem.getId());
+            assertThat(change.allowedOperations()).containsExactly(
+                    com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM);
+        });
+
+        job = jobService.get(owner.getId(), job.id());
+        previewService.resolve(owner.getId(), job.id(),
+                List.of(new ImportResolutionOperation.SkipItem(seasonItem.getId())), job.previewVersion());
+        driveUntil(job.id(), ImportJobState.READY);
+        job = jobService.get(owner.getId(), job.id());
+        jobService.commit(owner.getId(), job.id(), new ImportCommitDTO(job.previewVersion(), job.previewDigest()));
+        driveUntil(job.id(), ImportJobState.COMPLETED);
+
+        assertThat(items.findById(seasonItem.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        List<UserList> created = lists.findByUserId(owner.getId());
+        assertThat(created).singleElement().satisfies(list -> {
+            assertThat(jdbc.queryForObject("select count(*) from user_list_items item "
+                            + "join contents content on content.id = item.content_id "
+                            + "where item.user_list_id = ? and content.type = 'SERIES'", Long.class, list.getId()))
+                    .isEqualTo(1L);
+            assertThat(jdbc.queryForObject("select count(*) from user_list_items item "
+                            + "join contents content on content.id = item.content_id "
+                            + "where item.user_list_id = ? and content.type = 'SEASON'", Long.class, list.getId()))
+                    .isZero();
+        });
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    void rechecksListMemberGroupsAfterLinkingToAnExistingList() throws Exception {
+        User owner = createUser();
+        String seriesId = "66121";
+        seedSeries(seriesId);
+        seedSeason(seriesId, 1);
+        var existing = listService.createUserList(owner.getId(),
+                new UserListCreationDTO("Existing series", null, UserListVisibility.PUBLIC));
+        listItems.addItem(owner.getId(), existing.id(), new UserListItemCreationDTO(
+                new com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO(
+                        seriesId, ContentType.SERIES, null, null, null, null, null), null, null, null));
+        clearInvocations(tmdbClient);
+
+        byte[] archive = zip(Map.of(
+                "export/lists-lists.json",
+                "[{\"name\":\"Imported season\",\"item_count\":1,\"ids\":{\"trakt\":43}}]",
+                "export/lists-list-43-season.json",
+                "[{\"id\":43001,\"rank\":1,\"type\":\"season\",\"season\":{\"number\":1,\"ids\":{\"trakt\":4301}},\"show\":{\"title\":\"Example series\",\"year\":2020,\"ids\":{\"tmdb\":" + seriesId + "}}}]"));
+        ImportJobDTO job = createAndInspect(owner, archive, ImportSourceFormat.TRAKT_ZIP,
+                ImportPlatform.TRAKT, null);
+        job = jobService.select(owner.getId(), job.id(), new ImportSelectionDTO(job.previewVersion(),
+                false, false, List.of("43"), objectMapper.createObjectNode().put("sourceAccount", "account-lucas")));
+        driveUntil(job.id(), ImportJobState.READY);
+
+        ImportItem metadata = items.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                job.id(), 1, ImportRecordKind.LIST_METADATA, "43").orElseThrow();
+        job = jobService.get(owner.getId(), job.id());
+        previewService.resolve(owner.getId(), job.id(), List.of(
+                new ImportResolutionOperation.LinkImportedList(metadata.getId(), existing.id())),
+                job.previewVersion());
+        driveUntilWaitingForResolution(job.id());
+
+        ImportItem seasonItem = items.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                job.id(), 1, ImportRecordKind.LIST_ITEM, "43001").orElseThrow();
+        assertThat(seasonItem.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(seasonItem.getIssue()).startsWith("LIST_ITEM_CONTENT_GROUP_CONFLICT");
+        assertThat(previewService.reviewItems(owner.getId(), job.id(), null, 100).changes())
+                .singleElement().satisfies(change -> assertThat(change.allowedOperations()).containsExactly(
+                        com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM));
+
+        job = jobService.get(owner.getId(), job.id());
+        previewService.resolve(owner.getId(), job.id(),
+                List.of(new ImportResolutionOperation.SkipItem(seasonItem.getId())), job.previewVersion());
+        driveUntil(job.id(), ImportJobState.READY);
+        job = jobService.get(owner.getId(), job.id());
+        jobService.commit(owner.getId(), job.id(), new ImportCommitDTO(job.previewVersion(), job.previewDigest()));
+        driveUntil(job.id(), ImportJobState.COMPLETED);
+
+        assertThat(jdbc.queryForObject("select count(*) from user_list_items where user_list_id = ?",
+                Long.class, existing.id())).isEqualTo(1L);
+        assertThat(items.findById(seasonItem.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
         verifyNoInteractions(tmdbClient);
     }
 
@@ -694,6 +814,12 @@ class PlatformArchiveImportIntegrationTest {
         contents.saveAndFlush(Content.builder().type(ContentType.SERIES).tmdbId(id)
                 .genres(List.of("Drama")).releaseYear(2020).countries(List.of("US"))
                 .createdAt(now).updatedAt(now).build());
+    }
+
+    private void seedSeason(String seriesId, int season) {
+        LocalDateTime now = LocalDateTime.now();
+        contents.saveAndFlush(Content.builder().type(ContentType.SEASON).seriesTmdbId(seriesId)
+                .seasonNumber(season).createdAt(now).updatedAt(now).build());
     }
 
     private void seedEpisode(String seriesId, int season, int episode) {

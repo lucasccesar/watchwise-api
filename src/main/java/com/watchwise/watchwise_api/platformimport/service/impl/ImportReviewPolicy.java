@@ -63,6 +63,10 @@ public class ImportReviewPolicy {
             return state(List.of(ImportDecision.RESOLVE_TARGET, ImportDecision.REMOVE_NOMINEE,
                     ImportDecision.SKIP_ITEM), List.of());
         }
+        if (item.getNormalizedKind() == ImportRecordKind.LIST_ITEM
+                && issue.startsWith("LIST_ITEM_CONTENT_GROUP_CONFLICT")) {
+            return state(List.of(ImportDecision.SKIP_ITEM), List.of());
+        }
         if (issue.startsWith("LIST_ITEM_DESCRIPTION_TOO_LONG")) {
             return state(List.of(ImportDecision.EDIT_FIELD, ImportDecision.SKIP_ITEM),
                     editable(ImportResolutionOperation.EditableField.DESCRIPTION, 400));

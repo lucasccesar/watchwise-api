@@ -1144,6 +1144,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             item.setResolvedTargetJson(null);
             item.setResolvedContentKey(null);
         }
+        invalidateListContentGroupReview(job, item, operation, relatedChangedItems);
         if ((operation instanceof ImportResolutionOperation.SkipItem
                 || operation instanceof ImportResolutionOperation.ConfirmWatchScope)
                 && (item.getNormalizedKind() == ImportRecordKind.WATCHED_SUMMARY
@@ -1151,6 +1152,34 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             stageDeferredReplayForSourceDecision(ownerId, job, item, operation,
                     confirmedWatchScopeSnapshot, relatedChangedItems);
         }
+    }
+
+    private void invalidateListContentGroupReview(ImportJob job, ImportItem item,
+                                                 ImportResolutionOperation operation,
+                                                 List<ImportItem> relatedChangedItems) {
+        boolean invalidatesParent = item.getNormalizedKind() == ImportRecordKind.LIST_ITEM
+                && (operation instanceof ImportResolutionOperation.ResolveTarget
+                || operation instanceof ImportResolutionOperation.EditField)
+                || item.getNormalizedKind() == ImportRecordKind.LIST_METADATA
+                && (operation instanceof ImportResolutionOperation.LinkImportedList
+                || operation instanceof ImportResolutionOperation.SkipItem);
+        if (!invalidatesParent) return;
+
+        ImportItem parent = item;
+        if (item.getNormalizedKind() == ImportRecordKind.LIST_ITEM) {
+            if (item.getParentSourceId() == null) return;
+            parent = importItemRepository.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                    job.getId(), readPlanGeneration(job.getSelectionJson()), ImportRecordKind.LIST_METADATA,
+                    item.getParentSourceId()).orElse(null);
+            if (parent == null) return;
+        }
+        JsonNode parsed = readPayload(parent.getPayloadJson());
+        if (!parsed.isObject() || !parsed.path("resolution").isObject()) return;
+        ObjectNode overlay = (ObjectNode) parsed.deepCopy();
+        ObjectNode resolution = (ObjectNode) overlay.get("resolution");
+        if (resolution.remove("listContentGroupReview") == null) return;
+        parent.setPayloadJson(writeJson(overlay));
+        if (parent != item) relatedChangedItems.add(parent);
     }
 
     private void stageDeferredReplayForSourceDecision(UUID ownerId, ImportJob job, ImportItem sourceItem,

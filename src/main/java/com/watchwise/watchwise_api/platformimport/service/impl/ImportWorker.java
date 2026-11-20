@@ -86,6 +86,7 @@ public class ImportWorker {
     private final Clock clock;
     private final ImportLimits importLimits;
     private final StandaloneListIdentityResolver standaloneListIdentityResolver;
+    private final ImportListContentGroupReviewer listContentGroupReviewer;
     private final ImportReviewPolicy reviewPolicy;
     private final boolean enabled;
 
@@ -98,6 +99,7 @@ public class ImportWorker {
                         WatchScopeSnapshotPreparer watchScopeSnapshotPreparer,
                         ObjectMapper objectMapper, Clock clock,
                         ImportLimits importLimits, StandaloneListIdentityResolver standaloneListIdentityResolver,
+                        ImportListContentGroupReviewer listContentGroupReviewer,
                         ImportReviewPolicy reviewPolicy,
                         @Value("${app.import.worker.enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
@@ -114,6 +116,7 @@ public class ImportWorker {
         this.clock = clock;
         this.importLimits = importLimits;
         this.standaloneListIdentityResolver = standaloneListIdentityResolver;
+        this.listContentGroupReviewer = listContentGroupReviewer;
         this.reviewPolicy = reviewPolicy;
         this.enabled = enabled;
     }
@@ -292,6 +295,7 @@ public class ImportWorker {
                 resolveStandaloneListIdentities(job, context, selection);
             }
             modeRegistry.validateResolved(modeKey(job), context);
+            if (!listContentGroupReviewer.review(context)) return;
         }
         ImportUnitTransaction.ResolutionState state;
         if (unavailable) {
@@ -493,7 +497,7 @@ public class ImportWorker {
                 if (page.isEmpty()) break;
                 afterOrdinal = page.getLast().getOrdinal();
                 afterId = page.getLast().getId();
-                List<ImportUnitTransaction.CollectionLengthIssueUpdate> updates = new ArrayList<>();
+                List<ImportUnitTransaction.CollectionValidationIssueUpdate> updates = new ArrayList<>();
                 for (ImportItem item : page) {
                     if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
                         continue;
@@ -519,11 +523,11 @@ public class ImportWorker {
                     }
                     if (!java.util.Objects.equals(outcome, item.getOutcome())
                             || !java.util.Objects.equals(updatedIssue, item.getIssue())) {
-                        updates.add(new ImportUnitTransaction.CollectionLengthIssueUpdate(
-                                item.getId(), outcome, updatedIssue));
+                        updates.add(new ImportUnitTransaction.CollectionValidationIssueUpdate(
+                                item.getId(), null, outcome, updatedIssue, true));
                     }
                 }
-                if (!updates.isEmpty() && !unitTransaction.saveCollectionLengthIssues(context, updates)) {
+                if (!updates.isEmpty() && !unitTransaction.saveCollectionValidationUpdates(context, updates)) {
                     throw new StaleImportExecutionException();
                 }
             }

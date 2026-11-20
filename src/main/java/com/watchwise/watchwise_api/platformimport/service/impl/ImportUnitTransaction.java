@@ -480,26 +480,29 @@ public class ImportUnitTransaction {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean saveCollectionLengthIssues(ImportExecutionContext context,
-                                              List<CollectionLengthIssueUpdate> updates) {
+    public boolean saveCollectionValidationUpdates(ImportExecutionContext context,
+                                                   List<CollectionValidationIssueUpdate> updates) {
         if (updates == null || updates.isEmpty()) return true;
         if (updates.size() > NORMALIZE_BATCH_SIZE
-                || updates.stream().map(CollectionLengthIssueUpdate::itemId).distinct().count() != updates.size()) {
+                || updates.stream().map(CollectionValidationIssueUpdate::itemId).distinct().count() != updates.size()) {
             throw new IllegalArgumentException("Collection validation updates require at most 200 unique items");
         }
         ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
         if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
-        java.util.Map<UUID, CollectionLengthIssueUpdate> byId = updates.stream()
-                .collect(java.util.stream.Collectors.toMap(CollectionLengthIssueUpdate::itemId, update -> update));
+        java.util.Map<UUID, CollectionValidationIssueUpdate> byId = updates.stream()
+                .collect(java.util.stream.Collectors.toMap(CollectionValidationIssueUpdate::itemId, update -> update));
         List<ImportItem> items = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
                 context.jobId(), context.planGeneration(), byId.keySet());
         if (items.size() != updates.size()) {
             throw new IllegalArgumentException("Collection validation item is outside the active plan");
         }
         for (ImportItem item : items) {
-            CollectionLengthIssueUpdate update = byId.get(item.getId());
-            item.setOutcome(update.outcome());
-            item.setIssue(update.issue());
+            CollectionValidationIssueUpdate update = byId.get(item.getId());
+            if (update.payloadJson() != null) item.setPayloadJson(update.payloadJson());
+            if (update.updateStatus()) {
+                item.setOutcome(update.outcome());
+                item.setIssue(update.issue());
+            }
         }
         reviewQueue.synchronize(job, items, true);
         itemRepository.saveAll(items);
@@ -890,7 +893,8 @@ public class ImportUnitTransaction {
 
     public record TemplateResolutionIssueUpdate(UUID itemId, String outcome, String issue) { }
 
-    public record CollectionLengthIssueUpdate(UUID itemId, String outcome, String issue) { }
+    public record CollectionValidationIssueUpdate(UUID itemId, String payloadJson,
+                                                  String outcome, String issue, boolean updateStatus) { }
 
     public record StandaloneListIdentityUpdate(UUID itemId, String payloadJson, String outcome, String issue) { }
 
