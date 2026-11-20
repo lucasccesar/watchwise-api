@@ -461,9 +461,9 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
                 WHEN 'REVIEW' THEN 2
                 WHEN 'CURRENT_RATING' THEN 2
                 WHEN 'LIST_METADATA' THEN 3
-                WHEN 'LIST_ITEM' THEN 3
-                WHEN 'WATCHLIST_ITEM' THEN 4
-                ELSE 5
+                WHEN 'LIST_ITEM' THEN 4
+                WHEN 'WATCHLIST_ITEM' THEN 5
+                ELSE 6
             END ASC, item.ordinal ASC, item.id ASC
             """, nativeQuery = true)
     List<ImportItem> findApplyPending(@Param("jobId") UUID jobId,

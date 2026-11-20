@@ -186,6 +186,57 @@ class PlatformArchiveImportIntegrationTest {
     }
 
     @Test
+    void appliesListMembersWhenTheirMetadataOrdinalFallsBeyondTheFirstApplyPage() throws Exception {
+        User owner = createUser();
+        StringBuilder records = new StringBuilder("[");
+        for (int index = 0; index < 201; index++) {
+            String tmdbId = Integer.toString(800_000 + index);
+            seedMovie(tmdbId);
+            if (index > 0) records.append(',');
+            records.append("{\"id\":").append(900_000 + index)
+                    .append(",\"rank\":").append(index + 1)
+                    .append(",\"listed_at\":\"2024-01-02T03:04:05Z\",\"type\":\"movie\",\"movie\":{")
+                    .append("\"title\":\"Movie ").append(index + 1)
+                    .append("\",\"year\":2020,\"ids\":{\"tmdb\":").append(tmdbId).append("}}}");
+        }
+        records.append(']');
+        byte[] archive = zip(Map.of(
+                "export/lists-lists.json",
+                "[{\"name\":\"Large list\",\"description\":\"Apply ordering\",\"item_count\":201,\"ids\":{\"trakt\":42}}]",
+                "export/lists-list-42-large-list.json", records.toString()));
+        ImportJobDTO job = createAndInspect(owner, archive, ImportSourceFormat.TRAKT_ZIP,
+                ImportPlatform.TRAKT, null);
+        job = jobService.select(owner.getId(), job.id(), new ImportSelectionDTO(job.previewVersion(),
+                false, false, List.of("42"), objectMapper.createObjectNode().put("sourceAccount", "account-lucas")));
+        driveUntil(job.id(), ImportJobState.READY);
+
+        ImportItem metadata = items.findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+                job.id(), 1, ImportRecordKind.LIST_METADATA, "42").orElseThrow();
+        List<ImportItem> members = items.findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
+                job.id(), 1, "42", ImportRecordKind.LIST_ITEM);
+        assertThat(members).hasSize(201);
+        assertThat(metadata.getOrdinal()).isGreaterThan(members.stream().mapToLong(ImportItem::getOrdinal).max().orElse(-1));
+
+        job = jobService.get(owner.getId(), job.id());
+        jobService.commit(owner.getId(), job.id(), new ImportCommitDTO(job.previewVersion(), job.previewDigest()));
+        worker.runAvailable(1);
+
+        ImportJob afterFirstBatch = jobs.findById(job.id()).orElseThrow();
+        assertThat(afterFirstBatch.getProgressAppliedItems() + afterFirstBatch.getProgressSkippedItems())
+                .isGreaterThan(0);
+        assertThat(afterFirstBatch.getState()).isEqualTo(ImportJobState.IMPORTING);
+
+        worker.runAvailable(1);
+
+        ImportJob completed = jobs.findById(job.id()).orElseThrow();
+        assertThat(completed.getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(completed.getProgressAppliedItems() + completed.getProgressSkippedItems()).isEqualTo(202);
+        assertThat(members.stream().map(member -> items.findById(member.getId()).orElseThrow().getOutcome()))
+                .allMatch(outcome -> "APPLIED".equals(outcome) || "SKIPPED".equals(outcome));
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
     void importsSelectedLetterboxdListFromZipUsingStoredAliasWithoutTmdbNetwork() throws Exception {
         User owner = createUser();
         String movieId = "55110";
