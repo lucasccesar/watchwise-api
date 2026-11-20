@@ -212,4 +212,15 @@ final class DiaryViewGroupingSql {
                 "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END, " +
                 "ordered_at DESC, target_id DESC";
     }
+
+    static String pageOrder(DiaryEntrySort sortBy) {
+        boolean oldestFirst = sortBy == DiaryEntrySort.OLDEST;
+        String direction = oldestFirst ? "ASC" : "DESC";
+        String inverseDirection = oldestFirst ? "DESC" : "ASC";
+        return "COALESCE(watched_date, group_sort_at::date) " + direction + " NULLS LAST, " +
+                "group_sort_at " + direction + " NULLS LAST, group_sort_id " + direction + " NULLS LAST, " +
+                "CASE WHEN kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END " + inverseDirection + ", " +
+                "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END " +
+                inverseDirection + ", ordered_at " + direction + " NULLS LAST, target_id " + direction + " NULLS LAST";
+    }
 }

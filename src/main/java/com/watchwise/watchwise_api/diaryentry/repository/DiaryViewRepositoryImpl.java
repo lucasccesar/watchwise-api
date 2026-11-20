@@ -44,7 +44,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
         MapSqlParameterSource parameters = parameters(ownerId, region, language, now, filter);
         String source = sourceSql();
         String where = filterSql(filter);
-        String order = " ORDER BY " + DiaryViewGroupingSql.order();
+        String order = " ORDER BY " + DiaryViewGroupingSql.pageOrder(filter.sortBy());
         String sql = "SELECT * FROM (" + source + ") timeline WHERE 1 = 1 " + where + order
                 + " LIMIT :limit OFFSET :offset";
         parameters.addValue("limit", pageable.getPageSize());
