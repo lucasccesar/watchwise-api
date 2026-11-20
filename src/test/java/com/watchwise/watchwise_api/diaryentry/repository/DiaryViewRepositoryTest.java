@@ -72,6 +72,19 @@ class DiaryViewRepositoryTest {
     private static final String SERIES_TMDB_ID = "1396";
     private static final LocalDateTime EPISODE_RECORDED_AT = LocalDateTime.of(2026, 10, 20, 12, 0);
 
+    @Test
+    void shouldSeparateEntryCursorFilterFromUnionInGroupedCandidates() throws Exception {
+        var owner = registerUser();
+        var cursor = new DiaryViewRepository.DiaryViewCursorPosition(
+                Instant.parse("2026-11-18T00:00:00Z"), UUID.randomUUID(), 1, 2,
+                Instant.parse("2026-11-17T00:00:00Z"), UUID.randomUUID(), null);
+
+        var candidates = diaryViewRepository.findGroupedCandidates(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(null, null, null, null, null, null), cursor, 10);
+
+        assertThat(candidates).isEmpty();
+    }
+
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
 

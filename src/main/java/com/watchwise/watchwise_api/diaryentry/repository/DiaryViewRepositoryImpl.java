@@ -154,7 +154,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 JOIN contents c ON c.id = d.content_id
                 WHERE d.user_id = :ownerId
                   AND c.type IN ('MOVIE', 'EPISODE')
-                """ + entryCursorFilter + """
+                """ + entryCursorFilter + " " + """
                 UNION ALL
                 SELECT 'DERIVED_COMPLETION' AS kind,
                        p.id AS target_id,
@@ -222,7 +222,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 contentRank + " " + rankComparison + " :cursorContentTypeRank OR (" + contentRank +
                 " = :cursorContentTypeRank AND (" + orderedAt + " " + orderedComparison + " :cursorOrderedAt OR (" +
                 orderedAt + " = :cursorOrderedAt AND " + targetId + " " + orderedComparison +
-                " :cursorTargetId)))))))))";
+                " :cursorTargetId))))))))))";
     }
 
     private GroupedDiaryViewKey mapGroupedRow(ResultSet resultSet, int rowNumber) throws SQLException {
