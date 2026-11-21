@@ -18,8 +18,12 @@ import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
 import com.watchwise.watchwise_api.userlist.dto.UserListViewQueryMode;
 import com.watchwise.watchwise_api.userlist.dto.UserListViewRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListViewSource;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderPageDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderRevisionDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import com.watchwise.watchwise_api.userlist.service.UserListDetailViewService;
+import com.watchwise.watchwise_api.userlist.service.UserListOrderService;
 import com.watchwise.watchwise_api.userlist.service.UserListViewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +42,20 @@ public class UserListController {
     private final UserListService userListService;
     private final UserListViewService userListViewService;
     private final UserListDetailViewService userListDetailViewService;
+    private final UserListOrderService userListOrderService;
+
+    @GetMapping("/users/me/lists/order")
+    public ResponseEntity<UserListOrderPageDTO> getMyListOrder(
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(userListOrderService.getOwnedListOrder(getCurrentUserId(), cursor, size));
+    }
+
+    @PatchMapping("/users/me/lists/order")
+    public ResponseEntity<UserListOrderRevisionDTO> reorderMyLists(
+            @Valid @RequestBody UserListOrderPatchDTO patch) {
+        return ResponseEntity.ok(userListOrderService.reorderOwnedLists(getCurrentUserId(), patch));
+    }
 
     @GetMapping("/users/me/lists/view")
     public ResponseEntity<PageWithBackdropResponseDTO<UserListCardDTO>> getMyListView(

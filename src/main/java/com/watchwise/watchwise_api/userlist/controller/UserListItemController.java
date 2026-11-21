@@ -4,7 +4,11 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderPageDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListOrderRevisionDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListOrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +25,22 @@ import java.util.UUID;
 public class UserListItemController {
 
     private final UserListItemService userListItemService;
+    private final UserListOrderService userListOrderService;
+
+    @GetMapping("/{listId}/items/order")
+    public ResponseEntity<UserListOrderPageDTO> getListItemOrder(
+            @PathVariable UUID listId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(userListOrderService.getListItemOrder(getCurrentUserId(), listId, cursor, size));
+    }
+
+    @PatchMapping("/{listId}/items/order")
+    public ResponseEntity<UserListOrderRevisionDTO> reorderListItems(
+            @PathVariable UUID listId,
+            @Valid @RequestBody UserListOrderPatchDTO patch) {
+        return ResponseEntity.ok(userListOrderService.reorderListItems(getCurrentUserId(), listId, patch));
+    }
 
     @PostMapping("/{listId}/items")
     public ResponseEntity<UserListItemResponseDTO> addItem(

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -35,6 +36,58 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             """)
     List<UserList> findVisibleChildListsByIdIn(
             @Param("childListIds") Collection<UUID> childListIds, @Param("viewerId") UUID viewerId);
+
+    @Query("""
+            SELECT child.id FROM UserList child
+            WHERE child.id IN :childListIds
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                  (b.blocker.id = :viewerId AND b.blocked.id = child.user.id)
+                  OR (b.blocker.id = child.user.id AND b.blocked.id = :viewerId))
+              AND (child.user.id = :viewerId
+                  OR child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
+                  OR (child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
+                      AND EXISTS (
+                          SELECT follower.id FROM Follower follower
+                          WHERE follower.follower.id = :viewerId
+                            AND follower.followed.id = child.user.id
+                            AND follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                      )))
+            """)
+    List<UUID> findVisibleChildListIdsByIdIn(
+            @Param("childListIds") Collection<UUID> childListIds, @Param("viewerId") UUID viewerId);
+
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_list_items item
+                JOIN user_lists child ON child.id = item.child_list_id
+                WHERE item.user_list_id = :listId
+                  AND item.position > :lowerPosition
+                  AND item.position < :upperPosition
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM user_blocks blocked
+                          WHERE (blocked.blocker_id = :viewerId AND blocked.blocked_id = child.user_id)
+                             OR (blocked.blocker_id = child.user_id AND blocked.blocked_id = :viewerId)
+                      )
+                      OR NOT (
+                          child.user_id = :viewerId
+                          OR child.visibility = 'PUBLIC'
+                          OR (child.visibility = 'FOLLOWERS' AND EXISTS (
+                              SELECT 1 FROM followers follower
+                              WHERE follower.follower_id = :viewerId
+                                AND follower.followed_id = child.user_id
+                                AND follower.status = 'ACCEPTED'
+                          ))
+                      )
+                  )
+            )
+            """, nativeQuery = true)
+    boolean existsInaccessibleNestedListBetweenPositions(
+            @Param("listId") UUID listId,
+            @Param("viewerId") UUID viewerId,
+            @Param("lowerPosition") int lowerPosition,
+            @Param("upperPosition") int upperPosition);
 
     @Query(value = """
             SELECT parent_id AS parentId, child_id AS childId, owner_id AS ownerId,
@@ -88,6 +141,21 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             @Param("userListId") UUID userListId, @Param("contentIds") Collection<UUID> contentIds);
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
+
+    @Query("""
+            SELECT item FROM UserListItem item
+            LEFT JOIN FETCH item.content
+            LEFT JOIN FETCH item.childList child
+            WHERE item.userList.id = :userListId
+              AND (item.position > :afterPosition
+                   OR (item.position = :afterPosition AND item.id > :afterId))
+            ORDER BY item.position ASC, item.id ASC
+            """)
+    List<UserListItem> findOrderBatch(
+            @Param("userListId") UUID userListId,
+            @Param("afterPosition") int afterPosition,
+            @Param("afterId") UUID afterId,
+            Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT item FROM UserListItem item WHERE item.userList.id = :userListId ORDER BY item.position ASC, item.id ASC")
