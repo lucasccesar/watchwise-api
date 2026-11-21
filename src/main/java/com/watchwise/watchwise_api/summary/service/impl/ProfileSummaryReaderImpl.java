@@ -79,7 +79,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
 
         return new SummaryResponseDTO(snapshot.watchTime(), highlights, snapshot.genreCounts(), ratingsSummary,
                 snapshot.ratingsDistribution(), snapshot.recentEpisodes(), snapshot.recentReviews(),
-                snapshot.recentActivity(), snapshot.top5());
+                snapshot.recentActivity(), snapshot.top5(), snapshot.episodeRatings());
     }
 
     private ProfileSummaryDataReader.Snapshot enrichVisualCards(
@@ -142,7 +142,7 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                 addCardsToActivity(snapshot.recentActivity(), cards),
                 snapshot.rewatch(), snapshot.longestWatch(),
                 snapshot.top5().stream().map(item -> item.withCard(cardFor(item.content(), cards))).toList(),
-                snapshot.seriesRatings());
+                snapshot.seriesRatings(), snapshot.episodeRatings());
     }
 
     private ContentCoordinate seriesCoordinateForReview(ContentRefDTO content) {
@@ -162,7 +162,8 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                             preview.id(), preview.source(), preview.content(), preview.score(),
                             preview.watchedDate(), preview.activityDate(), preview.watchNumber(),
                             card == null ? preview.customPosterUrl() : card.customPosterUrl(),
-                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe());
+                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe(),
+                            preview.seriesTitle());
                 })
                 .toList();
     }
@@ -181,7 +182,8 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
                             preview.id(), preview.source(), preview.content(), preview.score(),
                             preview.watchedDate(), preview.activityDate(), preview.watchNumber(),
                             card == null ? preview.customPosterUrl() : card.customPosterUrl(),
-                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe());
+                            preview.watchedWith(), card, preview.likesCount(), preview.likedByMe(),
+                            seriesCard == null ? preview.seriesTitle() : seriesCard.title());
                 })
                 .toList();
     }
@@ -203,7 +205,8 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
             List<RecentActivityItemDTO> activity, Map<ContentCoordinate, ContentCardDTO> cards) {
         return activity.stream()
                 .map(item -> new RecentActivityItemDTO(item.id(), item.source(), item.content(), item.status(), item.score(),
-                        item.timesWatched(), item.comment(), item.activityDate(), cardFor(item.content(), cards)))
+                        item.timesWatched(), item.comment(), item.activityDate(), cardFor(item.content(), cards),
+                        item.watchedEpisodeCount()))
                 .toList();
     }
 

@@ -21,6 +21,9 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileHighlightContentDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewSource;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsSummaryDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
@@ -113,6 +116,53 @@ class ProfileSummaryReaderImplTest {
         assertThat(result.ratingsSummary().averageScore()).isEqualTo(26.0 / 3.0);
         assertThat(result.highlights().rewatch().content()).isEqualTo(highlight);
         assertThat(result.genreCounts()).containsExactly(new GenreCountDTO("Drama", 2L));
+    }
+
+    @Test
+    void shouldExposeEpisodeRatingSummaryForSeriesProfile() {
+        EpisodeRatingsSummaryDTO episodeRatings = new EpisodeRatingsSummaryDTO(2L, 9.0,
+                List.of(new RatingCountDTO(8, 1L), new RatingCountDTO(10, 1L)));
+        ProfileSummaryDataReader.Snapshot snapshot = new ProfileSummaryDataReader.Snapshot(
+                new WatchTimeDTO(120L, 30L, 4L, 1L), List.of(), List.of(), List.of(), List.of(),
+                List.of(), null, null, List.of(), Map.of(), episodeRatings);
+        when(dataReader.read(viewerId, userId, ContentType.SERIES)).thenReturn(snapshot);
+
+        SummaryResponseDTO result = reader.read(viewerId, userId, ContentType.SERIES);
+
+        assertThat(result.episodeRatings()).isEqualTo(episodeRatings);
+        assertThat(serialize(result).get("episodeRatings").get("totalRatings").asLong()).isEqualTo(2L);
+    }
+
+    @Test
+    void shouldResolveParentSeriesTitleForRecentEpisodeReviewWithoutLoadingHistory() {
+        ContentRefDTO episode = new ContentRefDTO(
+                UUID.randomUUID(), null, ContentType.EPISODE, "1399", 1, 2,
+                false, false, null, null);
+        ProfileDiaryPreviewDTO preview = new ProfileDiaryPreviewDTO(
+                UUID.randomUUID(), ProfileDiaryPreviewSource.DIARY_ENTRY, episode, 9,
+                java.time.LocalDate.of(2026, 10, 5), java.time.LocalDate.of(2026, 10, 5),
+                1, null, List.of(), null, 0, false);
+        ProfileSummaryDataReader.Snapshot snapshot = new ProfileSummaryDataReader.Snapshot(
+                new WatchTimeDTO(0L, 0L, 0L, 0L), List.of(), List.of(), List.of(), List.of(preview),
+                List.of(), null, null);
+        when(dataReader.read(viewerId, userId, ContentType.SERIES)).thenReturn(snapshot);
+        ContentCoordinate episodeCoordinate = new ContentCoordinate(ContentType.EPISODE, null, "1399", 1, 2);
+        ContentCoordinate seriesCoordinate = new ContentCoordinate(ContentType.SERIES, "1399", null, null, null);
+        ContentCardDTO episodeCard = new ContentCardDTO(
+                null, ContentType.EPISODE, null, "1399", 1, 2, "Episode title", null, null,
+                null, null, null, null, null, null, null, null, List.of(), null, null,
+                ContentPreviewStatus.AVAILABLE);
+        ContentCardDTO seriesCard = new ContentCardDTO(
+                null, ContentType.SERIES, "1399", null, null, null, "Series title", null, null,
+                null, null, null, null, null, null, null, null, List.of(), null, null,
+                ContentPreviewStatus.AVAILABLE);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(java.util.Map.of(episodeCoordinate, episodeCard, seriesCoordinate, seriesCard));
+
+        SummaryResponseDTO result = reader.read(viewerId, userId, ContentType.SERIES);
+
+        assertThat(result.recentReviews()).singleElement()
+                .extracting(ProfileDiaryPreviewDTO::seriesTitle).isEqualTo("Series title");
     }
 
     @Test

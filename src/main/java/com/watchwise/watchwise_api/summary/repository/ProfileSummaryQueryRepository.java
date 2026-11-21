@@ -58,6 +58,30 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
             @Param("start") LocalDate start, @Param("end") LocalDate end);
 
+    @Query(value = """
+            SELECT COALESCE(SUM(c.runtime_minutes), 0) AS "totalMinutes",
+                   COALESCE(SUM(c.runtime_minutes) FILTER (
+                       WHERE d.watched_date BETWEEN :start AND :end), 0) AS "recentMinutes",
+                   COUNT(d.id) AS "totalCount",
+                   COUNT(d.id) FILTER (
+                       WHERE d.watched_date BETWEEN :start AND :end) AS "recentCount"
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId AND c.type = :contentType
+            """, nativeQuery = true)
+    WatchTimeAggregate aggregateWatchTimeByUserIdAndContentType(
+            @Param("userId") UUID userId,
+            @Param("contentType") String contentType,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end);
+
+    interface WatchTimeAggregate {
+        Long getTotalMinutes();
+        Long getRecentMinutes();
+        Long getTotalCount();
+        Long getRecentCount();
+    }
+
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId
@@ -207,6 +231,18 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             """, nativeQuery = true)
     List<ScoreCount> countLatestScoresByUserIdAndContentType(
             @Param("userId") UUID userId, @Param("contentType") String contentType);
+
+    @Query(value = """
+            SELECT c.series_tmdb_id AS "seriesTmdbId", COUNT(DISTINCT c.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+              AND c.type = 'EPISODE'
+              AND c.series_tmdb_id IN :seriesTmdbIds
+            GROUP BY c.series_tmdb_id
+            """, nativeQuery = true)
+    List<SeriesEpisodeCount> countDistinctEpisodesBySeriesTmdbIds(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     @Query(value = """
             SELECT ranked.content_id AS contentId, COUNT(*) AS count
@@ -361,6 +397,11 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
 
     interface ScoreCount {
         Integer getScore();
+        Long getCount();
+    }
+
+    interface SeriesEpisodeCount {
+        String getSeriesTmdbId();
         Long getCount();
     }
 

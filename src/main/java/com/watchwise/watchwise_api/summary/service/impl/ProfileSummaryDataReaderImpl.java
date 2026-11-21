@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewSource;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
@@ -80,13 +81,17 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         LocalDate windowEnd = LocalDate.now();
         LocalDate windowStart = windowEnd.minusDays(WATCH_TIME_WINDOW_DAYS - 1L);
 
+        ProfileSummaryQueryRepository.WatchTimeAggregate watchTimeAggregate =
+                queryRepository.aggregateWatchTimeByUserIdAndContentType(
+                        userId, watchedContentType.name(), windowStart, windowEnd);
         WatchTimeDTO watchTime = new WatchTimeDTO(
-                queryRepository.sumRuntimeMinutesByUserIdAndContentType(userId, watchedContentType),
-                queryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
-                        userId, watchedContentType, windowStart, windowEnd),
-                queryRepository.countByUserIdAndContentType(userId, watchedContentType),
-                queryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(
-                        userId, watchedContentType, windowStart, windowEnd));
+                valueOrZero(watchTimeAggregate == null ? null : watchTimeAggregate.getTotalMinutes()),
+                valueOrZero(watchTimeAggregate == null ? null : watchTimeAggregate.getRecentMinutes()),
+                valueOrZero(watchTimeAggregate == null ? null : watchTimeAggregate.getTotalCount()),
+                valueOrZero(watchTimeAggregate == null ? null : watchTimeAggregate.getRecentCount()));
+        EpisodeRatingsSummaryDTO episodeRatings = type == ContentType.SERIES
+                ? readEpisodeRatings(userId)
+                : null;
 
         List<GenreCountDTO> genreCounts = toGenreCounts(type == ContentType.MOVIE
                 ? queryRepository.countDistinctMoviesByGenre(userId)
@@ -153,6 +158,9 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         Map<UUID, Long> timesWatched = loadWatchCounts(userId, type, watchCountContentIds);
         List<RecentActivityItemDTO> recentActivity = toRecentActivity(
                 type, completedEntries, seriesCompletions, droppedEntries, timesWatched);
+        if (type == ContentType.SERIES) {
+            recentActivity = addWatchedEpisodeCounts(userId, recentActivity);
+        }
         Map<UUID, ProfileSummaryDataReader.SeriesRating> seriesRatings = includeSeriesRatings
                 ? readSeriesRatings(userId, top5Entries, recentActivity, recentReviews)
                 : Map.of();
@@ -176,7 +184,49 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
         LongestWatchData longestWatch = readLongestWatch(userId, type);
 
         return new Snapshot(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                recentActivity, rewatch, longestWatch, top5, seriesRatings);
+                recentActivity, rewatch, longestWatch, top5, seriesRatings, episodeRatings);
+    }
+
+    private EpisodeRatingsSummaryDTO readEpisodeRatings(UUID userId) {
+        List<RatingCountDTO> distribution = toRatingCounts(Optional.ofNullable(
+                        queryRepository.countLatestScoresByUserIdAndContentType(userId, ContentType.EPISODE.name()))
+                .orElse(List.of()));
+        long totalRatings = distribution.stream().mapToLong(RatingCountDTO::count).sum();
+        Double averageScore = totalRatings == 0
+                ? null
+                : distribution.stream().mapToLong(rating -> (long) rating.score() * rating.count()).sum()
+                        / (double) totalRatings;
+        return new EpisodeRatingsSummaryDTO(totalRatings, averageScore, distribution);
+    }
+
+    private List<RecentActivityItemDTO> addWatchedEpisodeCounts(
+            UUID userId, List<RecentActivityItemDTO> recentActivity) {
+        List<String> seriesTmdbIds = recentActivity.stream()
+                .map(RecentActivityItemDTO::content)
+                .filter(content -> content != null && content.type() == ContentType.SERIES)
+                .map(com.watchwise.watchwise_api.content.dto.ContentRefDTO::tmdbId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (seriesTmdbIds.isEmpty()) {
+            return recentActivity;
+        }
+
+        Map<String, Long> countsBySeriesTmdbId = Optional.ofNullable(
+                        queryRepository.countDistinctEpisodesBySeriesTmdbIds(userId, seriesTmdbIds))
+                .orElse(List.of()).stream()
+                .collect(Collectors.toMap(ProfileSummaryQueryRepository.SeriesEpisodeCount::getSeriesTmdbId,
+                        row -> valueOrZero(row.getCount())));
+        return recentActivity.stream()
+                .map(item -> item.content() != null && item.content().type() == ContentType.SERIES
+                        ? item.withWatchedEpisodeCount(countsBySeriesTmdbId.getOrDefault(
+                                item.content().tmdbId(), 0L))
+                        : item)
+                .toList();
+    }
+
+    private long valueOrZero(Long value) {
+        return value == null ? 0L : value;
     }
 
     private Map<UUID, ProfileSummaryDataReader.SeriesRating> readSeriesRatings(
@@ -223,7 +273,8 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                     }
                     ProfileSummaryDataReader.SeriesRating rating = seriesRatings.get(item.content().id());
                     return new RecentActivityItemDTO(item.id(), item.source(), item.content(), item.status(),
-                            rating.score(), item.timesWatched(), item.comment(), item.activityDate(), item.card());
+                            rating.score(), item.timesWatched(), item.comment(), item.activityDate(), item.card(),
+                            item.watchedEpisodeCount());
                 })
                 .toList();
     }

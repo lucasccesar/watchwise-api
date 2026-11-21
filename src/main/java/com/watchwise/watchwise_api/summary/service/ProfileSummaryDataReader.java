@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.summary.service;
 
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileTop5EntryDTO;
 import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
@@ -28,7 +29,8 @@ public interface ProfileSummaryDataReader {
             RewatchData rewatch,
             LongestWatchData longestWatch,
             List<ProfileTop5EntryDTO> top5,
-            Map<UUID, SeriesRating> seriesRatings) {
+            Map<UUID, SeriesRating> seriesRatings,
+            EpisodeRatingsSummaryDTO episodeRatings) {
         public Snapshot {
             seriesRatings = seriesRatings == null ? Map.of() : Map.copyOf(seriesRatings);
         }
@@ -41,9 +43,24 @@ public interface ProfileSummaryDataReader {
                 List<ProfileDiaryPreviewDTO> recentReviews,
                 List<RecentActivityItemDTO> recentActivity,
                 RewatchData rewatch,
+                LongestWatchData longestWatch,
+                List<ProfileTop5EntryDTO> top5,
+                Map<UUID, SeriesRating> seriesRatings) {
+            this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
+                    recentActivity, rewatch, longestWatch, top5, seriesRatings, null);
+        }
+
+        public Snapshot(
+                WatchTimeDTO watchTime,
+                List<GenreCountDTO> genreCounts,
+                List<RatingCountDTO> ratingsDistribution,
+                List<ProfileDiaryPreviewDTO> recentEpisodes,
+                List<ProfileDiaryPreviewDTO> recentReviews,
+                List<RecentActivityItemDTO> recentActivity,
+                RewatchData rewatch,
                 LongestWatchData longestWatch) {
             this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                    recentActivity, rewatch, longestWatch, List.of(), Map.of());
+                    recentActivity, rewatch, longestWatch, List.of(), Map.of(), null);
         }
 
         public Snapshot(
@@ -57,7 +74,7 @@ public interface ProfileSummaryDataReader {
                 LongestWatchData longestWatch,
                 List<ProfileTop5EntryDTO> top5) {
             this(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews,
-                    recentActivity, rewatch, longestWatch, top5, Map.of());
+                    recentActivity, rewatch, longestWatch, top5, Map.of(), null);
         }
     }
 

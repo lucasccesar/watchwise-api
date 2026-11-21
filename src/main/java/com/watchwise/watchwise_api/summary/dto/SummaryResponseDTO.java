@@ -16,7 +16,22 @@ public record SummaryResponseDTO(
         List<ProfileDiaryPreviewDTO> recentEpisodes,
         List<ProfileDiaryPreviewDTO> recentReviews,
         List<RecentActivityItemDTO> recentActivity,
-        List<ProfileTop5EntryDTO> top5) {
+        List<ProfileTop5EntryDTO> top5,
+        EpisodeRatingsSummaryDTO episodeRatings) {
+
+    public SummaryResponseDTO(
+            WatchTimeDTO watchTime,
+            ProfileHighlightsDTO highlights,
+            List<GenreCountDTO> genreCounts,
+            RatingsSummaryDTO ratingsSummary,
+            List<RatingCountDTO> ratingsDistribution,
+            List<ProfileDiaryPreviewDTO> recentEpisodes,
+            List<ProfileDiaryPreviewDTO> recentReviews,
+            List<RecentActivityItemDTO> recentActivity,
+            List<ProfileTop5EntryDTO> top5) {
+        this(watchTime, highlights, genreCounts, ratingsSummary, ratingsDistribution,
+                recentEpisodes, recentReviews, recentActivity, top5, null);
+    }
 
     public SummaryResponseDTO(
             WatchTimeDTO watchTime,
@@ -28,7 +43,7 @@ public record SummaryResponseDTO(
             List<ProfileDiaryPreviewDTO> recentReviews,
             List<RecentActivityItemDTO> recentActivity) {
         this(watchTime, highlights, genreCounts, ratingsSummary, ratingsDistribution,
-                recentEpisodes, recentReviews, recentActivity, List.of());
+                recentEpisodes, recentReviews, recentActivity, List.of(), null);
     }
 
     public SummaryResponseDTO(
@@ -39,7 +54,7 @@ public record SummaryResponseDTO(
             List<?> recentReviews,
             List<RecentActivityItemDTO> recentActivity) {
         this(watchTime, null, genreCounts, null, ratingsDistribution,
-                toPreviews(recentEpisodes), toPreviews(recentReviews), recentActivity, List.of());
+                toPreviews(recentEpisodes), toPreviews(recentReviews), recentActivity, List.of(), null);
     }
 
     private static List<ProfileDiaryPreviewDTO> toPreviews(List<?> entries) {

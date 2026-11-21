@@ -985,6 +985,34 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[aggregateWatchTimeByUserIdAndContentType] Should Match All-Time And Recent Sums And Counts")
+    void shouldAggregateAllTimeAndRecentWatchTimeInOneRead() {
+        LocalDate start = LocalDate.of(2024, 1, 1);
+        LocalDate end = LocalDate.of(2024, 1, 31);
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 100, List.of("Drama")));
+        Content episodeWithRuntime = contentRepository.save(buildEpisode("1399", 1, 1, 40));
+        Content episodeWithoutRuntime = contentRepository.save(buildEpisode("1399", 1, 2));
+
+        DiaryEntry recentEpisode = buildEntry(lucas, episodeWithRuntime, 1);
+        recentEpisode.setWatchedDate(LocalDate.of(2024, 1, 15));
+        DiaryEntry olderEpisode = buildEntry(lucas, episodeWithoutRuntime, 1);
+        olderEpisode.setWatchedDate(LocalDate.of(2023, 12, 31));
+        DiaryEntry recentMovie = buildEntry(lucas, movie, 1);
+        recentMovie.setWatchedDate(LocalDate.of(2024, 1, 15));
+        diaryEntryRepository.saveAllAndFlush(List.of(recentEpisode, olderEpisode, recentMovie));
+        entityManager.clear();
+
+        ProfileSummaryQueryRepository.WatchTimeAggregate result =
+                profileSummaryQueryRepository.aggregateWatchTimeByUserIdAndContentType(
+                        lucas.getId(), ContentType.EPISODE.name(), start, end);
+
+        assertThat(result.getTotalMinutes()).isEqualTo(40L);
+        assertThat(result.getRecentMinutes()).isEqualTo(40L);
+        assertThat(result.getTotalCount()).isEqualTo(2L);
+        assertThat(result.getRecentCount()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("[countEntriesByGenreAndUserIdForMovies] Should Count Only Movie Titles")
     void shouldCountOnlyMovieTitlesByEntry() {
         Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama")));
@@ -1092,6 +1120,39 @@ class DiaryEntryRepositoryTest {
                 .extracting(ProfileSummaryQueryRepository.ScoreCount::getScore,
                         ProfileSummaryQueryRepository.ScoreCount::getCount)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(9, 1L));
+    }
+
+    @Test
+    @DisplayName("[profile episode aggregates] Should Keep The Latest Episode Rating And Count Unique Episodes")
+    void shouldKeepLatestEpisodeRatingAndCountUniqueEpisodes() {
+        contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1, 45));
+        Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2, 50));
+
+        DiaryEntry firstRating = buildEntry(lucas, firstEpisode, 1);
+        firstRating.setScore(8);
+        DiaryEntry rewatchRating = buildEntry(lucas, firstEpisode, 2);
+        rewatchRating.setScore(10);
+        diaryEntryRepository.save(firstRating);
+        diaryEntryRepository.save(rewatchRating);
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode, 1));
+        entityManager.clear();
+
+        List<ProfileSummaryQueryRepository.ScoreCount> ratings =
+                profileSummaryQueryRepository.countLatestScoresByUserIdAndContentType(
+                        lucas.getId(), ContentType.EPISODE.name());
+        List<ProfileSummaryQueryRepository.SeriesEpisodeCount> episodesBySeries =
+                profileSummaryQueryRepository.countDistinctEpisodesBySeriesTmdbIds(
+                        lucas.getId(), List.of("1399"));
+
+        assertThat(ratings)
+                .extracting(ProfileSummaryQueryRepository.ScoreCount::getScore,
+                        ProfileSummaryQueryRepository.ScoreCount::getCount)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(10, 1L));
+        assertThat(episodesBySeries).singleElement().satisfies(row -> {
+            assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
+            assertThat(row.getCount()).isEqualTo(2L);
+        });
     }
 
     @Test

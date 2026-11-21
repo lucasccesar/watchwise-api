@@ -15,20 +15,37 @@ public record RecentActivityItemDTO(
         Long timesWatched,
         String comment,
         LocalDateTime activityDate,
-        ContentCardDTO card) {
+        ContentCardDTO card,
+        Long watchedEpisodeCount) {
+
+    public RecentActivityItemDTO(UUID id, RecentActivitySource source, ContentRefDTO content,
+            RecentActivityStatus status, Integer score, Long timesWatched, String comment,
+            LocalDateTime activityDate, ContentCardDTO card) {
+        this(id, source, content, status, score, timesWatched, comment, activityDate, card, null);
+    }
 
     public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status, Integer score,
             Long timesWatched, String comment, LocalDateTime activityDate) {
-        this(null, null, content, status, score, timesWatched, comment, activityDate, null);
+        this(null, null, content, status, score, timesWatched, comment, activityDate, null, null);
     }
 
     public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status, Integer score,
             Long timesWatched, String comment, LocalDateTime activityDate, ContentCardDTO card) {
-        this(null, null, content, status, score, timesWatched, comment, activityDate, card);
+        this(null, null, content, status, score, timesWatched, comment, activityDate, card, null);
     }
 
     public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status,
             String comment, LocalDateTime activityDate) {
-        this(null, null, content, status, null, null, comment, activityDate, null);
+        this(null, null, content, status, null, null, comment, activityDate, null, null);
+    }
+
+    public RecentActivityItemDTO withWatchedEpisodeCount(Long count) {
+        return new RecentActivityItemDTO(id, source, content, status, score, timesWatched, comment,
+                activityDate, card, count);
+    }
+
+    public RecentActivityItemDTO withCard(ContentCardDTO value) {
+        return new RecentActivityItemDTO(id, source, content, status, score, timesWatched, comment,
+                activityDate, value, watchedEpisodeCount);
     }
 }

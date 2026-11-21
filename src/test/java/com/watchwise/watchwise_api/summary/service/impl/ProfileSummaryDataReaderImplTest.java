@@ -148,6 +148,29 @@ class ProfileSummaryDataReaderImplTest {
     }
 
     @Test
+    void shouldReadWatchTimeAndCountsFromOneAggregateQuery() {
+        ProfileSummaryQueryRepository.WatchTimeAggregate aggregate =
+                org.mockito.Mockito.mock(ProfileSummaryQueryRepository.WatchTimeAggregate.class);
+        when(aggregate.getTotalMinutes()).thenReturn(600L);
+        when(aggregate.getRecentMinutes()).thenReturn(120L);
+        when(aggregate.getTotalCount()).thenReturn(5L);
+        when(aggregate.getRecentCount()).thenReturn(1L);
+        when(queryRepository.aggregateWatchTimeByUserIdAndContentType(
+                eq(userId), eq(ContentType.MOVIE.name()), any(), any())).thenReturn(aggregate);
+
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.MOVIE);
+
+        assertThat(result.watchTime()).isEqualTo(new com.watchwise.watchwise_api.summary.dto.WatchTimeDTO(
+                600L, 120L, 5L, 1L));
+        verify(queryRepository).aggregateWatchTimeByUserIdAndContentType(
+                eq(userId), eq(ContentType.MOVIE.name()), any(), any());
+        org.mockito.Mockito.verify(queryRepository, org.mockito.Mockito.never())
+                .sumRuntimeMinutesByUserIdAndContentType(any(), any());
+        org.mockito.Mockito.verify(queryRepository, org.mockito.Mockito.never())
+                .countByUserIdAndContentType(any(), any());
+    }
+
+    @Test
     void shouldCountTopFiveWhenRecentActivityIsEmpty() {
         Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
         ContentRefDTO contentRef = new ContentRefDTO(movie.getId(), "550", ContentType.MOVIE,
@@ -247,6 +270,50 @@ class ProfileSummaryDataReaderImplTest {
         assertThat(result.top5()).singleElement().satisfies(item -> assertThat(item.score()).isEqualTo(8));
         verify(queryRepository).findRecentSeriesCompletionActivities(eq(userId), eq(false), any());
         verify(contentRatingRepository).findRatingStates(userId, ContentType.SERIES, List.of(contentId));
+    }
+
+    @Test
+    void shouldReturnEpisodeRatingEventsAndDistinctWatchedCountsForRecentSeries() {
+        UUID seriesContentId = UUID.randomUUID();
+        Content series = Content.builder().id(seriesContentId).tmdbId("1399").type(ContentType.SERIES).build();
+        ContentRefDTO seriesRef = new ContentRefDTO(seriesContentId, "1399", ContentType.SERIES,
+                null, null, null, null, null, null, null);
+        ProfileSummaryQueryRepository.SeriesCompletionActivity completion =
+                org.mockito.Mockito.mock(ProfileSummaryQueryRepository.SeriesCompletionActivity.class);
+        UUID projectionId = UUID.randomUUID();
+        when(queryRepository.findRecentSeriesCompletionActivities(eq(userId), eq(true), any()))
+                .thenReturn(List.of(completion));
+        when(completion.getProjectionId()).thenReturn(projectionId);
+        when(completion.getContentId()).thenReturn(seriesContentId);
+        when(completion.getOrderedAt()).thenReturn(Instant.parse("2026-10-02T12:00:00Z"));
+        when(completion.getTimesWatched()).thenReturn(1L);
+        when(contentRepository.findAllById(List.of(seriesContentId))).thenReturn(List.of(series));
+        when(contentMapper.contentToContentRefDto(series)).thenReturn(seriesRef);
+
+        ProfileSummaryQueryRepository.ScoreCount scoreTen =
+                org.mockito.Mockito.mock(ProfileSummaryQueryRepository.ScoreCount.class);
+        when(scoreTen.getScore()).thenReturn(10);
+        when(scoreTen.getCount()).thenReturn(1L);
+        when(queryRepository.countLatestScoresByUserIdAndContentType(userId, ContentType.EPISODE.name()))
+                .thenReturn(List.of(scoreTen));
+
+        ProfileSummaryQueryRepository.SeriesEpisodeCount watchedEpisodes =
+                org.mockito.Mockito.mock(ProfileSummaryQueryRepository.SeriesEpisodeCount.class);
+        when(watchedEpisodes.getSeriesTmdbId()).thenReturn("1399");
+        when(watchedEpisodes.getCount()).thenReturn(2L);
+        when(queryRepository.countDistinctEpisodesBySeriesTmdbIds(userId, List.of("1399")))
+                .thenReturn(List.of(watchedEpisodes));
+
+        ProfileSummaryDataReader.Snapshot result = reader.read(UUID.randomUUID(), userId, ContentType.SERIES);
+
+        assertThat(result.episodeRatings()).isNotNull();
+        assertThat(result.episodeRatings().totalRatings()).isEqualTo(1L);
+        assertThat(result.episodeRatings().averageScore()).isEqualTo(10.0);
+        assertThat(result.episodeRatings().distribution())
+                .containsExactly(new com.watchwise.watchwise_api.summary.dto.RatingCountDTO(10, 1L));
+        assertThat(result.recentActivity()).filteredOn(item -> item.source()
+                == RecentActivitySource.SERIES_COMPLETION)
+                .singleElement().satisfies(item -> assertThat(item.watchedEpisodeCount()).isEqualTo(2L));
     }
 
     @Test
@@ -350,12 +417,14 @@ class ProfileSummaryDataReaderImplTest {
     }
 
     @Test
-    void shouldUseCurrentSeriesRatingsInsteadOfEpisodeDiaryScores() {
-        reader.read(userId, userId, ContentType.SERIES);
+    void shouldKeepSeriesOpinionDistributionAndEpisodeDiaryRatingsSeparate() {
+        ProfileSummaryDataReader.Snapshot result = reader.read(userId, userId, ContentType.SERIES);
 
         verify(queryRepository).countLatestScoresByUserIdAndContentType(userId, ContentType.SERIES.name());
-        org.mockito.Mockito.verify(queryRepository, org.mockito.Mockito.never())
-                .countLatestScoresByUserIdAndContentType(userId, ContentType.EPISODE.name());
+        verify(queryRepository).countLatestScoresByUserIdAndContentType(userId, ContentType.EPISODE.name());
+        assertThat(result.ratingsDistribution()).isEmpty();
+        assertThat(result.episodeRatings().totalRatings()).isZero();
+        assertThat(result.episodeRatings().averageScore()).isNull();
     }
 
     @Test
