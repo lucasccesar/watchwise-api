@@ -1431,7 +1431,10 @@ paths:
         ou atualizados segundo a política existente. Os cards expõem numberOfEpisodes e
         tmdbVoteAverage da metadata TMDB (nullable quando ausente; numberOfEpisodes também é null para
         filmes) e stats.averageScore como média comunitária pública (null sem notas públicas); metadata
-        TMDB não é armazenada em Content. Com sort=RATING, stats.averageScore ordena primeiro e
+        TMDB não é armazenada em Content. `availableGenres` lista gêneros distintos presentes em toda a
+        watchlist visível do dono, antes dos filtros e da paginação, mesmo quando a página filtrada está
+        vazia. Nomes nulos/vazios são omitidos e diferenças de caixa contam como o mesmo gênero.
+        Com sort=RATING, stats.averageScore ordena primeiro e
         tmdbVoteAverage desempata; direction se aplica às duas notas, valores nulos ficam por último
         e empates completos seguem o UUID crescente da entrada.
       parameters:
@@ -1680,8 +1683,12 @@ paths:
         separado para o Top 5. No perfil do próprio usuário na aba SERIES, cards de série em top5,
         recentActivity e recentReviews incluem `viewerState.myRating` e
         `viewerState.currentRatingVersion` do ContentRating atual. Visitantes recebem viewerState nulo.
+        Para type=SERIES, `episodeRatings` usa a nota do evento mais recente de cada episódio distinto;
+        episódios cujo evento mais recente não tem nota não entram, e rewatches não duplicam a métrica.
+        `ratingsDistribution` permanece referente às opiniões atuais de SERIES.
         O cliente usa essa versão como expectedVersion ao editar a nota em
-        `/contents/{contentId}/my-rating`.
+        `/contents/{contentId}/my-rating`. `recentActivity.watchedEpisodeCount` conta episódios
+        distintos das séries retornadas, sem duplicar rewatches.
       parameters:
         - $ref: "#/components/parameters/userId"
         - name: type
@@ -3608,6 +3615,46 @@ paths:
         "400": { description: name ausente/vazio }
         "403": { description: Cookie CSRF ausente ou inválido }
 
+  /users/me/lists/order:
+    get:
+      tags: [Lists]
+      summary: Carregar um lote da ordem das listas próprias
+      description: >
+        Leitura exclusiva do usuário autenticado. Usa cursor por rank e UUID e devolve até 30 linhas
+        leves por chamada. O cursor está vinculado ao usuário e à revisão da ordem; uma alteração
+        concorrente invalida lotes seguintes com 409.
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 30, default: 30 }
+      responses:
+        "200": { description: Lote da ordem, content: { application/json: { schema: { $ref: "#/components/schemas/UserListOrderPage" } } } }
+        "400": { description: Cursor ou tamanho inválido; corpo ApiError }
+        "401": { description: Não autenticado }
+        "409": { description: A ordem mudou após o cursor ser emitido; corpo ApiError }
+    patch:
+      tags: [Lists]
+      summary: Mover listas próprias em relação a âncoras
+      description: >
+        Aplica de 1 a 100 movimentos na mesma transação. Cada item movido deve ser único no payload;
+        âncoras podem se repetir. A revisão obrigatória rejeita um rascunho baseado em ordem antiga
+        com 409. Cada movimento informa uma lista e uma âncora da coleção própria, sem enviar a lista
+        completa nem atualizar posições fora dos intervalos afetados.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListOrderPatch" }
+      responses:
+        "200": { description: Nova revisão da ordem, content: { application/json: { schema: { $ref: "#/components/schemas/UserListOrderRevision" } } } }
+        "400": { description: Movimentos inválidos ou alvo fora da coleção própria; corpo ApiError }
+        "401": { description: Não autenticado }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "409": { description: Revisão desatualizada ou conflito ao aplicar a ordem; corpo ApiError }
+
   /users/me/lists/bulk:
     post:
       tags: [Lists]
@@ -3894,6 +3941,52 @@ paths:
         "401": { description: Não autenticado }
         "403": { description: "Lista FOLLOWERS sem seguimento aceito, lista PRIVATE de outro usuário, nested list não visível ou notas do dono privadas para episodeAvgRating" }
         "404": { description: Lista não encontrada }
+
+  /lists/{listId}/items/order:
+    get:
+      tags: [Lists]
+      summary: Carregar um lote da ordem dos itens de uma lista própria
+      description: >
+        Disponível somente ao dono da lista. Usa cursor por posição e UUID e devolve até 30 linhas
+        leves por chamada. Referências a listas aninhadas não visíveis mantêm sua posição, mas não
+        incluem título/imagem e não podem ser usadas como alvos de movimento. O cursor está vinculado
+        à lista e à revisão da ordem; alterações concorrentes invalidam lotes seguintes com 409.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 30, default: 30 }
+      responses:
+        "200": { description: Lote da ordem, content: { application/json: { schema: { $ref: "#/components/schemas/UserListOrderPage" } } } }
+        "400": { description: Cursor ou tamanho inválido; corpo ApiError }
+        "401": { description: Não autenticado }
+        "404": { description: Lista não encontrada ou não pertence ao usuário autenticado }
+        "409": { description: A ordem mudou após o cursor ser emitido; corpo ApiError }
+    patch:
+      tags: [Lists]
+      summary: Mover itens de uma lista própria em relação a âncoras
+      description: >
+        Aplica de 1 a 100 movimentos na mesma transação. Cada item movido deve ser único no payload;
+        âncoras podem se repetir. A revisão obrigatória rejeita um rascunho baseado em ordem antiga
+        com 409. A lista deve pertencer ao usuário autenticado. Itens e âncoras precisam pertencer
+        a essa lista, e referências aninhadas não visíveis não podem participar dos movimentos.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListOrderPatch" }
+      responses:
+        "200": { description: Nova revisão da ordem, content: { application/json: { schema: { $ref: "#/components/schemas/UserListOrderRevision" } } } }
+        "400": { description: Movimento inválido, item/âncora fora da lista, referência aninhada inacessível ou movimento que a atravesse; corpo ApiError }
+        "401": { description: Não autenticado }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: Lista não encontrada ou não pertence ao usuário autenticado }
+        "409": { description: Revisão desatualizada ou conflito ao aplicar a ordem; corpo ApiError }
 
   /lists/{listId}/items:
     post:
@@ -7269,7 +7362,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
         - type: object
-          required: [content, aggregate, backdropPath]
+          required: [content, aggregate, backdropPath, availableGenres]
           properties:
             content:
               type: array
@@ -7279,6 +7372,10 @@ components:
               type: string
               nullable: true
               description: Raw TMDB image path from the first card in the filtered and sorted page.
+            availableGenres:
+              type: array
+              description: Distinct, non-blank genre names in the owner's complete visible watchlist, independent of request filters and pagination.
+              items: { type: string }
 
     DroppedEntry:
       type: object
@@ -7414,6 +7511,7 @@ components:
           enum: [DIARY_ENTRY, CONTENT_REVIEW]
           description: DIARY_ENTRY aponta para um evento MOVIE/EPISODE e usa /diary/{diaryEntryId}/like; CONTENT_REVIEW aponta para uma review escrita de SERIES/SEASON e usa /reviews/{reviewId}/like.
         content: { $ref: "#/components/schemas/ContentRef" }
+        seriesTitle: { type: string, nullable: true, description: Título da série pai para prévias EPISODE/SEASON, resolvido em lote no idioma do usuário. }
         card:
           allOf: [{ $ref: "#/components/schemas/ContentCard" }]
           nullable: true
@@ -7536,6 +7634,20 @@ components:
             properties:
               score: { type: integer }
               count: { type: integer }
+        episodeRatings:
+          type: object
+          nullable: true
+          description: Só preenchido quando type=SERIES. Conta a nota do evento mais recente de cada episódio distinto, sem duplicar rewatches.
+          properties:
+            totalRatings: { type: integer, format: int64 }
+            averageScore: { type: number, format: double, nullable: true }
+            distribution:
+              type: array
+              items:
+                type: object
+                properties:
+                  score: { type: integer }
+                  count: { type: integer, format: int64 }
         recentEpisodes:
           type: array
           description: Últimos 4 episódios assistidos. Sempre vazio quando type=MOVIE.
@@ -7575,6 +7687,7 @@ components:
               status: { type: string, enum: [COMPLETED, DROPPED] }
               score: { type: integer, minimum: 1, maximum: 10, nullable: true }
               timesWatched: { type: integer, format: int64 }
+              watchedEpisodeCount: { type: integer, format: int64, nullable: true, description: Episódios distintos já registrados na série; nulo para outras atividades e sem duplicar rewatches. }
               comment: { type: string, nullable: true }
               activityDate: { type: string, format: date-time }
 
@@ -9033,6 +9146,52 @@ components:
         remainingEpisodeCount: { type: integer, format: int64, nullable: true }
         remainingRuntimeMinutes: { type: integer, format: int64, nullable: true }
 
+    UserListOrderItem:
+      type: object
+      required: [id, position, label, thumbnailUrl, movable]
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer, minimum: 1 }
+        label: { type: string, nullable: true, description: Null para referências a listas aninhadas que o dono da lista não pode ver. }
+        thumbnailUrl: { type: string, nullable: true, description: Caminho de imagem TMDB ou URL de pôster customizado; null para listas aninhadas sem acesso ou mídia sem imagem. O front converte caminhos TMDB em URLs de imagem. }
+        movable: { type: boolean, description: False para referências aninhadas inacessíveis; a linha mantém sua posição e não pode ser usada como alvo. }
+
+    UserListOrderPage:
+      type: object
+      required: [revision, items, nextCursor]
+      properties:
+        revision: { type: string, pattern: '^(0|[1-9][0-9]*)$', description: Revisão decimal do escopo da ordem. }
+        items:
+          type: array
+          maxItems: 30
+          items: { $ref: "#/components/schemas/UserListOrderItem" }
+        nextCursor: { type: string, maxLength: 200, nullable: true }
+
+    UserListOrderMove:
+      type: object
+      required: [movedId, anchorId, side]
+      properties:
+        movedId: { type: string, format: uuid }
+        anchorId: { type: string, format: uuid }
+        side: { type: string, enum: [BEFORE, AFTER] }
+
+    UserListOrderPatch:
+      type: object
+      required: [revision, moves]
+      properties:
+        revision: { type: string, minLength: 1, maxLength: 19, pattern: '^(0|[1-9][0-9]*)$' }
+        moves:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/UserListOrderMove" }
+
+    UserListOrderRevision:
+      type: object
+      required: [revision]
+      properties:
+        revision: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+
     UserListItem:
       type: object
       description: >
@@ -9352,6 +9511,7 @@ components:
         id: { type: string, format: uuid }
         userId: { type: string, format: uuid }
         content: { $ref: "#/components/schemas/ContentRef" }
+        seriesTitle: { type: string, nullable: true, description: Título da série pai para prévias de episódio/temporada, resolvido em lote no idioma preferido do usuário. }
         card:
           allOf: [{ $ref: "#/components/schemas/ContentCard" }]
           nullable: true

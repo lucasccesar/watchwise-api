@@ -6079,3 +6079,22 @@ validações e retries continuam indeterminados. `GET /imports/{importId}/review
 remoções e deltas de contagem são gravados na transação do worker. `PATCH /resolutions` aceita
 `expectedReviewRevisions` para rejeitar uma decisão baseada em um cartão desatualizado, e commit não
 prossegue enquanto restarem pendências.
+
+## 2026-11-20 — Watchlist, métricas e reordenação contínua
+
+`GET /users/{userId}/watchlist/view` agora inclui `availableGenres` com os gêneros distintos da
+Watchlist visível completa, independente dos filtros e da página pedida. O backend extrai as opções
+dos candidatos já carregados para montar a visão, sem buscar ou montar cards de páginas adicionais.
+
+O resumo do perfil passou a enviar `episodeRatings` (última nota por episódio distinto), contagem de
+episódios únicos na atividade recente e o título da série pai nas prévias de episódio/temporada. O
+front usa esses campos e deixa de baixar o histórico inteiro para desenhar as métricas. Watch time e
+contagens passaram a vir de uma agregação SQL com filtros condicionais: no snapshot local com 4.514
+registros, a consulta combinada levou 4,63 ms contra 7,31 ms somados nas quatro consultas separadas,
+com resultados iguais. Essa medição cobriu o tempo no banco com cache aquecido; não mede latência HTTP,
+transferência de resposta ou primeira leitura fria.
+
+Os modos de reordenação de listas próprias e de itens usam lotes de até 30 por cursor, uma sequência
+única de arraste no front e salvamentos por âncora em transações de até 100 movimentos. Revisões no
+banco invalidam cursores e rejeitam gravações concorrentes. Referências aninhadas sem acesso mantêm a
+posição, sem expor metadados nem permitir movimento através delas.

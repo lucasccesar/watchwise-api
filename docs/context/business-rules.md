@@ -1139,6 +1139,7 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   em vez de um loop.
 - **Mesmo conteúdo não pode entrar duas vezes na watchlist do mesmo tipo** (constraint
   `uq_watchlist_entries_user_id_type_content_id` → `409`).
+- **As opções de gênero da Watchlist refletem a coleção inteira visível** (`WatchlistEntryServiceImpl.getWatchlistView`) — `availableGenres` é distinto sem diferenciar caixa, omite valores nulos/vazios e ignora os filtros da requisição e o recorte da página; `aggregate` continua descrevendo o conjunto filtrado.
 - **Conteúdo com evidência de assistido não pode ser inserido/reinserido na watchlist**
   (`WatchlistEntryServiceImpl.insertEntry`, `ContentWatchEligibilityServiceImpl`): MOVIE é inelegível
   quando existe qualquer `DiaryEntry` direta, mesmo com `ignore = true`; SERIES é inelegível quando
@@ -1938,6 +1939,13 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   a quantidade de listas rankeadas é `400`; pedir o mesmo rank já atual é no-op; a escrita final usa
   `saveAndFlush` dentro de um `try/catch DataIntegrityViolationException` → `409`, mesmo padrão de
   corrida do `WatchlistEntry`.
+- **Modo contínuo de reordenação usa lotes leves e revisão do dono** (`UserListOrderServiceImpl`,
+  `UserListOrderSnapshotReader`, migration `V104`) — `GET /users/me/lists/order` busca até 30 linhas
+  por cursor keyset `(rank,id)`, sem montar cards. A revisão em `users.user_list_order_revision`
+  invalida cursores após insert/delete/mudança de rank; listas legadas sem rank recebem posição ao fim
+  da coleção na V104, preservando `created_at DESC, id DESC`. `PATCH` exige essa revisão e aplica até
+  100 movimentos únicos por `movedId` numa transação; âncoras repetidas são permitidas e revisão
+  vencida retorna `409`.
 - **Ordenação de `GET /users/{userId}/lists` por `sortBy`** — `rank`/`updatedAt`/`name`/`likesCount`
   são colunas reais de `UserList`, then reaproveitam o `Sort` genérico já suportado por
   `PageRequestFactory.build(pageNumber, pageSize, sortBy, sortDirection)` (nenhuma query nova).
@@ -2155,6 +2163,26 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   para o porquê da "estacionada" em offset gigante) usados por `insertAtPosition`/`deleteAndCloseGap`;
   uma falha de concorrência no `save` durante o deslocamento vira `409` (`ConflictException`), não
   propaga a exceção do Postgres.
+- **Modo de reordenação lê itens em páginas distintas da leitura visual normal**
+  (`UserListOrderSnapshotReader`, `UserListOrderServiceImpl`) — `GET /lists/{listId}/items/order`
+  busca no máximo 30 linhas por keyset `(position,id)` e lê revisão/lote num snapshot consistente;
+  não chama `UserListItemPageReaderImpl.read()`, que materializa a lista inteira para filtros,
+  ordenação e página normal. O snapshot fecha a transação antes de `ContentCardAssembler` resolver
+  metadados/TMDB, para não manter conexão aberta durante essa espera.
+- **Referência aninhada inacessível mantém posição sem expor metadados nem servir de alvo**
+  (`UserListOrderSnapshotReader`, `UserListOrderServiceImpl.assertNestedTargetsVisible`,
+  `assertNoInaccessibleNestedListBetween`) — a resposta
+  omite título e imagem e define `movable=false`; cliente e servidor impedem mover a referência ou
+  atravessar sua posição. A API verifica também as posições entre item e âncora por uma consulta
+  `EXISTS` indexada, sem carregar títulos ou identificar referências ocultas na resposta. A rota só é
+  acessível pelo dono da lista; outra posse retorna `404`.
+- **Salvamentos de ordem dos itens são versionados e atômicos**
+  (`UserListOrderServiceImpl.reorderListItems`, migration `V104`) — `PATCH /lists/{listId}/items/order`
+  exige revisão atual, aceita até 100 `movedId` únicos e valida item/âncora na mesma lista. O bloqueio
+  do agregado e os deslocamentos existentes acontecem na mesma transação; qualquer alvo inválido
+  reverte todos os movimentos. A revisão em `user_lists.item_order_revision` também avança em
+  insert/delete/alteração de posição dos endpoints antigos, importações e cascatas, invalidando cursores
+  anteriores.
 - **`insertAtPosition`/`deleteAndCloseGap` deslocam posição via duas queries `UPDATE` em massa
   (`UserListItemRepository.parkPositionsInRange`/`settleParkedPositions`, escopadas por `userListId`),
   não num loop item a item** — mesma técnica de `WatchlistEntry` (ver nota lá para o porquê da
@@ -2600,6 +2628,8 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   ranking por título. A resposta combinada de `GET /users/{userId}/summary/all-time` preserva seus
   campos legados e acrescenta cards aditivos aos blocos `mostLoggedContent`, `topRated` e `bottomRated`.
 - **Profile summary keeps event metrics separate from series opinions** (`ProfileSummaryDataReaderImpl`): `watchTime` sums MOVIE and EPISODE DiaryEntry events; SERIES ratingsDistribution uses one current ContentRating per series. Series/season completion projections do not add runtime or duplicate episode counts.
+- **Profile episode rating metrics use one latest DiaryEntry score per episode coordinate** (`ProfileSummaryQueryRepository.countLatestScoresByUserIdAndContentType`, `ProfileSummaryDataReaderImpl.readEpisodeRatings`) — rewatches do not add another rating to the episode histogram or average. `episodeRatings` remains separate from the current ContentRating distribution for SERIES.
+- **Recent series activity includes a distinct watched episode count** (`ProfileSummaryQueryRepository.countDistinctEpisodesBySeriesTmdbIds`, `ProfileSummaryDataReaderImpl.addWatchedEpisodeCounts`) — repeated DiaryEntry events for the same Content episode count once, and only series already present in the six recent activity rows are queried.
 - **Cards de série no Summary próprio carregam nota atual e versão juntas** (`ProfileSummaryDataReaderImpl`, `ProfileSummaryReaderImpl`): a consulta agrupa os IDs locais de séries de Top 5, atividade recente e reviews e lê `score`/`version` da mesma linha `ContentRating`. O estado fica limitado ao dono do perfil; visitantes recebem `viewerState` nulo. Séries sem nota têm ambos os campos nulos.
 - **Profile summary highlights expose the TMDB backdrop** (`ProfileDisplayMetadataResolverImpl`): MOVIE/SERIES highlights return `backdropPath`, never fall back to `posterPath` when TMDB has no backdrop; `customPosterUrl` remains a separate owner-specific override.
 - **Series genre counts derive only from episode events** (`ProfileSummaryQueryRepository`): a series is represented by its `seriesTmdbId` and counted once per requested window, regardless of multiple episodes or rewatches. There is no direct SERIES DiaryEntry log; MOVIE counts retain their existing event/window semantics.
