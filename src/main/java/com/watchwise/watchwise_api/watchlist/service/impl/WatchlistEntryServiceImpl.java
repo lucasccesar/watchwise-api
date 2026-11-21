@@ -67,6 +67,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -157,8 +158,11 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         boolean descending = resolveDescending(direction);
         PageRequest pageRequest = viewPageRequest(pageNumber, pageSize);
 
-        List<WatchlistEntry> candidates = watchlistEntryRepository.findByUserIdWithContentForView(userId).stream()
+        List<WatchlistEntry> allEntries = watchlistEntryRepository.findByUserIdWithContentForView(userId).stream()
                 .filter(entry -> entry != null && entry.getContent() != null)
+                .toList();
+        List<String> availableGenres = availableGenres(allEntries);
+        List<WatchlistEntry> candidates = allEntries.stream()
                 .filter(entry -> type == null || entry.getType() == type)
                 .filter(entry -> matchesGenre(entry.getContent(), normalizedGenre))
                 .toList();
@@ -208,7 +212,23 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 page.getTotalPages(),
                 page.hasNext(),
                 aggregate,
-                cards.isEmpty() || cards.get(0).card() == null ? null : cards.get(0).card().backdropPath());
+                cards.isEmpty() || cards.get(0).card() == null ? null : cards.get(0).card().backdropPath(),
+                availableGenres);
+    }
+
+    private List<String> availableGenres(List<WatchlistEntry> entries) {
+        Map<String, String> genresByNormalizedName = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        entries.stream()
+                .map(WatchlistEntry::getContent)
+                .filter(Objects::nonNull)
+                .map(Content::getGenres)
+                .filter(Objects::nonNull)
+                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(genre -> !genre.isEmpty())
+                .forEach(genre -> genresByNormalizedName.putIfAbsent(genre, genre));
+        return List.copyOf(genresByNormalizedName.values());
     }
 
     private String normalizeGenre(String genre) {

@@ -367,7 +367,8 @@ class WatchlistEntryServiceImplTest {
     @Test
     void shouldFilterByTypeAndGenreBeforePaginationAndAggregateFilteredCandidates() {
         WatchlistEntry dramaMovie = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
-        WatchlistEntry dramaSeries = entry(content("1396", ContentType.SERIES, null, List.of("Drama"), 480), ContentType.SERIES, 2);
+        WatchlistEntry dramaSeries = entry(content("1396", ContentType.SERIES, null,
+                List.of("drama", "Comedy", " ", ""), 480), ContentType.SERIES, 2);
         WatchlistEntry comedyMovie = entry(content("680", ContentType.MOVIE, 90, List.of("Comedy")), ContentType.MOVIE, 3);
         List<WatchlistEntry> candidates = List.of(dramaMovie, dramaSeries, comedyMovie);
         stubViewCandidates(candidates);
@@ -387,6 +388,7 @@ class WatchlistEntryServiceImplTest {
         assertThat(result.totalPages()).isEqualTo(1);
         assertThat(result.hasNext()).isFalse();
         assertThat(result.aggregate()).isEqualTo(new WatchlistAggregateDTO(1, 1, 0, 120, 0));
+        assertThat(result.availableGenres()).containsExactly("Comedy", "Drama");
     }
 
     @Test
@@ -632,7 +634,7 @@ class WatchlistEntryServiceImplTest {
                 .isEqualTo(ContentPreviewStatus.PARTIAL);
         verifyNoInteractions(contentService, contentRepository);
         verify(contentCardAssembler).assemble(anyCollection(), eq(new ContentCardContext(
-                user.getPreferredLanguage(), user.getPreferredRegion(), userId, null)), anySet());
+                user.getPreferredLanguage(), user.getPreferredRegion(), userId, userId)), anySet());
     }
 
     @Test

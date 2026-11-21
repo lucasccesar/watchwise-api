@@ -71,7 +71,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = com.watchwise_test.WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class WatchlistEntryControllerIntegrationTest {
@@ -478,6 +478,14 @@ class WatchlistEntryControllerIntegrationTest {
                 .updatedAt(LocalDateTime.now())
                 .build());
         persistEntry(entity, content, ContentType.MOVIE, 1);
+        Content otherTypeContent = contentRepository.save(Content.builder()
+                .tmdbId("1396")
+                .type(ContentType.SERIES)
+                .genres(List.of("Comedy"))
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        persistEntry(entity, otherTypeContent, ContentType.SERIES, 2);
 
         long contentCountBefore = contentRepository.count();
         mockMvc.perform(getWatchlistViewRequest(user, user.id())
@@ -503,7 +511,10 @@ class WatchlistEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.aggregate.movieCount").value(1))
                 .andExpect(jsonPath("$.aggregate.seriesCount").value(0))
                 .andExpect(jsonPath("$.aggregate.totalRuntimeMinutes").value(120))
-                .andExpect(jsonPath("$.aggregate.upcomingCount").value(0));
+                .andExpect(jsonPath("$.aggregate.upcomingCount").value(0))
+                .andExpect(jsonPath("$.availableGenres.length()").value(2))
+                .andExpect(jsonPath("$.availableGenres[0]").value("Comedy"))
+                .andExpect(jsonPath("$.availableGenres[1]").value("Drama"));
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
     }
 
