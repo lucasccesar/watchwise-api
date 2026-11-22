@@ -4416,7 +4416,7 @@ paths:
           schema: { type: boolean }
         - name: sortBy
           in: query
-          description: Sort key for cursor pages; rating sorts use the maximum selected event score, with unrated groups last.
+          description: "NEWEST/OLDEST sort by orderedAt, which uses watchedAt when available and falls back to watchedDate and then the recording time. Regular, grouped, and cursor-grouped pages use the same chronology. In cursor-grouped pages, rating sorts use the maximum selected event score, with unrated groups last."
           schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
       responses:
         "200":

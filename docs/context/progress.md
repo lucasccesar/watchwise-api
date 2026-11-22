@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-11-17.
+Última atualização: 2026-11-22.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -6062,15 +6062,13 @@ Os cards de detalhe de lista, Trending e Watchlist agora expõem `viewerState.my
 do viewer. Na Watchlist, a nota, review e assistência pertencem a quem consulta, enquanto `status`
 continua classificando a entrada; estado pessoal segue fora do cache TMDB.
 
-## 2026-11-19 — Contagens do progresso de importação
+## 2026-11-19 — Importações e correção do cursor agrupado do diário
 
 `GET /imports/{importId}` agora retorna `progress` na fase de aplicação. O total é agregado uma vez
 para a geração do plano quando o worker inicia APPLY. `processedItems` soma os itens aplicados e
 ignorados. As contagens são atualizadas na mesma transação do resultado e checkpoint, incluindo
 membros de lista/watchlist e filhos de expansão de série. A leitura de status não consulta itens de
 importação. Alterar o plano reinicializa o resumo; retry e retomada preservam resultados confirmados.
-
-## 2026-11-19 — Progresso de resolução e fila incremental de revisão
 
 `GET /imports/{importId}` inclui `resolutionProgress` com fase, total e itens identificados durante
 `MATCHING`, além da contagem/revisão da fila. O percentual só é determinado para um total positivo;
@@ -6080,7 +6078,14 @@ remoções e deltas de contagem são gravados na transação do worker. `PATCH /
 `expectedReviewRevisions` para rejeitar uma decisão baseada em um cartão desatualizado, e commit não
 prossegue enquanto restarem pendências.
 
-## 2026-11-20 — Watchlist, métricas e reordenação contínua
+Listas importadas agora validam o grupo de conteúdo durante `RESOLVING`. Temporadas ou episódios que
+conflitam com o grupo da lista aparecem na fila de revisão com a opção de ignorar, em vez de fazer o
+job falhar durante `APPLY`. O grupo permitido da lista permanece inalterado e a tela explica o conflito.
+
+A query do diário agrupado agora fecha o predicado de cursor antes de concatenar `UNION ALL`. Isso
+remove o erro de sintaxe no PostgreSQL ao buscar páginas seguintes com `grouped=true`.
+
+## 2026-11-20 — Watchlist, métricas, reordenação e timeline do diário
 
 `GET /users/{userId}/watchlist/view` agora inclui `availableGenres` com os gêneros distintos da
 Watchlist visível completa, independente dos filtros e da página pedida. O backend extrai as opções
@@ -6098,3 +6103,15 @@ Os modos de reordenação de listas próprias e de itens usam lotes de até 30 p
 única de arraste no front e salvamentos por âncora em transações de até 100 movimentos. Revisões no
 banco invalidam cursores e rejeitam gravações concorrentes. Referências aninhadas sem acesso mantêm a
 posição, sem expor metadados nem permitir movimento através delas.
+
+As páginas regulares e agrupadas de `/users/{id}/diary/view` passaram a ordenar `NEWEST` e `OLDEST` pela
+data assistida, usando a data de criação como fallback quando `watchedDate` está ausente e
+`createdAt` como desempate. O cursor agrupado carregava a data efetiva para continuar sem repetir ou
+ignorar grupos; o formato passou para `v3`.
+
+## 2026-11-22 — Ordenar o diário pelo horário assistido
+
+`/users/{id}/diary/view` agora prioriza `watchedAt` para posicionar eventos no histórico, usando
+`watchedDate` e o momento de gravação como alternativas quando o horário exato não existe. A regra foi
+aplicada às páginas regulares, agrupadas e aos cursores; o formato passou para `v4`, que rejeita
+cursores gerados pela ordenação anterior.
