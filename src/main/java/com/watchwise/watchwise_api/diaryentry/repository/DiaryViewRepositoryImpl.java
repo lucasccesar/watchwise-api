@@ -128,11 +128,12 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
     private String sourceSql(DiaryViewCursorPosition cursor, DiaryEntrySort sortBy) {
         boolean oldestFirst = sortBy == DiaryEntrySort.OLDEST;
         String entryCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "COALESCE(d.watched_date, d.created_at::date)", "d.created_at", "d.id", "1", contentTypeRank("c.type"),
-                "COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at)", "d.id", oldestFirst);
+                "COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at)",
+                "COALESCE(d.watched_date, d.created_at::date)", "d.created_at", "d.id", "1",
+                contentTypeRank("c.type"), "d.id", oldestFirst);
         String completionCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "COALESCE(p.completed_on, anchor.created_at::date)", "anchor.created_at", "anchor.id", "0", contentTypeRank("p.content_type"),
-                "p.ordered_at", "p.id", oldestFirst);
+                "p.ordered_at", "COALESCE(p.completed_on, anchor.created_at::date)",
+                "anchor.created_at", "anchor.id", "0", contentTypeRank("p.content_type"), "p.id", oldestFirst);
         return " " + """
                 SELECT 'PERSISTED_ENTRY' AS kind,
                        d.id AS target_id,
@@ -212,13 +213,13 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 + "WHEN 'EPISODE' THEN 2 ELSE 3 END";
     }
 
-    private String afterCursor(String sortDate, String sortAt, String sortId, String kindRank,
-            String contentRank, String orderedAt, String targetId, boolean oldestFirst) {
+    private String afterCursor(String orderedAt, String sortDate, String sortAt, String sortId, String kindRank,
+            String contentRank, String targetId, boolean oldestFirst) {
         String comparison = oldestFirst ? ">" : "<";
-        return "((" + sortDate + ", " + sortAt + ", " + sortId + ", (0 - (" + kindRank + ")), " +
-                "(0 - (" + contentRank + ")), " + orderedAt + ", " + targetId + ") " + comparison + " " +
-                "(:cursorSortDate, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
-                "(0 - (:cursorContentTypeRank)), :cursorOrderedAt, :cursorTargetId))";
+        return "((" + orderedAt + ", " + sortDate + ", " + sortAt + ", " + sortId + ", (0 - (" + kindRank + ")), " +
+                "(0 - (" + contentRank + ")), " + targetId + ") " + comparison + " " +
+                "(:cursorOrderedAt, :cursorSortDate, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
+                "(0 - (:cursorContentTypeRank)), :cursorTargetId))";
     }
 
     private GroupedDiaryViewKey mapGroupedRow(ResultSet resultSet, int rowNumber) throws SQLException {

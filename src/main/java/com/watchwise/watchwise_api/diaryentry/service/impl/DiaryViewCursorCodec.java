@@ -15,7 +15,7 @@ import java.util.UUID;
 
 final class DiaryViewCursorCodec {
 
-    private static final String VERSION = "v3";
+    private static final String VERSION = "v4";
 
     private DiaryViewCursorCodec() { }
 
