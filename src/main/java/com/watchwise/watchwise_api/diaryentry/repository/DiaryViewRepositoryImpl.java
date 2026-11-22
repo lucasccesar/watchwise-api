@@ -128,12 +128,13 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
     private String sourceSql(DiaryViewCursorPosition cursor, DiaryEntrySort sortBy) {
         boolean oldestFirst = sortBy == DiaryEntrySort.OLDEST;
         String entryCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at)",
-                "COALESCE(d.watched_date, d.created_at::date)", "d.created_at", "d.id", "1",
-                contentTypeRank("c.type"), "d.id", oldestFirst);
+                "COALESCE(d.watched_at, d.watched_date::timestamp AT TIME ZONE 'UTC', d.created_at)",
+                "d.created_at", "d.id", "1", contentTypeRank("c.type"), "d.id",
+                "COALESCE(d.watched_date, d.created_at::date)", oldestFirst);
         String completionCursorFilter = cursor == null ? "" : " AND " + afterCursor(
-                "p.ordered_at", "COALESCE(p.completed_on, anchor.created_at::date)",
-                "anchor.created_at", "anchor.id", "0", contentTypeRank("p.content_type"), "p.id", oldestFirst);
+                "p.ordered_at", "anchor.created_at", "anchor.id", "0",
+                contentTypeRank("p.content_type"), "p.id",
+                "COALESCE(p.completed_on, anchor.created_at::date)", oldestFirst);
         return " " + """
                 SELECT 'PERSISTED_ENTRY' AS kind,
                        d.id AS target_id,
@@ -146,7 +147,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                        d.watch_number,
                        d.id AS anchor_entry_id,
                        d.watched_date,
-                       COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at) AS ordered_at,
+                       COALESCE(d.watched_at, d.watched_date::timestamp AT TIME ZONE 'UTC', d.created_at) AS ordered_at,
                        d.created_at AS group_sort_at,
                        d.id AS group_sort_id,
                        d.score,
@@ -217,13 +218,13 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 + "WHEN 'EPISODE' THEN 2 ELSE 3 END";
     }
 
-    private String afterCursor(String orderedAt, String sortDate, String sortAt, String sortId, String kindRank,
-            String contentRank, String targetId, boolean oldestFirst) {
+    private String afterCursor(String orderedAt, String sortAt, String sortId, String kindRank,
+            String contentRank, String targetId, String sortDate, boolean oldestFirst) {
         String comparison = oldestFirst ? ">" : "<";
-        return "((" + orderedAt + ", " + sortDate + ", " + sortAt + ", " + sortId + ", (0 - (" + kindRank + ")), " +
-                "(0 - (" + contentRank + ")), " + targetId + ") " + comparison + " " +
-                "(:cursorOrderedAt, :cursorSortDate, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
-                "(0 - (:cursorContentTypeRank)), :cursorTargetId))";
+        return "((" + orderedAt + ", " + sortAt + ", " + sortId + ", (0 - (" + kindRank + ")), " +
+                "(0 - (" + contentRank + ")), " + targetId + ", " + sortDate + ") " + comparison + " " +
+                "(:cursorOrderedAt, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
+                "(0 - (:cursorContentTypeRank)), :cursorTargetId, :cursorSortDate))";
     }
 
     private GroupedDiaryViewKey mapGroupedRow(ResultSet resultSet, int rowNumber) throws SQLException {

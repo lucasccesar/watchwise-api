@@ -928,7 +928,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
               AND c.type IN (:contentTypes)
-            ORDER BY COALESCE(d.watched_at, d.watched_date::timestamptz, d.created_at) DESC,
+            ORDER BY COALESCE(d.watched_at, d.watched_date::timestamp AT TIME ZONE 'UTC', d.created_at) DESC,
                      d.created_at DESC,
                      d.id DESC
             """, nativeQuery = true)

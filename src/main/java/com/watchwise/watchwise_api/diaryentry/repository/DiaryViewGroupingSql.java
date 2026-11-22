@@ -197,22 +197,20 @@ final class DiaryViewGroupingSql {
     }
 
     private static String afterNewest(String alias) {
-        return "((" + alias + ".ordered_at, " + alias + ".group_date, " + alias + ".group_sort_at, " +
-                alias + ".group_sort_id, " +
+        return "((" + alias + ".ordered_at, " + alias + ".group_sort_at, " + alias + ".group_sort_id, " +
                 "(0 - (CASE WHEN " + alias + ".kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END)), " +
                 "(0 - (CASE " + alias + ".content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 " +
-                "WHEN 'EPISODE' THEN 2 ELSE 3 END)), " + alias + ".target_id) < " +
-                "(:cursorOrderedAt, :cursorSortDate, :cursorSortAt, :cursorSortId, " +
-                "(0 - (:cursorKindRank)), (0 - (:cursorContentTypeRank)), :cursorTargetId))";
+                "WHEN 'EPISODE' THEN 2 ELSE 3 END)), " + alias + ".target_id, " + alias + ".group_date) < " +
+                "(:cursorOrderedAt, :cursorSortAt, :cursorSortId, (0 - (:cursorKindRank)), " +
+                "(0 - (:cursorContentTypeRank)), :cursorTargetId, :cursorSortDate))";
     }
 
     static String order() {
         return "ordered_at DESC NULLS LAST, " +
-                "COALESCE(watched_date, group_sort_at::date) DESC NULLS LAST, " +
                 "group_sort_at DESC NULLS LAST, group_sort_id DESC NULLS LAST, " +
                 "CASE WHEN kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END, " +
                 "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END, " +
-                "target_id DESC";
+                "target_id DESC, COALESCE(watched_date, group_sort_at::date) DESC NULLS LAST";
     }
 
     static String pageOrder(DiaryEntrySort sortBy) {
@@ -229,10 +227,10 @@ final class DiaryViewGroupingSql {
 
     private static String chronologicalPageOrder(String direction, String inverseDirection) {
         return "ordered_at " + direction + " NULLS LAST, " +
-                "COALESCE(watched_date, group_sort_at::date) " + direction + " NULLS LAST, " +
                 "group_sort_at " + direction + " NULLS LAST, group_sort_id " + direction + " NULLS LAST, " +
                 "CASE WHEN kind = 'DERIVED_COMPLETION' THEN 0 ELSE 1 END " + inverseDirection + ", " +
                 "CASE content_type WHEN 'SERIES' THEN 0 WHEN 'SEASON' THEN 1 WHEN 'EPISODE' THEN 2 ELSE 3 END " +
-                inverseDirection + ", target_id " + direction + " NULLS LAST";
+                inverseDirection + ", target_id " + direction + " NULLS LAST, " +
+                "COALESCE(watched_date, group_sort_at::date) " + direction + " NULLS LAST";
     }
 }
