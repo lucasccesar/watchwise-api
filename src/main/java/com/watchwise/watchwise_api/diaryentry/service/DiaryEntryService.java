@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineResponseItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
@@ -25,6 +26,11 @@ public interface DiaryEntryService {
 
     Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
             ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId, Integer score);
+
+    Page<DiaryTimelineResponseItemDTO> getDiaryTimeline(
+            UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId,
+            Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy);
 
     default Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber,
             Integer pageSize, ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview,

@@ -172,7 +172,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                        p.ordered_at,
                        anchor.created_at AS group_sort_at,
                        anchor.id AS group_sort_id,
-                       rating.score AS score,
+                       COALESCE(pass_rating.score, rating.score) AS score,
                        NULL::boolean AS watched_in_theater,
                        EXISTS (SELECT 1
                                FROM content_reviews review
@@ -186,6 +186,10 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                  LEFT JOIN content_ratings rating
                    ON rating.user_id = p.user_id
                   AND rating.content_id = p.content_id
+                 LEFT JOIN content_rating_passes pass_rating
+                   ON pass_rating.user_id = p.user_id
+                  AND pass_rating.content_id = p.content_id
+                  AND pass_rating.watch_number = p.watch_number
                 JOIN diary_entries anchor ON anchor.id = p.anchor_diary_entry_id
                                            AND anchor.user_id = p.user_id
                 JOIN user_series_history_states state
@@ -247,6 +251,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
     private String filterSql(DiaryViewFilter filter) {
         return """
                 AND (:type IS NULL OR content_type = :type)
+                AND (:seriesTmdbId IS NULL OR
+                     (content_type <> 'MOVIE' AND COALESCE(series_tmdb_id, tmdb_id) = :seriesTmdbId))
                 AND (:dateStart IS NULL OR watched_date >= :dateStart)
                 AND (:dateEnd IS NULL OR watched_date <= :dateEnd)
                 AND (:scoreMin IS NULL OR score >= :scoreMin)

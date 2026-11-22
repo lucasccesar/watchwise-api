@@ -55,6 +55,11 @@ import com.watchwise.watchwise_api.diaryentry.dto.WatchEventCommand;
 import com.watchwise.watchwise_api.diaryentry.dto.WatchMutationResult;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineCompletionItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineEntryItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineResponseItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -68,11 +73,13 @@ import com.watchwise.watchwise_api.diaryentry.repository.ImportedWatchAssertionR
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySearchCriteria;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryViewRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.diarycompletion.service.impl.DiaryProjectionInvalidator;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import com.watchwise.watchwise_api.diaryentry.service.DiaryViewService;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryWatchCommandService;
 import com.watchwise.watchwise_api.diarycompletion.model.CompletedPass;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
@@ -129,6 +136,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -169,6 +177,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final SeriesProgressPresentationEnricher seriesProgressPresentationEnricher;
     private final DiaryProjectionInvalidator diaryProjectionInvalidator;
     private final DiaryWatchCommandService diaryWatchCommandService;
+    private final DiaryViewService diaryViewService;
     private final UserActionExecutor userActionExecutor;
     private final CompletionScopeLoader completionScopeLoader;
     private final CalendarScheduleProvider calendarScheduleProvider;
@@ -247,6 +256,129 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 effectiveSort, pageRequest);
 
         return enrichDiaryPage(viewerId, userId, target, entries);
+    }
+
+    @Override
+    public Page<DiaryTimelineResponseItemDTO> getDiaryTimeline(
+            UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview,
+            String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy) {
+        DiaryEntrySort effectiveSort = sortBy == null ? DiaryEntrySort.NEWEST : sortBy;
+        validateScoreRange(score, scoreFrom, scoreTo);
+        if (score != null && (score < 1 || score > 10)) {
+            throw new BadRequestException("score must be between 1 and 10");
+        }
+
+        User owner = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewDiary(viewerId, userId, owner);
+
+        String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
+        if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
+            throw new BadRequestException("seriesTmdbId cannot be blank");
+        }
+        if (year != null && (dateFrom != null || dateTo != null)) {
+            throw new BadRequestException("year cannot be combined with dateFrom/dateTo");
+        }
+
+        LocalDate effectiveDateFrom = dateFrom != null ? dateFrom : (year != null ? startOfYear(year) : null);
+        LocalDate effectiveDateTo = dateTo != null ? dateTo : (year != null ? endOfYear(year) : null);
+        Integer effectiveScoreMin = scoreFrom != null ? scoreFrom : score;
+        Integer effectiveScoreMax = scoreTo != null ? scoreTo : score;
+        DiaryViewFilter filter = new DiaryViewFilter(type, effectiveDateFrom, effectiveDateTo,
+                effectiveScoreMin, effectiveScoreMax, hasReview, normalizedSeriesTmdbId, null, effectiveSort);
+        Page<DiaryViewRepository.DiaryViewKey> timeline = diaryViewService.getTimelineKeys(
+                viewerId, userId, filter, pageNumber, pageSize);
+        if (timeline.isEmpty()) {
+            return new org.springframework.data.domain.PageImpl<>(
+                    List.of(), timeline.getPageable(), timeline.getTotalElements());
+        }
+
+        List<UUID> persistedEntryIds = timeline.getContent().stream()
+                .filter(key -> "PERSISTED_ENTRY".equals(key.kind()))
+                .map(DiaryViewRepository.DiaryViewKey::targetId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<UUID, DiaryEntryResponseDTO> persistedEntriesById = persistedEntryIds.isEmpty()
+                ? Map.of()
+                : enrichDiaryPage(viewerId, userId, owner,
+                        new PageImpl<>(diaryEntryRepository.findByIdInWithContentAndUser(persistedEntryIds).stream()
+                                .filter(entry -> userId.equals(entry.getUser().getId()))
+                                .toList()))
+                        .getContent().stream()
+                        .collect(Collectors.toMap(DiaryEntryResponseDTO::id, Function.identity()));
+
+        List<DiaryViewRepository.DiaryViewKey> completionKeys = timeline.getContent().stream()
+                .filter(key -> "DERIVED_COMPLETION".equals(key.kind()))
+                .toList();
+        List<DiaryViewItemDTO> completions = diaryViewService
+                .enrichDerivedCompletions(userId, completionKeys).getContent();
+        Map<String, DiaryViewItemDTO> completionsByKey = completions.stream()
+                .collect(Collectors.toMap(DiaryViewItemDTO::completionKey, Function.identity()));
+        Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate = assembleTimelineCompletionCards(
+                viewerId, owner, completions);
+
+        List<DiaryTimelineResponseItemDTO> content = new ArrayList<>(timeline.getContent().size());
+        for (DiaryViewRepository.DiaryViewKey key : timeline.getContent()) {
+            if ("PERSISTED_ENTRY".equals(key.kind())) {
+                DiaryEntryResponseDTO entry = persistedEntriesById.get(key.targetId());
+                if (entry != null) content.add(new DiaryTimelineEntryItemDTO(entry));
+                continue;
+            }
+            DiaryViewItemDTO completion = completionsByKey.get(timelineCompletionKey(key));
+            if (completion == null) continue;
+            ContentCoordinate coordinate = contentCoordinate(completion.content());
+            ContentCardDTO card = coordinate == null ? null : cardsByCoordinate.get(coordinate);
+            ContentCardDTO seriesCard = timelineSeriesCard(completion.content(), card, cardsByCoordinate);
+            content.add(new DiaryTimelineCompletionItemDTO(completion, card, seriesCard));
+        }
+        return new org.springframework.data.domain.PageImpl<>(content, timeline.getPageable(), timeline.getTotalElements());
+    }
+
+    private String timelineCompletionKey(DiaryViewRepository.DiaryViewKey key) {
+        String contentId = key.contentType() == ContentType.SERIES ? key.tmdbId() : key.seriesTmdbId();
+        String base = key.contentType() + ":" + contentId;
+        if (key.seasonNumber() != null) base += ":" + key.seasonNumber();
+        return base + ":pass:" + key.watchNumber();
+    }
+
+    private Map<ContentCoordinate, ContentCardDTO> assembleTimelineCompletionCards(
+            UUID viewerId, User owner, List<DiaryViewItemDTO> completions) {
+        if (completions.isEmpty()) return Map.of();
+        List<ContentCardSpec> specs = new ArrayList<>();
+        for (DiaryViewItemDTO completion : completions) {
+            ContentCoordinate coordinate = contentCoordinate(completion.content());
+            if (coordinate == null) continue;
+            specs.add(new ContentCardSpec(coordinate, null, null, null,
+                    completion.content().runtimeMinutes()));
+            if (completion.content().type() == ContentType.SEASON
+                    && completion.content().seriesTmdbId() != null) {
+                specs.add(new ContentCardSpec(new ContentCoordinate(ContentType.SERIES,
+                        completion.content().seriesTmdbId(), null, null, null), null, null, null, null));
+            }
+        }
+        specs = distinctCardSpecs(specs);
+        if (specs.isEmpty()) return Map.of();
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(specs,
+                new ContentCardContext(owner.getPreferredLanguage(), owner.getPreferredRegion(), owner.getId(), viewerId),
+                cardFields(true, viewerId));
+        return cards == null ? Map.of() : cards;
+    }
+
+    private ContentCoordinate contentCoordinate(ContentRefDTO content) {
+        if (content == null || content.type() == null) return null;
+        return new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber());
+    }
+
+    private ContentCardDTO timelineSeriesCard(ContentRefDTO content, ContentCardDTO card,
+            Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
+        if (content == null) return null;
+        if (content.type() == ContentType.SERIES) return card;
+        if (content.seriesTmdbId() == null) return null;
+        return cardsByCoordinate.get(new ContentCoordinate(ContentType.SERIES,
+                content.seriesTmdbId(), null, null, null));
     }
 
     private void validateScoreRange(Integer score, Integer scoreFrom, Integer scoreTo) {

@@ -216,9 +216,18 @@ final class DiaryViewGroupingSql {
     }
 
     static String pageOrder(DiaryEntrySort sortBy) {
+        if (sortBy == DiaryEntrySort.RATING_DESC || sortBy == DiaryEntrySort.RATING_ASC) {
+            String scoreDirection = sortBy == DiaryEntrySort.RATING_DESC ? "DESC" : "ASC";
+            return "CASE WHEN score IS NULL THEN 1 ELSE 0 END ASC, score " + scoreDirection + " NULLS LAST, " +
+                    chronologicalPageOrder("DESC", "ASC");
+        }
         boolean oldestFirst = sortBy == DiaryEntrySort.OLDEST;
         String direction = oldestFirst ? "ASC" : "DESC";
         String inverseDirection = oldestFirst ? "DESC" : "ASC";
+        return chronologicalPageOrder(direction, inverseDirection);
+    }
+
+    private static String chronologicalPageOrder(String direction, String inverseDirection) {
         return "ordered_at " + direction + " NULLS LAST, " +
                 "COALESCE(watched_date, group_sort_at::date) " + direction + " NULLS LAST, " +
                 "group_sort_at " + direction + " NULLS LAST, group_sort_id " + direction + " NULLS LAST, " +

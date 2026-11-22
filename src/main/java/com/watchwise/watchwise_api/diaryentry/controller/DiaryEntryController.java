@@ -12,6 +12,9 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntriesBatchRequestDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineCompletionItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineEntryItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryTimelineResponseItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
@@ -67,8 +70,9 @@ public class DiaryEntryController {
     }
 
     @GetMapping("/users/{userId}/diary")
-    public ResponseEntity<PageWithBackdropResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
+    public ResponseEntity<?> getDiaryEntries(
             @PathVariable UUID userId,
+            @RequestParam(defaultValue = "false") boolean includeCompletions,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -82,12 +86,30 @@ public class DiaryEntryController {
             @RequestParam(required = false) Integer scoreTo,
             @RequestParam(required = false, defaultValue = "NEWEST") DiaryEntrySort sortBy
     ) {
-        Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
+        if (!includeCompletions) {
+            Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
+                    getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId,
+                    score, scoreFrom, scoreTo, sortBy);
+            String backdropPath = entries.isEmpty() || entries.getContent().get(0).card() == null
+                    ? null
+                    : entries.getContent().get(0).card().backdropPath();
+            return ResponseEntity.ok(PageWithBackdropResponseDTO.of(entries, backdropPath));
+        }
+
+        Page<DiaryTimelineResponseItemDTO> entries = diaryEntryService.getDiaryTimeline(
                 getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId, score,
                 scoreFrom, scoreTo, sortBy);
-        String backdropPath = entries.isEmpty() || entries.getContent().get(0).card() == null
-                ? null
-                : entries.getContent().get(0).card().backdropPath();
+        String backdropPath = null;
+        if (!entries.isEmpty()) {
+            DiaryTimelineResponseItemDTO firstItem = entries.getContent().getFirst();
+            if (firstItem instanceof DiaryTimelineEntryItemDTO persisted && persisted.entry().card() != null) {
+                backdropPath = persisted.entry().card().backdropPath();
+            } else if (firstItem instanceof DiaryTimelineCompletionItemDTO completion) {
+                backdropPath = completion.seriesCard() != null
+                        ? completion.seriesCard().backdropPath()
+                        : completion.card() == null ? null : completion.card().backdropPath();
+            }
+        }
         return ResponseEntity.ok(PageWithBackdropResponseDTO.of(entries, backdropPath));
     }
 

@@ -1649,11 +1649,18 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   criada naquele período. `year` é um atalho pra `dateFrom=01/01`/`dateTo=31/12` do mesmo ano, resolvido
   antes de decidir a query — combinar `year` com `dateFrom`/`dateTo` explícitos é `400`
   (`DiaryEntryServiceImpl.getDiaryEntries`). `type` e `hasReview` são filtros independentes, aplicáveis
-  junto com qualquer combinação de data; `hasReview` compara `comment IS NOT NULL`/`IS NULL`. A rota
-  REST com `sortBy` usa `DiaryEntryReadRepository.findPage` antes da paginação, inclusive sem filtros;
-  a query adiciona somente os predicados efetivamente informados. `NEWEST`/`OLDEST` ordenam pela data
-  assistida efetiva, depois por `watchedAt` quando há horário e por `createdAt`/ID para desempates.
-- **A timeline de `/users/{id}/diary/view` ordena pelo momento assistido** (`DiaryViewRepositoryImpl.findPage`/`findGroupedCandidates`, `DiaryViewGroupingSql.order`/`afterNewest`) — `NEWEST` e `OLDEST` priorizam `orderedAt`, que preserva `watchedAt` quando disponível e recorre a `watchedDate` ou ao momento de gravação quando não há horário/data mais precisa. A mesma ordem vale para páginas regulares, agrupadas e páginas com cursor agrupado; data efetiva, criação, tipo e IDs estabilizam empates. O cursor usa a versão `v4`; cursores anteriores são rejeitados.
+  junto com qualquer combinação de data; `hasReview` compara `comment IS NOT NULL`/`IS NULL`. Com
+  `includeCompletions=false`, `DiaryEntryReadRepository.findPage` pagina eventos persistidos e ordena
+  pela data assistida efetiva, depois por `watchedAt` quando há horário e por `createdAt`/ID para
+  desempates. Com `includeCompletions=true`, a ordenação e paginação usam a timeline combinada de
+  `DiaryViewServiceImpl.getView`.
+- **`GET /users/{userId}/diary` combina eventos e conclusões quando `includeCompletions=true`**
+  (`DiaryEntryServiceImpl.getDiaryTimeline`, `DiaryViewServiceImpl.getView`) — a página é selecionada
+  sobre a timeline única antes do enriquecimento visual. Eventos persistidos continuam com `DiaryEntry`
+  e o card completo; conclusões SERIES/SEASON são projeções, usam `completionKey` e cards TMDB próprios
+  e nunca criam linhas `DiaryEntry`. `type=SERIES|SEASON` e `seriesTmdbId` filtram as conclusões pela
+  série relacionada. `includeCompletions=false` mantém a resposta legada somente com eventos MOVIE/EPISODE.
+- **A timeline de `/users/{id}/diary/view` ordena pelo momento assistido** (`DiaryViewRepositoryImpl.findPage`/`findGroupedCandidates`, `DiaryViewGroupingSql.order`/`afterNewest`) — `NEWEST` e `OLDEST` priorizam `orderedAt`, que preserva `watchedAt` quando disponível e recorre a `watchedDate` ou ao momento de gravação quando não há horário/data mais precisa. A mesma ordem vale para páginas regulares, agrupadas e páginas com cursor agrupado; filtros `seriesTmdbId` aplicam-se antes da paginação e, nos modos `RATING_DESC`/`RATING_ASC`, a nota vem primeiro, sem nota fica por último e a cronologia desempata. Data efetiva, criação, tipo e IDs estabilizam empates. O cursor usa a versão `v4`; cursores anteriores são rejeitados.
 - **Dono do recurso em `PATCH`/`DELETE` é resolvido por `userId` batendo, não por dono explícito na
   URL** (`findOwnedEntry`) — tentar editar/apagar a entrada de outro usuário devolve `404` ("Diary entry
   not found"), não `403`, para não revelar que o recurso existe e pertence a outra pessoa (mesmo padrão

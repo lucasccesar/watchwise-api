@@ -4264,19 +4264,24 @@ paths:
       tags: [Diary]
       summary: Histórico de conteúdos assistidos (diário)
       description: >
-        Retorna somente eventos assistidos MOVIE/EPISODE, mais recentes primeiro. Use
-        /users/{userId}/diary/view para incluir conclusões derivadas de série/temporada. `year` é
-        um atalho pra `dateFrom=01/01`/`dateTo=31/12` do mesmo ano — usar `year` junto com
+        Retorna eventos assistidos com cards TMDB. Com `includeCompletions=true`, combina na mesma
+        página conclusões derivadas de SERIES/SEASON, com kind próprio e card TMDB; elas não criam
+        DiaryEntry. `includeCompletions=false` preserva somente eventos persistidos MOVIE/EPISODE. `year` é um
+        atalho pra `dateFrom=01/01`/`dateTo=31/12` do mesmo ano — usar `year` junto com
         `dateFrom`/`dateTo` é `400`.
       parameters:
         - $ref: "#/components/parameters/userId"
+        - name: includeCompletions
+          in: query
+          description: Inclui conclusões derivadas SERIES/SEASON na mesma paginação. false preserva a resposta apenas com eventos persistidos.
+          schema: { type: boolean, default: false }
         - name: year
           in: query
           schema: { type: integer }
         - name: type
           in: query
-          description: Filtra eventos persistidos; aceita somente MOVIE/EPISODE.
-          schema: { type: string, enum: [MOVIE, EPISODE] }
+          description: Filtra itens da timeline. Com includeCompletions=false, aceita somente MOVIE/EPISODE.
+          schema: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
         - name: dateFrom
           in: query
           description: Início do range de watchedDate (inclusivo). Não pode ser combinado com year.
@@ -4287,27 +4292,27 @@ paths:
           schema: { type: string, format: date }
         - name: hasReview
           in: query
-          description: "true filtra só entradas com comment preenchido (Reviews); false só as sem review (History)."
+          description: Filtra comentários persistidos e reviews escritos vinculados à mesma conclusão e passada.
           schema: { type: boolean }
         - name: seriesTmdbId
           in: query
-          description: Filtra eventos EPISODE pela série pai.
+          description: Filtra episódios e conclusões derivados pela série pai.
           schema: { type: string }
         - name: score
           in: query
-          description: Filters by exact score from 1 to 10; only entries with that score are returned.
+          description: Filtra itens da timeline pela nota exata de 1 a 10.
           schema: { type: integer, minimum: 1, maximum: 10 }
         - name: scoreFrom
           in: query
-          description: Inclusive lower bound for score. Cannot be combined with score.
+          description: Limite inferior inclusivo da nota. Não pode ser combinado com score.
           schema: { type: integer, minimum: 1, maximum: 10 }
         - name: scoreTo
           in: query
-          description: Inclusive upper bound for score. Cannot be combined with score.
+          description: Limite superior inclusivo da nota. Não pode ser combinado com score.
           schema: { type: integer, minimum: 1, maximum: 10 }
         - name: sortBy
           in: query
-          description: "NEWEST/OLDEST sort by watchedDate (falling back to createdAt's date when absent), then watchedAt within the day when available, with createdAt and ID as tie-breakers. Rating sorts use this chronology after score. Ordering is applied before pagination. TITLE_ASC is not supported because titles are not stored locally."
+          description: "With includeCompletions=true, NEWEST/OLDEST sort the combined timeline by orderedAt (watchedAt when available, then watchedDate and creation time). With includeCompletions=false, they sort by watchedDate, then watchedAt within the day when available, with createdAt and ID as tie-breakers. Rating sorts use the selected score first, then the corresponding chronology. Ordering is applied before pagination. TITLE_ASC is not supported because titles are not stored locally."
           schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
         - $ref: "#/components/parameters/page"
         - name: size
@@ -4319,13 +4324,16 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DiaryEntryPageView" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DiaryEntryPageView"
+                  - $ref: "#/components/schemas/DiaryTimelinePageView"
         "400":
           description: >
             Número/tamanho de página inválido, year inválido, userId não é um
             UUID válido, year combinado com dateFrom/dateTo, score fora de 1 a 10,
             scoreFrom/scoreTo fora de 1 a 10, score combinado com uma faixa,
-            scoreFrom maior que scoreTo, seriesTmdbId em branco ou type SERIES/SEASON (use /diary/view).
+            scoreFrom maior que scoreTo, seriesTmdbId em branco ou type SERIES/SEASON com includeCompletions=false.
         "403": { description: Perfil privado e quem pede não é seguidor aceito }
         "404": { description: Usuário não encontrado }
 
@@ -4408,7 +4416,7 @@ paths:
           schema: { type: boolean }
         - name: seriesTmdbId
           in: query
-          description: Limits grouped rows to this series before cursor selection.
+          description: Limits timeline rows to this series; cursor selection also applies the filter before grouping.
           schema: { type: string }
         - name: watchedInTheater
           in: query
@@ -6637,6 +6645,54 @@ components:
               description: >
                 Raw TMDB image path from the first diary entry in the filtered and sorted page. With
                 the default NEWEST order, hasReview=true selects the newest entry that has a review.
+
+    DiaryTimelinePageView:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [content, backdropPath]
+          properties:
+            content:
+              type: array
+              items: { $ref: "#/components/schemas/DiaryTimelineResponseItem" }
+            backdropPath:
+              type: string
+              nullable: true
+              description: TMDB backdrop path from the first persisted or derived timeline item on the page.
+
+    DiaryTimelineResponseItem:
+      oneOf:
+        - $ref: "#/components/schemas/DiaryTimelineEntryItem"
+        - $ref: "#/components/schemas/DiaryTimelineCompletionItem"
+      discriminator:
+        propertyName: kind
+        mapping:
+          PERSISTED_ENTRY: "#/components/schemas/DiaryTimelineEntryItem"
+          DERIVED_COMPLETION: "#/components/schemas/DiaryTimelineCompletionItem"
+
+    DiaryTimelineEntryItem:
+      type: object
+      required: [kind, entry]
+      properties:
+        kind: { type: string, enum: [PERSISTED_ENTRY] }
+        entry: { $ref: "#/components/schemas/DiaryEntry" }
+
+    DiaryTimelineCompletionItem:
+      type: object
+      required: [kind, completion, card]
+      properties:
+        kind: { type: string, enum: [DERIVED_COMPLETION] }
+        completion:
+          allOf: [{ $ref: "#/components/schemas/DiaryViewItem" }]
+          description: Derived completion metadata and opinion summary; it does not identify a DiaryEntry row.
+        card:
+          allOf: [{ $ref: "#/components/schemas/ContentCard" }]
+          nullable: true
+          description: Full TMDB card for the completed series or season.
+        seriesCard:
+          allOf: [{ $ref: "#/components/schemas/ContentCard" }]
+          nullable: true
+          description: Parent-series card used when the completion is a season.
 
     ContentSeasonSelectionDTO:
       type: object

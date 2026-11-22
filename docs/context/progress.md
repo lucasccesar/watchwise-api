@@ -6116,6 +6116,8 @@ ignorar grupos; o formato passou para `v3`.
 aplicada às páginas regulares, agrupadas e aos cursores; o formato passou para `v4`, que rejeita
 cursores gerados pela ordenação anterior.
 
-`GET /users/{id}/diary` também passou a ordenar os eventos antes da paginação pela data assistida e,
-dentro do dia, pelo horário `watchedAt` quando disponível. A resposta continua enriquecendo os cards
-com metadados do TMDB; registros sem horário usam a data e a criação como desempate.
+`GET /users/{id}/diary?includeCompletions=true` agora combina, na mesma página, os eventos MOVIE/EPISODE
+com as conclusões derivadas SERIES/SEASON. Os eventos preservam seus cards TMDB e dados sociais; cada
+conclusão recebe card próprio e continua sendo projeção, sem criar `DiaryEntry`. A ordenação combinada
+acontece antes da paginação. O padrão `includeCompletions=false` preserva a resposta legada para
+consumidores existentes; os filtros `type` e `seriesTmdbId` também cobrem conclusões quando habilitadas.

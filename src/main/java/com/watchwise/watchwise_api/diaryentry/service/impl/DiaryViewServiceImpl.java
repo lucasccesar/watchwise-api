@@ -74,6 +74,12 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
             DiaryViewFilter filter,
             Integer pageNumber,
             Integer pageSize) {
+        return enrich(ownerId, getTimelineKeys(viewerId, ownerId, filter, pageNumber, pageSize));
+    }
+
+    @Override
+    public Page<DiaryViewRepository.DiaryViewKey> getTimelineKeys(
+            UUID viewerId, UUID ownerId, DiaryViewFilter filter, Integer pageNumber, Integer pageSize) {
         User owner = userRepository.findById(ownerId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         userBlockAccessService.assertContentVisible(viewerId, ownerId);
@@ -82,14 +88,22 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         refreshCompletions(ownerId, filter);
-        Page<DiaryViewRepository.DiaryViewKey> keys = diaryViewRepository.findPage(
+        return diaryViewRepository.findPage(
                 ownerId,
                 owner.getPreferredRegion(),
                 owner.getPreferredLanguage(),
                 java.time.Instant.now(),
                 filter,
                 pageRequest);
-        return enrich(ownerId, keys);
+    }
+
+    @Override
+    public Page<DiaryViewItemDTO> enrichDerivedCompletions(
+            UUID ownerId, List<DiaryViewRepository.DiaryViewKey> keys) {
+        List<DiaryViewRepository.DiaryViewKey> derived = keys.stream()
+                .filter(key -> "DERIVED_COMPLETION".equals(key.kind()))
+                .toList();
+        return enrich(ownerId, new org.springframework.data.domain.PageImpl<>(derived));
     }
 
     @Override
