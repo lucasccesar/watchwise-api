@@ -18,8 +18,9 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -124,28 +125,57 @@ public class DiaryEntryReadRepositoryImpl implements DiaryEntryReadRepository {
     private List<jakarta.persistence.criteria.Order> orderBy(
             CriteriaBuilder builder, Root<DiaryEntry> root, DiaryEntrySort sort) {
         Expression<LocalDateTime> createdAt = root.get("createdAt");
+        Expression<LocalDate> effectiveDate = builder.coalesce(
+                root.<LocalDate>get("watchedDate"), createdAt.as(LocalDate.class));
+        Expression<Instant> watchedAt = root.get("watchedAt");
+        Expression<Integer> missingWatchedAt = builder.<Integer>selectCase()
+                .when(builder.isNull(watchedAt), 1)
+                .otherwise(0);
         Expression<?> id = root.get("id");
 
         return switch (sort) {
-            case OLDEST -> List.of(builder.asc(createdAt), builder.asc(id));
-            case RATING_DESC -> ratingOrder(builder, root, true, createdAt, id);
-            case RATING_ASC -> ratingOrder(builder, root, false, createdAt, id);
-            case NEWEST -> List.of(builder.desc(createdAt), builder.desc(id));
+            case OLDEST -> chronologicalOrder(builder, effectiveDate, missingWatchedAt, watchedAt,
+                    createdAt, id, false);
+            case RATING_DESC -> ratingOrder(builder, root, true,
+                    chronologicalOrder(builder, effectiveDate, missingWatchedAt, watchedAt, createdAt, id, true));
+            case RATING_ASC -> ratingOrder(builder, root, false,
+                    chronologicalOrder(builder, effectiveDate, missingWatchedAt, watchedAt, createdAt, id, true));
+            case NEWEST -> chronologicalOrder(builder, effectiveDate, missingWatchedAt, watchedAt,
+                    createdAt, id, true);
         };
+    }
+
+    private List<jakarta.persistence.criteria.Order> chronologicalOrder(
+            CriteriaBuilder builder,
+            Expression<LocalDate> effectiveDate,
+            Expression<Integer> missingWatchedAt,
+            Expression<Instant> watchedAt,
+            Expression<LocalDateTime> createdAt,
+            Expression<?> id,
+            boolean newestFirst) {
+        return List.of(
+                newestFirst ? builder.desc(effectiveDate) : builder.asc(effectiveDate),
+                builder.asc(missingWatchedAt),
+                newestFirst ? builder.desc(watchedAt) : builder.asc(watchedAt),
+                newestFirst ? builder.desc(createdAt) : builder.asc(createdAt),
+                newestFirst ? builder.desc(id) : builder.asc(id));
     }
 
     private List<jakarta.persistence.criteria.Order> ratingOrder(
             CriteriaBuilder builder,
             Root<DiaryEntry> root,
             boolean descending,
-            Expression<LocalDateTime> createdAt,
-            Expression<?> id) {
+            List<jakarta.persistence.criteria.Order> chronologicalOrder) {
         Expression<Integer> nullScore = builder.<Integer>selectCase()
                 .when(builder.isNull(root.get("score")), 1)
                 .otherwise(0);
         jakarta.persistence.criteria.Order scoreOrder = descending
                 ? builder.desc(root.get("score"))
                 : builder.asc(root.get("score"));
-        return List.of(builder.asc(nullScore), scoreOrder, builder.desc(createdAt), builder.desc(id));
+        List<jakarta.persistence.criteria.Order> order = new ArrayList<>(chronologicalOrder.size() + 2);
+        order.add(builder.asc(nullScore));
+        order.add(scoreOrder);
+        order.addAll(chronologicalOrder);
+        return order;
     }
 }

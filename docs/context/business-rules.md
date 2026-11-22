@@ -1649,10 +1649,10 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   criada naquele período. `year` é um atalho pra `dateFrom=01/01`/`dateTo=31/12` do mesmo ano, resolvido
   antes de decidir a query — combinar `year` com `dateFrom`/`dateTo` explícitos é `400`
   (`DiaryEntryServiceImpl.getDiaryEntries`). `type` e `hasReview` são filtros independentes, aplicáveis
-  junto com qualquer combinação de data; `hasReview` compara `comment IS NOT NULL`/`IS NULL`. Sem
-  nenhum filtro, a query original (`findByUserIdOrderByCreatedAtDesc`) continua sendo usada — a nova
-  query flexível (`findByUserIdWithFilters`, com `AND (:param IS NULL OR ...)` por filtro) só entra
-  quando pelo menos um filtro é passado, pra não pagar o custo de uma query maior no caso comum.
+  junto com qualquer combinação de data; `hasReview` compara `comment IS NOT NULL`/`IS NULL`. A rota
+  REST com `sortBy` usa `DiaryEntryReadRepository.findPage` antes da paginação, inclusive sem filtros;
+  a query adiciona somente os predicados efetivamente informados. `NEWEST`/`OLDEST` ordenam pela data
+  assistida efetiva, depois por `watchedAt` quando há horário e por `createdAt`/ID para desempates.
 - **A timeline de `/users/{id}/diary/view` ordena pelo momento assistido** (`DiaryViewRepositoryImpl.findPage`/`findGroupedCandidates`, `DiaryViewGroupingSql.order`/`afterNewest`) — `NEWEST` e `OLDEST` priorizam `orderedAt`, que preserva `watchedAt` quando disponível e recorre a `watchedDate` ou ao momento de gravação quando não há horário/data mais precisa. A mesma ordem vale para páginas regulares, agrupadas e páginas com cursor agrupado; data efetiva, criação, tipo e IDs estabilizam empates. O cursor usa a versão `v4`; cursores anteriores são rejeitados.
 - **Dono do recurso em `PATCH`/`DELETE` é resolvido por `userId` batendo, não por dono explícito na
   URL** (`findOwnedEntry`) — tentar editar/apagar a entrada de outro usuário devolve `404` ("Diary entry

@@ -4307,7 +4307,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 10 }
         - name: sortBy
           in: query
-          description: Server-side ordering applied before pagination. TITLE_ASC is not supported because titles are not stored locally.
+          description: "NEWEST/OLDEST sort by watchedDate (falling back to createdAt's date when absent), then watchedAt within the day when available, with createdAt and ID as tie-breakers. Rating sorts use this chronology after score. Ordering is applied before pagination. TITLE_ASC is not supported because titles are not stored locally."
           schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
         - $ref: "#/components/parameters/page"
         - name: size

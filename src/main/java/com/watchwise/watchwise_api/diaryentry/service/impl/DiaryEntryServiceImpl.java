@@ -224,10 +224,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy) {
         DiaryEntrySort effectiveSort = sortBy == null ? DiaryEntrySort.NEWEST : sortBy;
         validateScoreRange(score, scoreFrom, scoreTo);
-        if (effectiveSort == DiaryEntrySort.NEWEST && scoreFrom == null && scoreTo == null) {
-            return getDiaryEntries(viewerId, userId, year, pageNumber, pageSize, type, dateFrom, dateTo,
-                    hasReview, seriesTmdbId, score);
-        }
 
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));

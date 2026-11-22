@@ -6115,3 +6115,7 @@ ignorar grupos; o formato passou para `v3`.
 `watchedDate` e o momento de gravação como alternativas quando o horário exato não existe. A regra foi
 aplicada às páginas regulares, agrupadas e aos cursores; o formato passou para `v4`, que rejeita
 cursores gerados pela ordenação anterior.
+
+`GET /users/{id}/diary` também passou a ordenar os eventos antes da paginação pela data assistida e,
+dentro do dia, pelo horário `watchedAt` quando disponível. A resposta continua enriquecendo os cards
+com metadados do TMDB; registros sem horário usam a data e a criação como desempate.
