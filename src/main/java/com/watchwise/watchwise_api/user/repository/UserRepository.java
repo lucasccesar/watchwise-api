@@ -59,6 +59,25 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByUsernameIgnoreCase(String username);
 
+    @Query("""
+        SELECT u.id AS id, u.username AS username, u.name AS name, u.description AS description,
+               u.profilePicture AS profilePicture, u.banner AS banner, u.isProfilePublic AS isProfilePublic
+        FROM User u
+        WHERE LOWER(u.username) = LOWER(:username)
+        """)
+    Optional<ProfileHeaderIdentity> findProfileHeaderIdentityByUsername(@Param("username") String username);
+
+    interface ProfileHeaderIdentity {
+        UUID getId();
+        String getUsername();
+        String getName();
+        String getDescription();
+        String getProfilePicture();
+        String getBanner();
+        Boolean getIsProfilePublic();
+    }
+
+
     boolean existsByRole(UserRole role);
 
     @Modifying
