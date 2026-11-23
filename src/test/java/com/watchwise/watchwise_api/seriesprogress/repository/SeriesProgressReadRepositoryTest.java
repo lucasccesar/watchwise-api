@@ -51,11 +51,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SeriesProgressReadRepositoryTest {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine").withDatabaseName("ww_series_7h41");
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        String jdbcUrl = postgres.getJdbcUrl();
+        int port = postgres.getMappedPort(5432);
+        if (!List.of("localhost", "127.0.0.1").contains(postgres.getHost())
+                || port == 15432 || port == 15433 || !jdbcUrl.split("[?]", 2)[0].endsWith(":" + port + "/ww_series_7h41")) {
+            throw new IllegalStateException("Unexpected datasource for isolated series progress tests");
+        }
+        try (var connection = java.sql.DriverManager.getConnection(jdbcUrl, postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement();
+             var result = statement.executeQuery("SELECT current_database(), current_setting('server_version_num')")) {
+            if (!result.next() || !"ww_series_7h41".equals(result.getString(1)) || result.getInt(2) / 10000 != 16) {
+                throw new IllegalStateException("Unexpected ephemeral PostgreSQL identity");
+            }
+            System.out.println("Verified isolated PostgreSQL datasource before Spring: " + jdbcUrl);
+        } catch (java.sql.SQLException failure) {
+            throw new IllegalStateException("Could not verify ephemeral PostgreSQL datasource", failure);
+        }
+        registry.add("spring.datasource.url", () -> jdbcUrl);
+        registry.add("spring.flyway.url", () -> jdbcUrl);
+        registry.add("spring.flyway.user", postgres::getUsername);
+        registry.add("spring.flyway.password", postgres::getPassword);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
@@ -417,6 +436,12 @@ class SeriesProgressReadRepositoryTest {
                 .containsExactlyInAnyOrder("1399", "1396", "1400", "1401", "1402");
         assertThat(page.getTotalElements()).isEqualTo(5L);
 
+        var byId = seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(
+                lucas.getId(), List.of("1401", "1402"));
+        assertThat(byId).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1401", "1402");
+        assertThat(byId).allSatisfy(row -> assertThat(row.getWatchedEpisodeCount()).isEqualTo(1L));
+
         var totals = seriesProgressReadRepository.findStartedGlobalTotalsByUserId(lucas.getId());
 
         assertThat(totals.getWatchedEpisodeCount()).isEqualTo(5L);
@@ -459,6 +484,45 @@ class SeriesProgressReadRepositoryTest {
         assertThat(seasonOnly.getWatchedEpisodeCount()).isEqualTo(1L);
         assertThat(seasonOnly.getMaxSeasonNumber()).isEqualTo(1);
         assertThat(seasonOnly.getRemainingEpisodeCount()).isEqualTo(1L);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"3,3", "25,25", "105,100", "105,101"})
+    void findsTheSameSingleCandidateIndependentlyOfTheFirstPage(int volume, int position) {
+        LocalDate watched = LocalDate.of(2024, 3, 2);
+        saveEntry(saveEpisode("198200001", 2, 1, 42), 1, watched, watched.atTime(12, 0));
+        saveEntry(saveEpisode("198200001", 1, 1, 42), 1, watched.minusDays(1), watched.minusDays(1).atTime(12, 0));
+        saveMetadata("198200001", 5, 210, LocalDate.of(2002, 1, 2));
+        for (int i = 1; i < volume; i++) {
+            String id = Integer.toString(198200001 + i);
+            LocalDate date = watched.plusDays(i < position ? i : -i);
+            saveEntry(saveEpisode(id, 1, 1, 42), 1, date, date.atTime(12, 0));
+            saveMetadata(id, 3, 126, LocalDate.of(2001, 1, 3));
+        }
+        entityManager.clear();
+
+        var page = seriesProgressReadRepository.findStartedCandidatesByUserId(lucas.getId(),
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 100));
+        assertThat(page.getTotalElements()).isEqualTo(volume);
+        assertThat(page.getContent()).hasSize(Math.min(100, volume));
+        if (position <= 100) {
+            assertThat(page.getContent().get(position - 1).getSeriesTmdbId()).isEqualTo("198200001");
+        } else {
+            assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                    .doesNotContain("198200001");
+            var second = seriesProgressReadRepository.findStartedCandidatesByUserId(lucas.getId(),
+                    SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(1, 100));
+            assertThat(second.getContent().getFirst().getSeriesTmdbId()).isEqualTo("198200001");
+        }
+        var result = seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(lucas.getId(), List.of("198200001"));
+        assertThat(result).singleElement().satisfies(row -> {
+            assertThat(row.getWatchedEpisodeCount()).isEqualTo(2L);
+            assertThat(row.getRemainingEpisodeCount()).isEqualTo(3L);
+            assertThat(row.getLastWatchedDate()).isEqualTo(watched);
+            assertThat(row.getLastWatchedSeasonNumber()).isEqualTo(2);
+        });
+        assertThat(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(marina.getId(), List.of("198200001")))
+                .singleElement().satisfies(row -> assertThat(row.getWatchedEpisodeCount()).isZero());
     }
 
     private Content saveEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber, Integer runtimeMinutes) {

@@ -105,6 +105,83 @@ class SeriesProgressReaderImplTest {
                 presentationEnricher, userRepository);
     }
 
+    @Test
+    void readsOnlyStartedTargetWithoutPresentationAndUsesSnapshotForConsistentBalance() {
+        var ids = List.of("1396");
+        var target = row("1396", 2L);
+        when(target.getLastWatchedDate()).thenReturn(LocalDate.of(2024, 3, 2));
+        when(target.getLastWatchedSeasonNumber()).thenReturn(2);
+        when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of(target));
+        when(metadataRefreshService.getSnapshotsForRead(ids, LocalDate.of(2026, 9, 25)))
+                .thenReturn(Map.of("1396", snapshot("1396", 5)));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of());
+
+        var result = reader.readStartedSeries(viewerId(), "1396").orElseThrow();
+
+        assertThat(result.watchedEpisodeCount()).isEqualTo(2L);
+        assertThat(result.totalReleasedEpisodeCount()).isEqualTo(5);
+        assertThat(result.watchedPercentage()).isEqualTo(40.0);
+        assertThat(result.remainingEpisodeCount()).isEqualTo(3L);
+        assertThat(result.lastWatchedDate()).isEqualTo(LocalDate.of(2024, 3, 2));
+        assertThat(result.lastWatchedSeasonNumber()).isEqualTo(2);
+        verifyNoInteractions(presentationEnricher, userRepository);
+    }
+
+    @Test
+    void fallsBackWithoutLoadingMetadataForAnUnstartedSeries() {
+        var target = mock(SeriesProgressReadRepository.SeriesProgressCandidate.class);
+        when(target.getWatchedEpisodeCount()).thenReturn(0L);
+        when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId(), List.of("1396")))
+                .thenReturn(List.of(target));
+        assertThat(reader.readStartedSeries(viewerId(), "1396")).isEmpty();
+        verifyNoInteractions(metadataRefreshService, diaryEntryRepository, presentationEnricher, userRepository);
+    }
+
+    @Test
+    void keepsObservedHistoryWhenSnapshotsAreUnavailable() {
+        var ids = List.of("1396");
+        var target = row("1396", 2L);
+        var date = LocalDate.of(2024, 3, 2);
+        when(target.getLastWatchedDate()).thenReturn(date);
+        when(target.getTotalReleasedEpisodeCount()).thenReturn(null);
+        when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of(target));
+        when(metadataRefreshService.getSnapshotsForRead(ids, LocalDate.of(2026, 9, 25)))
+                .thenReturn(Map.of("1396", new SeriesProgressMetadataRefreshService.Snapshot(null, List.of())));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of());
+
+        var result = reader.readStartedSeries(viewerId(), "1396").orElseThrow();
+
+        assertThat(result.watchedEpisodeCount()).isEqualTo(2L);
+        assertThat(result.lastWatchedDate()).isEqualTo(date);
+        assertThat(result.totalReleasedEpisodeCount()).isNull();
+        assertThat(result.remainingEpisodeCount()).isNull();
+        assertThat(result.watchedPercentage()).isNull();
+        assertThat(result.seasonProgress()).isEmpty();
+    }
+
+    @Test
+    void derivesRemainingFromTheSelectedMetadataWhenTheProjectionHasAnOlderTotal() {
+        var ids = List.of("1396");
+        var target = row("1396", 5L);
+        when(target.getRemainingEpisodeCount()).thenReturn(2L);
+        when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of(target));
+        when(metadataRefreshService.getSnapshotsForRead(ids, LocalDate.of(2026, 9, 25)))
+                .thenReturn(Map.of("1396", snapshot("1396", 5)));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(viewerId(), ids))
+                .thenReturn(List.of());
+
+        var result = reader.readStartedSeries(viewerId(), "1396").orElseThrow();
+
+        assertThat(result.watchedPercentage()).isEqualTo(100.0);
+        assertThat(result.remainingEpisodeCount()).isZero();
+        assertThat(result.totalReleasedEpisodeCount()).isEqualTo(5);
+    }
+
     private SeriesProgressReadRepository.SeriesProgressCandidate row(String seriesTmdbId, long watchedEpisodeCount) {
         SeriesProgressReadRepository.SeriesProgressCandidate row =
                 mock(SeriesProgressReadRepository.SeriesProgressCandidate.class);

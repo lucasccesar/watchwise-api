@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
+import com.watchwise.watchwise_api.seriesprogress.dto.IndividualSeriesProgressDTO;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
@@ -24,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -105,6 +107,22 @@ public class SeriesProgressReaderImpl implements SeriesProgressReader {
         return new SeriesProgressReadResult(
                 result,
                 firstPresentation == null ? null : firstPresentation.seriesBackdropPath());
+    }
+
+    @Override
+    public Optional<IndividualSeriesProgressDTO> readStartedSeries(UUID viewerId, String seriesTmdbId) {
+        List<String> ids = List.of(seriesTmdbId);
+        var rows = seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId, ids);
+        if (rows.isEmpty() || rows.getFirst().getWatchedEpisodeCount() == null
+                || rows.getFirst().getWatchedEpisodeCount() == 0) {
+            return Optional.empty();
+        }
+
+        var snapshot = metadataRefreshService.getSnapshotsForRead(ids, LocalDate.now(clock)).get(seriesTmdbId);
+        var watched = loadWatchedProgress(viewerId, ids).getOrDefault(seriesTmdbId, Map.of());
+        var progress = seriesProgressAssembler.toDetailedSeriesResponse(rows.getFirst(), snapshot, watched);
+        return Optional.of(IndividualSeriesProgressDTO.from(
+                seriesProgressAssembler.splitCompletedSeasonProgress(progress)));
     }
 
     private List<String> normalizeSeriesIds(Collection<String> seriesTmdbIds) {
