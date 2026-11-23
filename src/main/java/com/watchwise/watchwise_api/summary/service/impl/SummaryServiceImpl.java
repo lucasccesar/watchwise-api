@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import com.watchwise.watchwise_api.feed.dto.FeedEventType;
 import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -162,7 +163,7 @@ public class SummaryServiceImpl implements SummaryService {
     }
 
     @Override
-    public HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId) {
+    public HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId, boolean includeDiaryActivity) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewSummary(viewerId, userId, target);
@@ -205,8 +206,9 @@ public class SummaryServiceImpl implements SummaryService {
         List<FeedItemDTO> feedItems = feedService.getFeed(userId, null, 3).content();
         Map<ContentCoordinate, ContentCardDTO> cards = assembleHomeCards(userId, target, recentEntries, feedItems);
         List<HomeRecentlyWatchedDTO> recentlyWatched = toHomeRecentlyWatched(recentEntries, cards);
+        boolean includeViewerDiaryActivity = includeDiaryActivity && viewerId.equals(userId);
         List<HomeSocialActivityDTO> socialActivities = feedItems.stream()
-                .map(item -> toHomeSocialActivity(item, cards))
+                .map(item -> toHomeSocialActivity(item, cards, includeViewerDiaryActivity))
                 .toList();
         HomeViewerDTO viewer = new HomeViewerDTO(target.getName(), target.getUsername(), target.getProfilePicture());
         String latestWatchedBackdropPath = latestWatchedBackdropPath(
@@ -324,12 +326,16 @@ public class SummaryServiceImpl implements SummaryService {
     }
 
     private HomeSocialActivityDTO toHomeSocialActivity(
-            FeedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
+            FeedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards, boolean includeViewerDiaryActivity) {
         String targetLabel = item.pick() != null ? "Pick" : item.picksTemplate() != null ? item.picksTemplate().name()
                 : item.top5Type() == null ? null : "Top 5 " + item.top5Type().name().toLowerCase();
         ContentCardDTO card = item.content() == null ? null : cards.get(toCoordinate(item.content()));
+        boolean includeDetails = includeViewerDiaryActivity && item.eventType() == FeedEventType.DIARY_ENTRY;
         return new HomeSocialActivityDTO(item.eventType(), item.id(), item.user(), item.content(), targetLabel,
-                item.likesCount(), item.commentsCount(), item.createdAt(), card);
+                item.likesCount(), item.commentsCount(), item.createdAt(), card,
+                includeDetails ? item.score() : null,
+                includeDetails ? item.comment() : null,
+                includeDetails ? item.likedByMe() : null);
     }
 
     private Map<ContentCoordinate, ContentCardDTO> assembleHomeCards(

@@ -41,8 +41,11 @@ public class SummaryController {
     }
 
     @GetMapping("/users/{userId}/summary/home")
-    public ResponseEntity<HomeSummaryResponseDTO> getHomeSummary(@PathVariable UUID userId) {
-        HomeSummaryResponseDTO response = summaryService.getHomeSummary(getCurrentUserId(), userId);
+    public ResponseEntity<HomeSummaryResponseDTO> getHomeSummary(
+            @PathVariable UUID userId,
+            @RequestParam(defaultValue = "false") boolean includeDiaryActivity
+    ) {
+        HomeSummaryResponseDTO response = summaryService.getHomeSummary(getCurrentUserId(), userId, includeDiaryActivity);
         return ResponseEntity.ok(response);
     }
 

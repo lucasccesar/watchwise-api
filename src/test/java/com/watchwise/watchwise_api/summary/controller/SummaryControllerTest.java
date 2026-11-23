@@ -90,9 +90,9 @@ class SummaryControllerTest {
     void shouldReturnOkWithTheServiceResultWhenGettingHomeSummary() {
         UUID targetUserId = UUID.randomUUID();
         HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
-        when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
+        when(summaryService.getHomeSummary(currentUserId, targetUserId, false)).thenReturn(dto);
 
-        ResponseEntity<HomeSummaryResponseDTO> result = summaryController.getHomeSummary(targetUserId);
+        ResponseEntity<HomeSummaryResponseDTO> result = summaryController.getHomeSummary(targetUserId, false);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -103,11 +103,20 @@ class SummaryControllerTest {
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingHomeSummary() {
         UUID targetUserId = UUID.randomUUID();
         HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
-        when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
+        when(summaryService.getHomeSummary(currentUserId, targetUserId, false)).thenReturn(dto);
 
-        summaryController.getHomeSummary(targetUserId);
+        summaryController.getHomeSummary(targetUserId, false);
 
-        verify(summaryService).getHomeSummary(currentUserId, targetUserId);
+        verify(summaryService).getHomeSummary(currentUserId, targetUserId, false);
+    }
+
+    @Test
+    void shouldForwardTheExplicitDiaryOptInWithTheAuthenticatedPrincipal() {
+        UUID targetUserId = UUID.randomUUID();
+
+        summaryController.getHomeSummary(targetUserId, true);
+
+        verify(summaryService).getHomeSummary(currentUserId, targetUserId, true);
     }
 
     @Test

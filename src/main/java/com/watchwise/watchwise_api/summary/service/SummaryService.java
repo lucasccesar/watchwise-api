@@ -19,7 +19,11 @@ public interface SummaryService {
 
     SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type);
 
-    HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId);
+    default HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId) {
+        return getHomeSummary(viewerId, userId, false);
+    }
+
+    HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId, boolean includeDiaryActivity);
 
     DiaryReviewsSummaryResponseDTO getDiaryReviewsSummary(UUID viewerId, UUID userId);
 

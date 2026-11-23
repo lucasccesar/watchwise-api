@@ -41,6 +41,7 @@ import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.feed.dto.FeedEventType;
 import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedItemViewDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -318,6 +319,105 @@ class SummaryServiceImplTest {
     }
 
     // ---------- getHomeSummary ----------
+
+    @Test
+    void shouldReuseOrderedFeedItemsForTheAuthenticatedOwnerWhenOptedIn() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        LocalDateTime stamp = LocalDateTime.of(2026, 11, 2, 7, 52);
+        UserPreviewDTO actor = new UserPreviewDTO(marinaId, "marina", "Marina", "/avatar.png", true);
+        ContentRefDTO episode = new ContentRefDTO(UUID.randomUUID(), null, ContentType.EPISODE, "1399",
+                2, 3, false, false, stamp, stamp);
+        FeedItemDTO rated = new FeedItemDTO(FeedEventType.DIARY_ENTRY, UUID.randomUUID(), actor, episode, null,
+                8, "review", 1, true, 2, null, null, null, null, null, stamp, null);
+        FeedItemDTO unrated = new FeedItemDTO(FeedEventType.DIARY_ENTRY, UUID.randomUUID(), actor, null, null,
+                null, null, 0, false, 0, null, null, null, null, null, stamp.minusMinutes(1), null);
+        FeedItemDTO pick = new FeedItemDTO(FeedEventType.PICK_CREATED, UUID.randomUUID(), actor, null, null,
+                10, "ignored", 4, true, 3, null, null, null, null, null, stamp.minusMinutes(2), null);
+        when(feedService.getFeed(lucasId, null, 3))
+                .thenReturn(new CursorPageResponseDTO<>(List.of(rated, unrated, pick), 3, null, false));
+
+        var response = summaryService.getHomeSummary(lucasId, lucasId, true);
+
+        assertThat(response.socialActivities()).extracting(activity -> activity.id())
+                .containsExactly(rated.id(), unrated.id(), pick.id());
+        var diary = response.socialActivities().getFirst();
+        var oldView = new FeedItemViewDTO(rated, null, null, null);
+        assertThat(diary.score()).isEqualTo(oldView.score());
+        assertThat(diary.comment()).isEqualTo(oldView.comment());
+        assertThat(diary.likedByMe()).isEqualTo(oldView.likedByMe());
+        assertThat(diary.content().id()).isEqualTo(episode.id());
+        assertThat(diary.likesCount()).isEqualTo(oldView.likesCount());
+        assertThat(diary.commentsCount()).isEqualTo(oldView.commentsCount());
+        assertThat(diary.user()).isEqualTo(oldView.user());
+        JsonNode json = serialize(response).get("socialActivities");
+        assertThat(json.get(1).has("score")).isFalse();
+        assertThat(json.get(1).has("comment")).isFalse();
+        assertThat(json.get(1).get("likedByMe").asBoolean()).isFalse();
+        assertThat(json.get(2).has("likedByMe")).isFalse();
+        assertThat(json.get(2).has("score")).isFalse();
+        assertThat(json.get(2).has("comment")).isFalse();
+        verify(feedService).getFeed(lucasId, null, 3);
+        verifyNoMoreInteractions(feedService);
+        verify(userBlockAccessService).assertContentVisible(lucasId, lucasId);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldKeepThirdPartyAndLegacySummaryFieldsWhenViewingAnAllowedProfile(boolean profilePublic) {
+        lucas.setIsProfilePublic(profilePublic);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        if (!profilePublic) {
+            when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                    .thenReturn(true);
+        }
+        FeedItemDTO diary = new FeedItemDTO(FeedEventType.DIARY_ENTRY, UUID.randomUUID(), null, null, null,
+                8, "review", 2, true, List.of(), null, null, LocalDateTime.of(2026, 11, 2, 7, 52));
+        when(feedService.getFeed(lucasId, null, 3))
+                .thenReturn(new CursorPageResponseDTO<>(List.of(diary), 3, null, false));
+
+        var other = summaryService.getHomeSummary(marinaId, lucasId, true);
+        var legacy = summaryService.getHomeSummary(lucasId, lucasId);
+        for (var activity : List.of(other.socialActivities().getFirst(), legacy.socialActivities().getFirst())) {
+            JsonNode json = serialize(activity);
+            assertThat(json.has("score")).isFalse();
+            assertThat(json.has("comment")).isFalse();
+            assertThat(json.has("likedByMe")).isFalse();
+            assertThat(activity.id()).isEqualTo(diary.id());
+        }
+        verify(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+    }
+
+    @Test
+    void shouldRejectPrivateProfileWithoutAnAcceptedFollowEvenWhenOptedIn() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getHomeSummary(marinaId, lucasId, true))
+                .isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(feedService);
+    }
+
+    @Test
+    void shouldRejectBlockedProfileBeforeReadingFeedEvenWhenOptedIn() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+
+        assertThatThrownBy(() -> summaryService.getHomeSummary(marinaId, lucasId, true))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(feedService);
+    }
+
+    @Test
+    void shouldKeepTheOptedInFeedEmptyWhenNoActivitiesAreVisible() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThat(summaryService.getHomeSummary(lucasId, lucasId, true).socialActivities()).isEmpty();
+        verify(feedService).getFeed(lucasId, null, 3);
+        verifyNoMoreInteractions(feedService);
+    }
+
 
     @ParameterizedTest
     @EnumSource(value = ContentType.class, names = {"MOVIE", "EPISODE"})
