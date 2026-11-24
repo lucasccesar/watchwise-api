@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -51,19 +52,24 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -73,15 +79,39 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 class UserListDetailViewControllerIntegrationTest {
 
+    private static final String DATABASE = "ww_list_editor_7k4";
+
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withDatabaseName(DATABASE);
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        String host = postgres.getHost();
+        int port = postgres.getMappedPort(5432);
+        String url = postgres.getJdbcUrl();
+        if (!List.of("localhost", "127.0.0.1").contains(host) || port == 15432 || port == 15433
+                || !url.split("[?]", 2)[0].equals("jdbc:postgresql://" + host + ":" + port + "/" + DATABASE)) {
+            throw new IllegalStateException("Unexpected list editor test datasource");
+        }
+        try (var connection = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement();
+             var result = statement.executeQuery("SELECT current_database(), current_setting('server_version_num')")) {
+            if (!result.next() || !DATABASE.equals(result.getString(1)) || result.getInt(2) / 10000 != 16) {
+                throw new IllegalStateException("Unexpected list editor test database identity");
+            }
+            System.out.println("Verified isolated PostgreSQL datasource before Spring: " + url);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to verify isolated list editor test datasource", error);
+        }
+        registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.docker.compose.enabled", () -> "false");
+        registry.add("spring.flyway.url", () -> url);
+        registry.add("spring.flyway.user", postgres::getUsername);
+        registry.add("spring.flyway.password", postgres::getPassword);
+        registry.add("spring.docker.compose.enabled", () -> false);
+        registry.add("app.tmdb.base-url", () -> "http://127.0.0.1:1");
     }
 
     @Autowired MockMvc mockMvc;
@@ -324,6 +354,104 @@ class UserListDetailViewControllerIntegrationTest {
                 detailView(viewer, list.getId()).param("size", "0"))) {
             assertApiError(mockMvc.perform(invalid), 400);
         }
+    }
+
+    @Test
+    void editorFetchesTheCompleteOrderedCollectionAndSignalsOverflowWithoutPartialItems() throws Exception {
+        RegisteredUser owner = register("editorvolumes");
+        UserList list = persistList(users.findById(owner.id()).orElseThrow(), "Editor volumes", UserListVisibility.PRIVATE);
+        when(tmdbClient.getCardMetadata(any(TmdbCardMetadataKey.class), anyString()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata("Title", "/poster.jpg", "2024-01-01", 95)));
+        mockMvc.perform(editor(owner, list.getId())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("READY")).andExpect(jsonPath("$.items").isEmpty());
+        for (int position = 100; position > 0; position--) {
+            persistContentItem(list, position % 2 == 0 ? ContentType.SERIES : ContentType.MOVIE,
+                    position, Integer.toString(80000 + position));
+        }
+        var expected = items.findByUserListIdOrderByPositionAsc(list.getId());
+        mockMvc.perform(editor(owner, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.itemScope").value("MOVIE_OR_SERIES"))
+                .andExpect(jsonPath("$.items[*].id").value(contains(expected.stream().map(i -> i.getId().toString()).toArray(String[]::new))))
+                .andExpect(jsonPath("$.items[0].card.title").value("Title"))
+                .andExpect(jsonPath("$.items[0].card.releaseYear").value(2024))
+                .andExpect(jsonPath("$.items[0].card.posterPath").value("/poster.jpg"))
+                .andExpect(jsonPath("$.items[0].card.viewerState").doesNotExist())
+                .andExpect(jsonPath("$.items[1].card.type").value("SERIES"))
+                .andExpect(jsonPath("$.items[99].position").value(100));
+        persistContentItem(list, ContentType.SERIES, 101, "80101");
+        mockMvc.perform(editor(owner, list.getId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("LEGACY"))
+                .andExpect(jsonPath("$.items").doesNotExist());
+        mockMvc.perform(detailView(owner, list.getId()).param("page", "4").param("size", "30"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.totalElements").value(101))
+                .andExpect(jsonPath("$.items.content.length()").value(11));
+    }
+
+    @Test
+    void editorDoesNotExposeItemsOutsideOwnerAccessAndDefersNestedLists() throws Exception {
+        RegisteredUser actor = register("editornonowner");
+        RegisteredUser owner = register("editorprivacy");
+        User user = users.findById(owner.id()).orElseThrow();
+        var publicList = persistList(user, "Visible list", UserListVisibility.PUBLIC);
+        var privateList = persistList(user, "Private list", UserListVisibility.PRIVATE);
+        persistNestedItem(privateList, publicList, 1);
+
+        mockMvc.perform(get("/lists/{listId}/editor", publicList.getId())).andExpect(status().isUnauthorized());
+        mockMvc.perform(editor(actor, publicList.getId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("READ_ONLY"))
+                .andExpect(jsonPath("$.name").doesNotExist()).andExpect(jsonPath("$.items").doesNotExist());
+        mockMvc.perform(editor(actor, privateList.getId())).andExpect(status().isForbidden());
+        mockMvc.perform(editor(owner, UUID.randomUUID())).andExpect(status().isNotFound());
+        mockMvc.perform(editor(owner, privateList.getId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("LEGACY"))
+                .andExpect(jsonPath("$.items").doesNotExist());
+        mockMvc.perform(detailView(owner, privateList.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.content[0].nestedList.id").value(publicList.getId().toString()));
+    }
+
+    @Test
+    void editorReflectsChangesPersistedByTheExistingWriteRoutes() throws Exception {
+        RegisteredUser owner = register("editorwrites");
+        UserList list = persistList(users.findById(owner.id()).orElseThrow(), "Before", UserListVisibility.PRIVATE);
+        persistContentItem(list, ContentType.MOVIE, 1, "83001");
+        persistContentItem(list, ContentType.SERIES, 2, "83002");
+        persistContentItem(list, ContentType.MOVIE, 3, "83003");
+        var initial = items.findByUserListIdOrderByPositionAsc(list.getId());
+        when(tmdbClient.getMovieFullDetails(eq("83001"), anyString()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails("83001", "Re-added", null)));
+        mockMvc.perform(write(owner, patch("/lists/{listId}", list.getId()))
+                        .content("{\"name\":\"After\",\"visibility\":\"PUBLIC\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(write(owner, delete("/lists/{listId}/items/{id}", list.getId(), initial.getFirst().getId())))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(write(owner, patch("/lists/{listId}/items/{id}", list.getId(), initial.getLast().getId()))
+                        .content("{\"position\":1}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(write(owner, post("/lists/{listId}/items", list.getId()))
+                        .content("{\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"83001\"}}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(editor(owner, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("After"))
+                .andExpect(jsonPath("$.visibility").value("PUBLIC"))
+                .andExpect(jsonPath("$.items[*].position").value(contains(1, 2, 3)))
+                .andExpect(jsonPath("$.items[*].card.tmdbId").value(contains("83003", "83002", "83001")));
+        mockMvc.perform(detailView(owner, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.content[*].card.tmdbId").value(contains("83003", "83002", "83001")));
+    }
+
+    private MockHttpServletRequestBuilder editor(RegisteredUser viewer, UUID listId) {
+        return get("/lists/{listId}/editor", listId).cookie(viewer.accessToken());
+    }
+
+    private MockHttpServletRequestBuilder write(RegisteredUser viewer, MockHttpServletRequestBuilder request) {
+        return request.cookie(viewer.accessToken(), viewer.csrfToken())
+                .header("X-XSRF-TOKEN", viewer.csrfToken().getValue()).contentType(MediaType.APPLICATION_JSON);
     }
 
     private void assertStatusFilter(RegisteredUser viewer, UserList list, String watchStatus, Content expected)

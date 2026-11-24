@@ -127,6 +127,15 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
         String getVisibility();
     }
 
+    @Query("""
+            SELECT item FROM UserListItem item
+            LEFT JOIN FETCH item.content
+            LEFT JOIN FETCH item.childList
+            WHERE item.userList.id = :listId
+            ORDER BY item.position ASC, item.id ASC
+            """)
+    List<UserListItem> findEditorItems(@Param("listId") UUID listId, Pageable pageable);
+
     long countByUserListId(UUID userListId);
 
     @Query("SELECT COALESCE(MAX(item.position), 0) FROM UserListItem item WHERE item.userList.id = :userListId")
