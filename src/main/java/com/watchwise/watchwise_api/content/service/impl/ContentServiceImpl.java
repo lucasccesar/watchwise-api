@@ -128,6 +128,36 @@ public class ContentServiceImpl implements ContentService {
         }
     }
 
+    @Override
+    public void reconcileMoviePageReference(Content content, TmdbMovieFullDetails pageDetails, String language) {
+        if (content.getRuntimeMinutes() != null && hasMovieOrSeriesMetadata(content)) {
+            return;
+        }
+        var reference = new ContentRefCreationDTO(content.getTmdbId(), ContentType.MOVIE, null, null, null, null, null);
+        String referenceLanguage = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
+        // Use the POST's canonical source for shared metadata, regardless of the viewer's language.
+        var canonicalDetails = referenceLanguage.equals(language)
+                ? Optional.of(pageDetails)
+                : tmdbClient.getMovieFullDetails(content.getTmdbId(), referenceLanguage).toOptional();
+        var metadata = canonicalDetails.map(details -> withMovieMetadata(reference, details)).orElse(reference);
+        if (metadata.runtimeMinutes() == null) {
+            // Preserve the page's duration backfill when the canonical response has none.
+            metadata = withRuntime(metadata, pageDetails.runtime());
+        }
+        if (needsMovieMetadata(content, metadata)) {
+            reconcileExisting(content, metadata, false, true);
+        }
+    }
+
+    private boolean needsMovieMetadata(Content content, ContentRefCreationDTO metadata) {
+        return (content.getRuntimeMinutes() == null && metadata.runtimeMinutes() != null)
+                || ((content.getGenres() == null || content.getGenres().isEmpty()) && metadata.genres() != null
+                        && !metadata.genres().isEmpty())
+                || (content.getReleaseYear() == null && metadata.releaseYear() != null)
+                || ((content.getCountries() == null || content.getCountries().isEmpty()) && metadata.countries() != null
+                        && !metadata.countries().isEmpty());
+    }
+
     private ContentRefCreationDTO normalize(ContentRefCreationDTO dto) {
         return new ContentRefCreationDTO(
                 trimOrNull(dto.tmdbId()),
@@ -192,6 +222,11 @@ public class ContentServiceImpl implements ContentService {
     }
 
     private Content reconcileExisting(Content existing, ContentRefCreationDTO normalized, boolean trustedRuntimeMinutes) {
+        return reconcileExisting(existing, normalized, trustedRuntimeMinutes, false);
+    }
+
+    private Content reconcileExisting(
+            Content existing, ContentRefCreationDTO normalized, boolean trustedRuntimeMinutes, boolean fillMissingOnly) {
         if (!hasMetadataToReconcile(normalized)) {
             return existing;
         }
@@ -199,7 +234,9 @@ public class ContentServiceImpl implements ContentService {
         try {
             return newTransactionExecutor.runInNewTransaction(() -> {
                 Content fresh = contentRepository.findByIdForUpdate(existingId).orElseThrow();
-                assertNoMetadataMismatch(fresh, normalized, trustedRuntimeMinutes);
+                if (!fillMissingOnly) {
+                    assertNoMetadataMismatch(fresh, normalized, trustedRuntimeMinutes);
+                }
                 boolean backfillSeasonFinale = fresh.getIsSeasonFinale() == null && Boolean.TRUE.equals(normalized.isSeasonFinale());
                 boolean backfillSeriesFinale = fresh.getIsSeriesFinale() == null && Boolean.TRUE.equals(normalized.isSeriesFinale());
                 boolean updateRuntimeMinutes = normalized.runtimeMinutes() != null
@@ -326,7 +363,7 @@ public class ContentServiceImpl implements ContentService {
                 }
                 TmdbEpisodeFullDetails episode = requireFound(tmdbClient.getEpisodeFullDetails(
                         dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "episode");
-                yield new ResolvedContentReference(withEpisodeRuntime(dto, episode.runtime()), parentSeries);
+                yield new ResolvedContentReference(withRuntime(dto, episode.runtime()), parentSeries);
             }
         };
     }
@@ -409,7 +446,7 @@ public class ContentServiceImpl implements ContentService {
             case EPISODE -> existing.getRuntimeMinutes() != null
                     ? dto
                     : tmdbClient.getEpisodeFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
-                            .toOptional().map(details -> withEpisodeRuntime(dto, details.runtime())).orElse(dto);
+                            .toOptional().map(details -> withRuntime(dto, details.runtime())).orElse(dto);
             case SEASON -> dto;
         };
     }
@@ -436,7 +473,7 @@ public class ContentServiceImpl implements ContentService {
                 normalizeCountries(countryCodes(details.productionCountries())));
     }
 
-    private ContentRefCreationDTO withEpisodeRuntime(ContentRefCreationDTO dto, Integer runtimeMinutes) {
+    private ContentRefCreationDTO withRuntime(ContentRefCreationDTO dto, Integer runtimeMinutes) {
         if (runtimeMinutes == null) {
             return dto;
         }

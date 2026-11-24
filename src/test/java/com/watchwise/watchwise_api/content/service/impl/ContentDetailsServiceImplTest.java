@@ -47,6 +47,7 @@ import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
@@ -129,6 +130,9 @@ class ContentDetailsServiceImplTest {
     @Mock
     private RefreshGenerationSequence refreshGenerationSequence;
 
+    @Mock
+    private ContentService contentService;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -142,7 +146,7 @@ class ContentDetailsServiceImplTest {
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
                 contentPageMetadataService, refreshGenerationSequence, seriesRuntimeAggregateService, calendarScheduleSynchronizer,
                 userContentPosterService, userVisibilityService,
-                new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock));
+                new UserBlockAccessServiceImpl(userBlockRepository, advisoryLock), contentService);
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));

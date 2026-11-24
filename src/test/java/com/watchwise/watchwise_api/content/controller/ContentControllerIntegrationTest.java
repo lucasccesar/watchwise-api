@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -668,6 +670,85 @@ class ContentControllerIntegrationTest {
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    void moviePageCompletesExistingReferenceAndPreservesItOnReload() throws Exception {
+        Content movie = movieReference("603");
+        mockMovie("603", "en-US", "The Matrix", "Action", 136, "1999-03-31", "us");
+
+        readMoviePage(movie, "The Matrix");
+        Content repaired = contentRepository.findById(movie.getId()).orElseThrow();
+        assertThat(repaired.getRuntimeMinutes()).isEqualTo(136);
+        assertThat(repaired.getGenres()).containsExactly("Action");
+        assertThat(repaired.getReleaseYear()).isEqualTo(1999);
+        assertThat(repaired.getCountries()).containsExactly("US");
+        assertThat(repaired.getCreatedAt()).isEqualTo(movie.getCreatedAt());
+
+        readMoviePage(movie, "The Matrix");
+        assertThat(contentRepository.findById(movie.getId()).orElseThrow().getUpdatedAt())
+                .isEqualTo(repaired.getUpdatedAt());
+        assertThat(contentRepository.count()).isEqualTo(1);
+        verify(tmdbClient, times(4)).getMovieFullDetails("603", "en-US");
+    }
+
+    @Test
+    void moviePageKeepsLocalizedPresentationAndPersistsCanonicalMetadata() throws Exception {
+        Content movie = movieReference("603");
+        var viewer = userRepository.findByUsernameIgnoreCase("contentuser").orElseThrow();
+        viewer.setPreferredLanguage("pt-BR");
+        userRepository.saveAndFlush(viewer);
+        mockMovie("603", "pt-BR", "Matrix", "Ação", 136, "1999-03-31", "US");
+        mockMovie("603", "en-US", "The Matrix", "Action", 136, "1999-03-31", "US");
+
+        readMoviePage(movie, "Matrix");
+        assertThat(contentRepository.findById(movie.getId()).orElseThrow().getGenres()).containsExactly("Action");
+
+        readMoviePage(movie, "Matrix");
+        verify(tmdbClient, times(4)).getMovieFullDetails("603", "pt-BR");
+        verify(tmdbClient, times(1)).getMovieFullDetails("603", "en-US");
+    }
+
+    @Test
+    void moviePageLeavesUnavailableFactsUnchangedOnRepeatedReads() throws Exception {
+        Content movie = movieReference("603");
+        mockMovie("603", "en-US", "The Matrix", null, null, "", null);
+
+        readMoviePage(movie, "The Matrix");
+        readMoviePage(movie, "The Matrix");
+
+        Content current = contentRepository.findById(movie.getId()).orElseThrow();
+        assertThat(current.getRuntimeMinutes()).isNull();
+        assertThat(current.getGenres()).isNull();
+        assertThat(current.getReleaseYear()).isNull();
+        assertThat(current.getCountries()).isNull();
+        assertThat(current.getUpdatedAt()).isEqualTo(movie.getUpdatedAt());
+        assertThat(contentRepository.count()).isEqualTo(1);
+        verify(tmdbClient, times(4)).getMovieFullDetails("603", "en-US");
+    }
+
+    private Content movieReference(String tmdbId) {
+        var initialTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        return contentRepository.saveAndFlush(Content.builder().type(ContentType.MOVIE).tmdbId(tmdbId)
+                .createdAt(initialTime).updatedAt(initialTime).build());
+    }
+
+    private void mockMovie(String id, String language, String title, String genre, Integer runtime, String date,
+            String country) {
+        when(tmdbClient.getMovieFullDetails(id, language)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(id, title, title, null, null, null, date, runtime,
+                        genre == null ? List.of() : List.of(new TmdbGenre(28, genre)),
+                        country == null ? List.of() : List.of(new TmdbProductionCountry(country, "United States")),
+                        null, null, null, null, null, null, null)));
+        when(tmdbClient.getMovieReleaseDates(id, language))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieReleaseDates(id, List.of())));
+    }
+
+    private void readMoviePage(Content movie, String title) throws Exception {
+        mockMvc.perform(get("/contents/{contentId}/page", movie.getId()).cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.details.contentId").value(movie.getId().toString()))
+                .andExpect(jsonPath("$.details.title").value(title));
     }
 
     @Test

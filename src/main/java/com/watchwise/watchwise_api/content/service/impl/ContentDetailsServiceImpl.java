@@ -56,6 +56,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
@@ -114,6 +115,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final UserContentPosterService userContentPosterService;
     private final UserVisibilityService userVisibilityService;
     private final UserBlockAccessService userBlockAccessService;
+    private final ContentService contentService;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
@@ -148,6 +150,10 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         String customPosterUrl = userContentPosterService
                 .findByUserAndContentIds(resolvedPosterUserId, List.of(content.getId()))
                 .get(content.getId());
+        if (content.getType() == ContentType.MOVIE) {
+            return new ContentPageDetails(
+                    buildMovieDetails(content, preferredLanguage, preferredRegion, customPosterUrl, true), List.of());
+        }
         if (content.getType() == ContentType.SEASON) {
             return buildSeasonPageDetails(
                     content, preferredLanguage, preferredRegion, customPosterUrl);
@@ -215,7 +221,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private ContentDetailsDTO buildDetails(Content content, String language, String region, String customPosterUrl) {
         return switch (content.getType()) {
-            case MOVIE -> buildMovieDetails(content, language, region, customPosterUrl);
+            case MOVIE -> buildMovieDetails(content, language, region, customPosterUrl, false);
             case SERIES -> buildSeriesDetails(content, language, region, customPosterUrl);
             case SEASON -> buildSeasonPageDetails(content, language, region, customPosterUrl).details();
             case EPISODE -> buildEpisodeDetails(content, language, region, customPosterUrl);
@@ -223,12 +229,16 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     }
 
     private ContentDetailsDTO buildMovieDetails(
-            Content content, String language, String region, String customPosterUrl) {
+            Content content, String language, String region, String customPosterUrl, boolean reconcileReference) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbMovieFullDetails> lookup = tmdbClient.getMovieFullDetails(content.getTmdbId(), language);
         TmdbMovieFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbExternalIds externalIds = details.externalIds();
-        persistUnitRuntime(content, details.runtime());
+        if (reconcileReference) {
+            contentService.reconcileMoviePageReference(content, details, language);
+        } else {
+            persistUnitRuntime(content, details.runtime());
+        }
         TmdbLookupResult<TmdbMovieReleaseDates> releaseDatesLookup = lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found
                 && found.origin() == TmdbLookupOrigin.REMOTE
                 ? tmdbClient.getMovieReleaseDates(content.getTmdbId(), language)
