@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.follower.repository;
 
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -99,6 +100,34 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
             """)
     Page<Follower> findByFollowerIdAndStatus(
             @Param("followerId") UUID followerId, @Param("status") FollowStatus status, Pageable pageable);
+
+    @Query(value = """
+            SELECT new com.watchwise.watchwise_api.user.dto.PublicUserDTO(
+                u.id, u.username, u.name, u.description, u.profilePicture, u.isProfilePublic, u.createdAt)
+            FROM Follower f JOIN f.follower u
+            WHERE f.followed.id = :targetId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+            ORDER BY f.createdAt DESC, f.id DESC
+            """, countQuery = """
+            SELECT COUNT(f) FROM Follower f
+            WHERE f.followed.id = :targetId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+            """)
+    Page<PublicUserDTO> findAcceptedFollowerPreviews(@Param("targetId") UUID targetId, Pageable pageable);
+
+    @Query(value = """
+            SELECT new com.watchwise.watchwise_api.user.dto.PublicUserDTO(
+                u.id, u.username, u.name, u.description, u.profilePicture, u.isProfilePublic, u.createdAt)
+            FROM Follower f JOIN f.followed u
+            WHERE f.follower.id = :targetId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+            ORDER BY f.createdAt DESC, f.id DESC
+            """, countQuery = """
+            SELECT COUNT(f) FROM Follower f
+            WHERE f.follower.id = :targetId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+            """)
+    Page<PublicUserDTO> findAcceptedFollowingPreviews(@Param("targetId") UUID targetId, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

@@ -30,7 +30,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 
 @Service
 @RequiredArgsConstructor
@@ -125,9 +124,8 @@ public class FollowerServiceImpl implements FollowerService {
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<Follower> follows = followerRepository.findByFollowedIdAndStatus(
-                targetUserId, FollowStatus.ACCEPTED, pageRequest);
-        return mapSocialPreviewPage(viewerId, follows, Follower::getFollower);
+        return maskBlockedDescriptions(viewerId,
+                followerRepository.findAcceptedFollowerPreviews(targetUserId, pageRequest));
     }
 
     @Override
@@ -138,9 +136,8 @@ public class FollowerServiceImpl implements FollowerService {
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<Follower> follows = followerRepository.findByFollowerIdAndStatus(
-                targetUserId, FollowStatus.ACCEPTED, pageRequest);
-        return mapSocialPreviewPage(viewerId, follows, Follower::getFollowed);
+        return maskBlockedDescriptions(viewerId,
+                followerRepository.findAcceptedFollowingPreviews(targetUserId, pageRequest));
     }
 
     @Override
@@ -155,28 +152,24 @@ public class FollowerServiceImpl implements FollowerService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         Page<Follower> requests = followerRepository.findByFollowerIdAndStatus(
                 requesterId, FollowStatus.PENDING, pageRequest);
-        return mapSocialPreviewPage(requesterId, requests, Follower::getFollowed);
+        return maskBlockedDescriptions(requesterId,
+                requests.map(follow -> userMapper.userToPublicUserDto(follow.getFollowed())));
     }
 
-    private Page<PublicUserDTO> mapSocialPreviewPage(
-            UUID viewerId, Page<Follower> follows, Function<Follower, User> listedUser) {
-        List<Follower> content = follows.getContent();
-        if (content.isEmpty()) {
-            return follows.map(follow -> userMapper.userToPublicUserDto(listedUser.apply(follow)));
+    private Page<PublicUserDTO> maskBlockedDescriptions(UUID viewerId, Page<PublicUserDTO> previews) {
+        if (!previews.hasContent()) {
+            return previews;
         }
 
-        List<UUID> listedUserIds = content.stream()
-                .map(listedUser)
-                .map(User::getId)
+        List<UUID> listedUserIds = previews.getContent().stream()
+                .map(PublicUserDTO::id)
                 .distinct()
                 .toList();
         Set<UUID> blockedUserIds = userBlockRepository.findBlockedCounterpartIdsEitherDirection(
                 viewerId, listedUserIds);
 
-        return follows.map(follow -> {
-            User user = listedUser.apply(follow);
-            PublicUserDTO preview = userMapper.userToPublicUserDto(user);
-            if (viewerId.equals(user.getId()) || !blockedUserIds.contains(user.getId())) {
+        return previews.map(preview -> {
+            if (viewerId.equals(preview.id()) || !blockedUserIds.contains(preview.id())) {
                 return preview;
             }
             return new PublicUserDTO(preview.id(), preview.username(), preview.name(), null,
