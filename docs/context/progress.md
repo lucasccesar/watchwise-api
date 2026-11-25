@@ -6112,12 +6112,18 @@ ignorar grupos; o formato passou para `v3`.
 ## 2026-11-22 — Ordenar o diário pelo horário assistido
 
 `/users/{id}/diary/view` agora prioriza `watchedAt` para posicionar eventos no histórico, usando
-`watchedDate` e o momento de gravação como alternativas quando o horário exato não existe. A regra foi
-aplicada às páginas regulares, agrupadas e aos cursores; o formato passou para `v4`, que rejeita
-cursores gerados pela ordenação anterior.
+`watchedDate` à meia-noite UTC e o momento de gravação como alternativas quando o horário exato não existe.
+A interpretação explícita do fuso alinha o evento-âncora com sua conclusão derivada quando o banco usa
+outro fuso. Em timestamps iguais, o cursor e a ordenação agora comparam primeiro a criação do evento
+âncora, depois priorizam a conclusão antes desse evento em `NEWEST`, sem deixar a data local de exibição
+inverter o par. A regra vale para páginas regulares, agrupadas e cursores; o formato passou para `v5`,
+que rejeita cursores gerados pela ordenação anterior.
 
 `GET /users/{id}/diary?includeCompletions=true` agora combina, na mesma página, os eventos MOVIE/EPISODE
 com as conclusões derivadas SERIES/SEASON. Os eventos preservam seus cards TMDB e dados sociais; cada
 conclusão recebe card próprio e continua sendo projeção, sem criar `DiaryEntry`. A ordenação combinada
 acontece antes da paginação. O padrão `includeCompletions=false` preserva a resposta legada para
 consumidores existentes; os filtros `type` e `seriesTmdbId` também cobrem conclusões quando habilitadas.
+
+`GET /users/{id}/summary/home` também passou a interpretar `watchedDate` à meia-noite UTC ao ordenar
+eventos sem `watchedAt`, com o mesmo critério usado no diário.

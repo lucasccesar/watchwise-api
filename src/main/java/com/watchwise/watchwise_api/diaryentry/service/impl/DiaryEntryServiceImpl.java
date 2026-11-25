@@ -265,9 +265,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy) {
         DiaryEntrySort effectiveSort = sortBy == null ? DiaryEntrySort.NEWEST : sortBy;
         validateScoreRange(score, scoreFrom, scoreTo);
-        if (score != null && (score < 1 || score > 10)) {
-            throw new BadRequestException("score must be between 1 and 10");
-        }
 
         User owner = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
@@ -382,6 +379,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private void validateScoreRange(Integer score, Integer scoreFrom, Integer scoreTo) {
+        if (score != null && (score < 1 || score > 10)) {
+            throw new BadRequestException("score must be between 1 and 10");
+        }
         if (scoreFrom != null && (scoreFrom < 1 || scoreFrom > 10)
                 || scoreTo != null && (scoreTo < 1 || scoreTo > 10)) {
             throw new BadRequestException("scoreFrom and scoreTo must be between 1 and 10");

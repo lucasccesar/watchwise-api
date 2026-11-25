@@ -1660,7 +1660,7 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   e o card completo; conclusões SERIES/SEASON são projeções, usam `completionKey` e cards TMDB próprios
   e nunca criam linhas `DiaryEntry`. `type=SERIES|SEASON` e `seriesTmdbId` filtram as conclusões pela
   série relacionada. `includeCompletions=false` mantém a resposta legada somente com eventos MOVIE/EPISODE.
-- **A timeline de `/users/{id}/diary/view` ordena pelo momento assistido** (`DiaryViewRepositoryImpl.findPage`/`findGroupedCandidates`, `DiaryViewGroupingSql.order`/`afterNewest`) — `NEWEST` e `OLDEST` priorizam `orderedAt`, que preserva `watchedAt` quando disponível e recorre a `watchedDate` ou ao momento de gravação quando não há horário/data mais precisa. A mesma ordem vale para páginas regulares, agrupadas e páginas com cursor agrupado; filtros `seriesTmdbId` aplicam-se antes da paginação e, nos modos `RATING_DESC`/`RATING_ASC`, a nota vem primeiro, sem nota fica por último e a cronologia desempata. Data efetiva, criação, tipo e IDs estabilizam empates. O cursor usa a versão `v4`; cursores anteriores são rejeitados.
+- **A timeline de `/users/{id}/diary/view` ordena pelo momento assistido** (`DiaryViewRepositoryImpl.findPage`/`findGroupedCandidates`, `DiaryViewGroupingSql.order`/`afterNewest`) — `NEWEST` e `OLDEST` priorizam `orderedAt`, que preserva `watchedAt` quando disponível, usa `watchedDate` à meia-noite UTC para eventos somente com data e recorre ao momento de gravação quando a data assistida também falta. `orderedAt` empata para uma conclusão e o evento que a ancora; `createdAt`/ID dessa âncora desempata antes da classificação por tipo, deixando a conclusão primeiro em `NEWEST` e depois no evento assistido que a completou. A data de apresentação não pode adiantar o evento numa comparação com timestamps iguais. Filtros `seriesTmdbId` aplicam-se antes da paginação e, nos modos `RATING_DESC`/`RATING_ASC`, a nota vem primeiro, sem nota fica por último e a cronologia desempata. A mesma ordem vale para páginas regulares, agrupadas e páginas com cursor agrupado. O cursor usa a versão `v5`; cursores anteriores são rejeitados.
 - **Dono do recurso em `PATCH`/`DELETE` é resolvido por `userId` batendo, não por dono explícito na
   URL** (`findOwnedEntry`) — tentar editar/apagar a entrada de outro usuário devolve `404` ("Diary entry
   not found"), não `403`, para não revelar que o recurso existe e pertence a outra pessoa (mesmo padrão
@@ -2660,7 +2660,7 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   minutos e é escopado a um único `type` por vez).
 - **`recentlyWatched` da Home ordena pelo momento assistido antes do limite**
   (`SummaryServiceImpl.loadHomeRecentlyWatchedEntries`, `DiaryEntryRepository.findRecentHomeEntries`) —
-  uma query combina MOVIE+EPISODE e ordena por `watchedAt`, com `watchedDate` como fallback e
+  uma query combina MOVIE+EPISODE e ordena por `watchedAt`, com `watchedDate` interpretado à meia-noite UTC como fallback e
   `createdAt` quando ambas as datas estão ausentes; `createdAt` e ID desempatarão resultados. Assim,
   uma importação recente não passa à frente de um evento assistido depois. Diferente de
   `recentActivity` do Perfil, não mescla `DroppedEntry` — "coisas assistidas" da Home é só o que foi

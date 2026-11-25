@@ -4387,7 +4387,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 10 }
         - name: sortBy
           in: query
-          description: "With includeCompletions=true, NEWEST/OLDEST sort the combined timeline by orderedAt (watchedAt when available, then watchedDate and creation time). With includeCompletions=false, they sort by watchedDate, then watchedAt within the day when available, with createdAt and ID as tie-breakers. Rating sorts use the selected score first, then the corresponding chronology. Ordering is applied before pagination. TITLE_ASC is not supported because titles are not stored locally."
+          description: "With includeCompletions=true, NEWEST/OLDEST sort by orderedAt (watchedAt when available, watchedDate at UTC midnight otherwise, then creation time if no watch date exists). For equal watch times, anchor creation order is used and the derived completion precedes its anchor event in NEWEST. With includeCompletions=false, ordering uses watchedDate, watchedAt within that day, then createdAt and ID. Rating sorts use score first, then the corresponding chronology. Ordering is applied before pagination. TITLE_ASC is not supported because titles are not stored locally."
           schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
         - $ref: "#/components/parameters/page"
         - name: size
@@ -4499,7 +4499,7 @@ paths:
           schema: { type: boolean }
         - name: sortBy
           in: query
-          description: "NEWEST/OLDEST sort by orderedAt, which uses watchedAt when available and falls back to watchedDate and then the recording time. Regular, grouped, and cursor-grouped pages use the same chronology. In cursor-grouped pages, rating sorts use the maximum selected event score, with unrated groups last."
+          description: "NEWEST/OLDEST sort by orderedAt, which uses watchedAt when available, watchedDate at UTC midnight when it is date-only, and the recording time only when no watch date exists. Equal watch times use anchor creation order; the derived completion precedes its anchor event in NEWEST. Regular, grouped, and cursor-grouped pages use the same chronology. In cursor-grouped pages, rating sorts use the maximum selected event score, with unrated groups last."
           schema: { type: string, enum: [NEWEST, OLDEST, RATING_DESC, RATING_ASC], default: NEWEST }
       responses:
         "200":

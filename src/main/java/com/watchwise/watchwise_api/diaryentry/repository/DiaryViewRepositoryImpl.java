@@ -43,15 +43,15 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
             Pageable pageable) {
         MapSqlParameterSource parameters = parameters(ownerId, region, language, now, filter);
         String source = sourceSql();
-        String where = filterSql(filter);
+        String where = timelineFilterSql();
         String order = " ORDER BY " + DiaryViewGroupingSql.pageOrder(filter.sortBy());
-        String sql = "SELECT * FROM (" + source + ") timeline WHERE 1 = 1 " + where + order
+        String sql = "SELECT * FROM (" + source + ") t WHERE 1 = 1 " + where + order
                 + " LIMIT :limit OFFSET :offset";
         parameters.addValue("limit", pageable.getPageSize());
         parameters.addValue("offset", pageable.getOffset());
         List<DiaryViewKey> rows = jdbc.query(sql, parameters, this::mapRow);
         long total = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM (" + source + ") timeline WHERE 1 = 1 " + where,
+                "SELECT COUNT(*) FROM (" + source + ") t WHERE 1 = 1 " + where,
                 parameters,
                 Long.class);
         return new PageImpl<>(rows, pageable, total);
@@ -63,7 +63,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
             Instant now, DiaryViewFilter filter, Pageable pageable) {
         MapSqlParameterSource parameters = parameters(ownerId, region, language, now, filter)
                 .addValue("limit", pageable.getPageSize()).addValue("offset", pageable.getOffset());
-        String cte = DiaryViewGroupingSql.cte(sourceSql(null, filter.sortBy()), filterSql(filter),
+        String cte = DiaryViewGroupingSql.cte(sourceSql(null, filter.sortBy()), timelineFilterSql(),
                 DiaryViewGroupingSql.pageCandidateSelection());
         List<GroupedDiaryViewKey> rows = jdbc.query(cte + " SELECT * FROM result ORDER BY candidate_order",
                 parameters, this::mapGroupedRow);
@@ -82,7 +82,7 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
         boolean ratingSort = filter.sortBy() == DiaryEntrySort.RATING_DESC
                 || filter.sortBy() == DiaryEntrySort.RATING_ASC;
         DiaryViewCursorPosition sourceCursor = ratingSort ? null : cursor;
-        String cte = DiaryViewGroupingSql.cte(sourceSql(sourceCursor, filter.sortBy()), filterSql(filter),
+        String cte = DiaryViewGroupingSql.cte(sourceSql(sourceCursor, filter.sortBy()), timelineFilterSql(),
                 DiaryViewGroupingSql.cursorCandidateSelection(filter.sortBy(), cursor != null));
         return jdbc.query(cte + " SELECT * FROM result ORDER BY candidate_order", parameters, this::mapGroupedRow);
     }
@@ -249,16 +249,16 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 uuidList(resultSet, "member_entry_ids"), resultSet.getLong("represented_item_count"), nextPosition);
     }
 
-    private String filterSql(DiaryViewFilter filter) {
+    private String timelineFilterSql() {
         return """
-                AND (:type IS NULL OR content_type = :type)
+                AND (:type IS NULL OR t.content_type = :type)
                 AND (:seriesTmdbId IS NULL OR
-                     (content_type <> 'MOVIE' AND COALESCE(series_tmdb_id, tmdb_id) = :seriesTmdbId))
-                AND (:dateStart IS NULL OR watched_date >= :dateStart)
-                AND (:dateEnd IS NULL OR watched_date <= :dateEnd)
-                AND (:scoreMin IS NULL OR score >= :scoreMin)
-                AND (:scoreMax IS NULL OR score <= :scoreMax)
-                AND (:hasReview IS NULL OR has_review = :hasReview)
+                     (t.content_type <> 'MOVIE' AND COALESCE(t.series_tmdb_id, t.tmdb_id) = :seriesTmdbId))
+                AND (:dateStart IS NULL OR t.watched_date >= :dateStart)
+                AND (:dateEnd IS NULL OR t.watched_date <= :dateEnd)
+                AND (:scoreMin IS NULL OR t.score >= :scoreMin)
+                AND (:scoreMax IS NULL OR t.score <= :scoreMax)
+                AND (:hasReview IS NULL OR t.has_review = :hasReview)
                 """;
     }
 
