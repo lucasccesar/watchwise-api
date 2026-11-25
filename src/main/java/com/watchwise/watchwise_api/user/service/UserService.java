@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.dto.SessionIdentityDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.springframework.data.domain.Page;
 
@@ -20,6 +21,8 @@ public interface UserService {
     PublicUserProfileDTO getUserById(UUID viewerId, UUID targetUserId);
 
     UserResponseDTO getCurrentUser(UUID id);
+
+    SessionIdentityDTO getSessionIdentity(UUID id);
 
     UserResponseDTO removeBanner(UUID id);
 

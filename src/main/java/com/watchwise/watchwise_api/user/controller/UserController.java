@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.dto.SessionIdentityDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -81,6 +82,11 @@ public class UserController {
     public ResponseEntity<UserResponseDTO> getCurrentUser() {
         UserResponseDTO user = userService.getCurrentUser(getCurrentUserId());
         return ResponseEntity.ok(user);
+    }
+
+    @GetMapping("/me/session")
+    public ResponseEntity<SessionIdentityDTO> getSessionIdentity() {
+        return ResponseEntity.ok(userService.getSessionIdentity(getCurrentUserId()));
     }
 
     @DeleteMapping("/me/banner")

@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.dto.SessionIdentityDTO;
 import com.watchwise.watchwise_api.user.service.AuthenticatedUser;
 import com.watchwise.watchwise_api.user.service.RegistrationStartResult;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
@@ -364,6 +365,12 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
         return toUserResponseDto(user, computeProfileStats(id));
+    }
+
+    @Override
+    public SessionIdentityDTO getSessionIdentity(UUID id) {
+        return userRepository.findSessionIdentityById(id)
+                .orElseThrow(() -> new NotFoundException("User not found"));
     }
 
     @Override

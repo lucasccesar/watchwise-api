@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.repository;
 
+import com.watchwise.watchwise_api.user.dto.SessionIdentityDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
@@ -29,6 +30,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
         WHERE u.id IN :ids
         """)
     List<UserPreviewDTO> findPreviewsByIdIn(@Param("ids") Collection<UUID> ids);
+
+    @Query("""
+        SELECT new com.watchwise.watchwise_api.user.dto.SessionIdentityDTO(
+            u.id, u.username, u.email, u.name, u.description, u.profilePicture,
+            u.banner, u.isProfilePublic, u.preferredLanguage, u.preferredRegion
+        )
+        FROM User u
+        WHERE u.id = :id
+        """)
+    Optional<SessionIdentityDTO> findSessionIdentityById(@Param("id") UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("SELECT u FROM User u WHERE u.id = :id")
