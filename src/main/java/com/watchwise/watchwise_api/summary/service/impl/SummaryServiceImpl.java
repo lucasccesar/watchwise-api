@@ -47,6 +47,8 @@ import com.watchwise.watchwise_api.summary.dto.EpisodeScoreDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.LatestWatchedBackdropResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.DiaryReviewsSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeRecentlyWatchedDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSocialActivityDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeViewerDTO;
@@ -216,6 +218,37 @@ public class SummaryServiceImpl implements SummaryService {
                 genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
                 notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities,
                 latestWatchedBackdropPath);
+    }
+
+    @Override
+    public DiaryReviewsSummaryResponseDTO getDiaryReviewsSummary(UUID viewerId, UUID userId) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewSummary(viewerId, userId, target);
+
+        DiaryEntryRepository.HomeWatchAggregate aggregate = diaryEntryRepository.findHomeWatchAggregate(userId);
+        return new DiaryReviewsSummaryResponseDTO(
+                aggregate.getTotalMinutesWatchedMovies(),
+                aggregate.getTotalMinutesWatchedEpisodes(),
+                aggregate.getTotalMoviesWatched(),
+                aggregate.getTotalDistinctMoviesWatched(),
+                aggregate.getTotalEpisodesWatched(),
+                aggregate.getDistinctSeriesWatched(),
+                latestWatchedBackdropPath(target));
+    }
+
+    @Override
+    public LatestWatchedBackdropResponseDTO getLatestWatchedBackdrop(UUID viewerId) {
+        User target = userRepository.findById(viewerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewSummary(viewerId, viewerId, target);
+        return new LatestWatchedBackdropResponseDTO(latestWatchedBackdropPath(target));
+    }
+
+    private String latestWatchedBackdropPath(User target) {
+        List<DiaryEntry> latestEntries = diaryEntryRepository.findRecentHomeEntries(
+                target.getId(), HOME_WATCHED_CONTENT_TYPES, PageRequest.of(0, 1));
+        return latestWatchedBackdropPath(latestEntries, target.getPreferredLanguage());
     }
 
     private List<SeriesInProgressPreviewDTO> loadHomeNextEpisodes(UUID viewerId, UUID userId, User target) {

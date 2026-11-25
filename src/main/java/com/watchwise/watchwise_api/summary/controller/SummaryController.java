@@ -7,6 +7,8 @@ import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.LatestWatchedBackdropResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.DiaryReviewsSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -42,6 +44,16 @@ public class SummaryController {
     public ResponseEntity<HomeSummaryResponseDTO> getHomeSummary(@PathVariable UUID userId) {
         HomeSummaryResponseDTO response = summaryService.getHomeSummary(getCurrentUserId(), userId);
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/users/{userId}/summary/diary-reviews")
+    public ResponseEntity<DiaryReviewsSummaryResponseDTO> getDiaryReviewsSummary(@PathVariable UUID userId) {
+        return ResponseEntity.ok(summaryService.getDiaryReviewsSummary(getCurrentUserId(), userId));
+    }
+
+    @GetMapping("/users/me/summary/latest-watched-backdrop")
+    public ResponseEntity<LatestWatchedBackdropResponseDTO> getLatestWatchedBackdrop() {
+        return ResponseEntity.ok(summaryService.getLatestWatchedBackdrop(getCurrentUserId()));
     }
 
     @GetMapping("/users/{userId}/summary/month")

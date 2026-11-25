@@ -1732,6 +1732,43 @@ paths:
         "403": { description: Perfil privado e quem pede não é seguidor aceito }
         "404": { description: Usuário não encontrado }
 
+  /users/{userId}/summary/diary-reviews:
+    get:
+      tags: [Users]
+      summary: Totais e imagem de fundo para as resenhas do diário
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: Resumo de resenhas do diário
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiaryReviewsSummary" }
+        "401": { description: Autenticação necessária }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário inexistente ou indisponível para quem pede }
+
+  /users/me/summary/latest-watched-backdrop:
+    get:
+      tags: [Users]
+      summary: Imagem de fundo da atividade mais recente do usuário autenticado
+      description: >
+        Usa o filme ou a série do episódio da última entrada elegível do diário,
+        no idioma preferido do usuário. Quando não houver imagem disponível,
+        retorna latestWatchedBackdropPath nulo.
+      responses:
+        "200":
+          description: Imagem de fundo
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [latestWatchedBackdropPath]
+                properties:
+                  latestWatchedBackdropPath: { type: string, nullable: true }
+        "401": { description: Autenticação necessária }
+        "404": { description: Usuário não encontrado }
+
   /users/{userId}/summary/month:
     get:
       tags: [Users]
@@ -8690,6 +8727,26 @@ components:
             mesma fonte da tela de Série. Nos guestStars de SEASON, é calculado pelo backend (não
             vem do TMDB) contando em quantos episódios daquela temporada o guest star apareceu, ao
             agregar os guest_stars de cada episódio de episodes[] da temporada.
+
+    DiaryReviewsSummary:
+      type: object
+      description: Os seis totais de atividade da Home e a mesma imagem de fundo do último item assistido.
+      required:
+        - totalMinutesWatchedMovies
+        - totalMinutesWatchedEpisodes
+        - totalMoviesWatched
+        - totalDistinctMoviesWatched
+        - totalEpisodesWatched
+        - distinctSeriesWatched
+        - latestWatchedBackdropPath
+      properties:
+        totalMinutesWatchedMovies: { type: integer, format: int64 }
+        totalMinutesWatchedEpisodes: { type: integer, format: int64 }
+        totalMoviesWatched: { type: integer, format: int64 }
+        totalDistinctMoviesWatched: { type: integer, format: int64 }
+        totalEpisodesWatched: { type: integer, format: int64 }
+        distinctSeriesWatched: { type: integer, format: int64 }
+        latestWatchedBackdropPath: { type: string, nullable: true }
 
     HomeSummary:
       type: object

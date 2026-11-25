@@ -6,6 +6,8 @@ import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.LatestWatchedBackdropResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.DiaryReviewsSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -18,6 +20,10 @@ public interface SummaryService {
     SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type);
 
     HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId);
+
+    DiaryReviewsSummaryResponseDTO getDiaryReviewsSummary(UUID viewerId, UUID userId);
+
+    LatestWatchedBackdropResponseDTO getLatestWatchedBackdrop(UUID viewerId);
 
     MonthInReviewResponseDTO getMonthInReview(UUID viewerId, UUID userId, ContentType type, YearMonth month);
 
