@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickDetailViewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTemplatePickViewDTO;
@@ -19,6 +20,8 @@ public interface PickService {
     Page<PickPreviewDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size);
 
     Page<PickViewCardDTO> getMyPicksView(UUID viewerId, Integer page, Integer size);
+
+    PicksTotalsDTO getMyTotals(UUID viewerId);
 
     Page<PickTemplatePickViewDTO> getTemplatePicksView(
             UUID viewerId, UUID templateId, PickSort sort, Integer page, Integer size);

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.ServiceUnavailableException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -12,6 +13,7 @@ import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickDetailViewDTO;
@@ -36,19 +38,24 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.TransactionException;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class PickServiceImpl implements PickService {
     private static final int MAX_VISUAL_PICK_PAGE_SIZE = 10;
@@ -127,6 +134,26 @@ public class PickServiceImpl implements PickService {
         PageRequest pageRequest = pageRequestFactory.build(page, size, MAX_VISUAL_PICK_PAGE_SIZE);
         Page<Pick> picks = pickRepository.findVisibleByUserId(viewerId, viewerId, pageRequest);
         return pickPreviewAssembler.assembleViewPage(picks, viewerId);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public PicksTotalsDTO getMyTotals(UUID viewerId) {
+        Long picksCount = readHeaderCount("Picks", () -> pickRepository.countVisibleByUserId(viewerId, viewerId));
+        Long templatesCount = readHeaderCount("Picks templates", () -> templateRepository.countByCreatorId(viewerId));
+        if (picksCount == null && templatesCount == null) {
+            throw new ServiceUnavailableException("Picks totals are temporarily unavailable");
+        }
+        return new PicksTotalsDTO(picksCount, templatesCount);
+    }
+
+    private Long readHeaderCount(String resource, LongSupplier count) {
+        try {
+            return count.getAsLong();
+        } catch (DataAccessException | TransactionException failure) {
+            log.warn("Could not count {} for the Explore header ({})", resource, failure.getClass().getSimpleName());
+            return null;
+        }
     }
 
     @Override

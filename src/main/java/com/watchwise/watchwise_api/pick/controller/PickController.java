@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.dto.PickDetailViewDTO;
@@ -101,6 +102,11 @@ public class PickController {
                                                                          @RequestParam(required = false) Integer size) {
         Page<PickPreviewDTO> picks = pickService.getUserPicks(currentUserId(), userId, templateId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(picks));
+    }
+
+    @GetMapping("/users/me/picks/totals")
+    public ResponseEntity<PicksTotalsDTO> getMyTotals() {
+        return ResponseEntity.ok(pickService.getMyTotals(currentUserId()));
     }
 
     @GetMapping("/users/me/picks/view")

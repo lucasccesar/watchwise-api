@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -16,6 +17,14 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
+    String COUNT_VISIBLE_BY_USER = """
+            select count(pick) from Pick pick
+            where pick.user.id = :userId
+              and (pick.picksTemplate.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.picksTemplate.creator.id) or
+                    (b.blocker.id = pick.picksTemplate.creator.id and b.blocked.id = :viewerId)))
+            """;
+
     @Query("select pick from Pick pick join fetch pick.picksTemplate where pick.id in :ids")
     List<Pick> findByIdInWithPicksTemplate(@Param("ids") Collection<UUID> ids);
 
@@ -30,14 +39,35 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
                     (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by pick.createdAt desc, pick.id desc
             """,
+            countQuery = COUNT_VISIBLE_BY_USER)
+    Page<Pick> findVisibleByUserId(@Param("viewerId") UUID viewerId, @Param("userId") UUID userId, Pageable pageable);
+
+    @Query(value = """
+            select new com.watchwise.watchwise_api.pick.repository.PickListRow(
+                pick.id, template.id, template.name, template.coverImage,
+                creator.username, creator.name, creator.profilePicture,
+                pick.visibility, pick.createdAt, pick.likesCount)
+            from Pick pick
+            join pick.picksTemplate template
+            left join template.creator creator
+            where pick.user.id = :userId
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :userId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :userId)))
+            order by pick.createdAt desc, pick.id desc
+            """,
             countQuery = """
                     select count(pick) from Pick pick
                     where pick.user.id = :userId
                       and (pick.picksTemplate.creator is null or not exists (select b.id from UserBlock b where
-                            (b.blocker.id = :viewerId and b.blocked.id = pick.picksTemplate.creator.id) or
-                            (b.blocker.id = pick.picksTemplate.creator.id and b.blocked.id = :viewerId)))
+                            (b.blocker.id = :userId and b.blocked.id = pick.picksTemplate.creator.id) or
+                            (b.blocker.id = pick.picksTemplate.creator.id and b.blocked.id = :userId)))
                     """)
-    Page<Pick> findVisibleByUserId(@Param("viewerId") UUID viewerId, @Param("userId") UUID userId, Pageable pageable);
+    Page<PickListRow> findMyPickList(@Param("userId") UUID userId, Pageable pageable);
+
+    @Transactional(readOnly = true)
+    @Query(COUNT_VISIBLE_BY_USER)
+    long countVisibleByUserId(@Param("viewerId") UUID viewerId, @Param("userId") UUID userId);
 
     @Query("select pick.picksTemplate.id from Pick pick where pick.id = :id and pick.user.id = :userId")
     Optional<UUID> findOwnedTemplateId(@Param("id") UUID id, @Param("userId") UUID userId);

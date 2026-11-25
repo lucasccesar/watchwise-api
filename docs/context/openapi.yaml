@@ -3551,6 +3551,36 @@ paths:
                         items: { $ref: "#/components/schemas/UserList" }
         "400": { description: Número/tamanho de página inválido }
 
+  /users/me/picks/totals:
+    get:
+      tags: [Picks]
+      summary: Obter os totais do cabeçalho de Explorar Picks
+      description: >-
+        Conta os Picks próprios visíveis ao usuário autenticado, inclusive os privados, e os
+        templates criados pelo usuário. Aplica os mesmos filtros das páginas próprias.
+        Um total indisponível pode ser nulo quando o outro for obtido.
+      responses:
+        "200": { description: Totais do cabeçalho, content: { application/json: { schema: { $ref: "#/components/schemas/PicksTotals" } } } }
+        "401": { description: Não autenticado }
+        "503": { description: Ambos os totais indisponíveis }
+
+  /users/me/picks/list:
+    get:
+      tags: [Picks]
+      summary: Listar cartões resumidos de Meus Picks
+      description: >-
+        Usa os mesmos filtros de propriedade e visibilidade e a mesma ordem da página visual.
+        Retorna os dados da lista e até cinco categorias respondidas válidas por cartão.
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10 }
+      responses:
+        "200": { description: Página resumida, content: { application/json: { schema: { $ref: "#/components/schemas/PickListCardPage" } } } }
+        "400": { description: Paginação inválida; corpo ApiError }
+        "401": { description: Não autenticado }
+
   /users/me/picks/view:
     get:
       tags: [Picks]
@@ -11132,6 +11162,58 @@ components:
       description: >
         Detalhe visual completo de um Pick. Os comentários não são embutidos e devem ser lidos
         por GET /picks/{pickId}/comments.
+
+    PicksTotals:
+      type: object
+      required: [picksCount, templatesCount]
+      properties:
+        picksCount: { type: integer, format: int64, minimum: 0, nullable: true }
+        templatesCount: { type: integer, format: int64, minimum: 0, nullable: true }
+
+    PickListCardPage:
+      type: object
+      required: [content, page, size, totalElements, totalPages, hasNext]
+      properties:
+        content: { type: array, items: { $ref: "#/components/schemas/PickListCard" } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        hasNext: { type: boolean }
+
+    PickListCard:
+      type: object
+      required: [id, picksTemplate, visibility, createdAt, answeredCategoriesCount, totalCategoriesCount, answeredCategories, likesCount, commentsCount]
+      properties:
+        id: { type: string, format: uuid }
+        picksTemplate:
+          type: object
+          required: [name]
+          properties:
+            name: { type: string }
+            coverImage: { type: string, nullable: true }
+            creator:
+              type: object
+              nullable: true
+              properties:
+                username: { type: string, nullable: true }
+                name: { type: string, nullable: true }
+                profilePicture: { type: string, nullable: true }
+        visibility: { type: string, enum: [PUBLIC, FOLLOWERS, PRIVATE] }
+        createdAt: { type: string, format: date-time }
+        answeredCategoriesCount: { type: integer, format: int64 }
+        totalCategoriesCount: { type: integer, format: int64 }
+        answeredCategories:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [categoryId, name]
+            properties:
+              categoryId: { type: string, format: uuid }
+              name: { type: string }
+        likesCount: { type: integer }
+        commentsCount: { type: integer, format: int64 }
 
     PickViewCard:
       type: object
