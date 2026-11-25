@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.auth.repository;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
 import com.watchwise.watchwise_api.auth.entity.RefreshToken;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers

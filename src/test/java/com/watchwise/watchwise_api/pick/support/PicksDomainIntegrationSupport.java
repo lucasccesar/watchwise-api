@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.pick.support;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.jayway.jsonpath.JsonPath;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.JwtService;
@@ -48,7 +49,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)

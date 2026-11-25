@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.comment.repository;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -48,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers

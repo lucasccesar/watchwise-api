@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.contentreleasedatesnapshot.service.impl;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieReleaseDateSelector;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
@@ -68,6 +70,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers

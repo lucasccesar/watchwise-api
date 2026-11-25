@@ -25,6 +25,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.AdditionalAnswers.returnsFirstArg;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -51,8 +54,9 @@ class PersonViewServiceImplTest {
                 card("1", "Newest", "2024-01-01", WatchStatus.UNWATCHED, true),
                 card("2", "Match", "2022-01-01", WatchStatus.WATCHED, true),
                 card("3", "Older match", "2020-01-01", WatchStatus.WATCHED, false));
-        when(assembler.assemble(org.mockito.ArgumentMatchers.eq(viewerId), org.mockito.ArgumentMatchers.anyList()))
-                .thenReturn(cards);
+        when(assembler.assemble(eq(viewerId), anyList())).thenReturn(cards);
+        when(assembler.enrichTmdbVoteAverages(List.of(cards.get(1)), "en-US"))
+                .thenAnswer(returnsFirstArg());
 
         var view = new PersonViewServiceImpl(userRepository, followerRepository, followedPersonService,
                 aggregateReader, new PersonFilmographyNormalizer(), assembler,
@@ -221,8 +225,8 @@ class PersonViewServiceImplTest {
                 null, null, List.of(), new TmdbPersonAggregateCredits(cast, List.of()));
         when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder().id(viewerId).build()));
         when(aggregateReader.read("287", "en-US")).thenReturn(aggregate);
-        when(assembler.assemble(org.mockito.ArgumentMatchers.eq(viewerId), org.mockito.ArgumentMatchers.anyList()))
-                .thenReturn(cards);
+        when(assembler.assemble(eq(viewerId), anyList())).thenReturn(cards);
+        when(assembler.enrichTmdbVoteAverages(anyList(), eq("en-US"))).thenAnswer(returnsFirstArg());
         return new PersonViewServiceImpl(userRepository, followerRepository, followedPersonService,
                 aggregateReader, new PersonFilmographyNormalizer(), assembler,
                 new com.watchwise.watchwise_api.common.pagination.PageRequestFactory())

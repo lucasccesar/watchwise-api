@@ -21,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
@@ -371,12 +373,10 @@ class FollowerServiceImplTest {
     @DisplayName("[getFollowers] Should Return Page Of PublicUserDTO - When Target Profile Is Public")
     void shouldReturnPageOfPublicUserDtoWhenTargetProfileIsPublic() {
         followedUser.setIsProfilePublic(true);
-        Follower follow = buildFollow(FollowStatus.ACCEPTED);
-        Page<Follower> followerPage = new PageImpl<>(List.of(follow));
+        Page<PublicUserDTO> followerPage = new PageImpl<>(List.of(publicUserDTO));
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowerPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(followerPage);
-        when(userMapper.userToPublicUserDto(followerUser)).thenReturn(publicUserDTO);
 
         Page<PublicUserDTO> result = followerService.getFollowers(UUID.randomUUID(), followedId, 1, 10);
 
@@ -387,11 +387,9 @@ class FollowerServiceImplTest {
     void shouldHideBiographyForBlockedFollowerInAnotherUsersFollowersPage() {
         UUID viewerId = UUID.randomUUID();
         followedUser.setIsProfilePublic(true);
-        Follower follow = buildFollow(FollowStatus.ACCEPTED);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(follow)));
-        when(userMapper.userToPublicUserDto(followerUser)).thenReturn(publicUserDTO);
+        when(followerRepository.findAcceptedFollowerPreviews(eq(followedId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(publicUserDTO)));
         when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(viewerId, List.of(followerId)))
                 .thenReturn(Set.of(followerId));
 
@@ -409,7 +407,7 @@ class FollowerServiceImplTest {
     void shouldReturnEmptyPageWhenTargetHasNoAcceptedFollowers() {
         followedUser.setIsProfilePublic(true);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowerPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         Page<PublicUserDTO> result = followerService.getFollowers(UUID.randomUUID(), followedId, 1, 10);
@@ -438,7 +436,7 @@ class FollowerServiceImplTest {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, followedId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowerPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(followerService.getFollowers(viewerId, followedId, 1, 10).getContent()).isEmpty();
@@ -457,7 +455,7 @@ class FollowerServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
-        verify(followerRepository, never()).findByFollowedIdAndStatus(any(), any(), any());
+        verify(followerRepository, never()).findAcceptedFollowerPreviews(any(), any());
     }
 
     @Test
@@ -465,7 +463,7 @@ class FollowerServiceImplTest {
     void shouldReturnPageWhenTargetProfileIsPrivateAndViewerIsTheTargetThemselves() {
         followedUser.setIsProfilePublic(false);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowerPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(followerService.getFollowers(followedId, followedId, 1, 10).getContent()).isEmpty();
@@ -479,7 +477,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, null, 10);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
@@ -490,7 +488,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 0, 10);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
@@ -501,7 +499,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 3, 10);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
     }
 
@@ -513,7 +511,7 @@ class FollowerServiceImplTest {
         assertThatThrownBy(() -> followerService.getFollowers(UUID.randomUUID(), followedId, -1, 10))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(followerRepository, never()).findByFollowedIdAndStatus(any(), any(), any());
+        verify(followerRepository, never()).findAcceptedFollowerPreviews(any(), any());
     }
 
     @Test
@@ -523,7 +521,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, null);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
@@ -534,7 +532,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, 1001);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
@@ -545,7 +543,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, 25);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
     }
 
@@ -556,7 +554,7 @@ class FollowerServiceImplTest {
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, 1000);
 
-        verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowerPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
     }
 
@@ -568,7 +566,7 @@ class FollowerServiceImplTest {
         assertThatThrownBy(() -> followerService.getFollowers(UUID.randomUUID(), followedId, 1, -5))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(followerRepository, never()).findByFollowedIdAndStatus(any(), any(), any());
+        verify(followerRepository, never()).findAcceptedFollowerPreviews(any(), any());
     }
 
     @Test
@@ -579,27 +577,24 @@ class FollowerServiceImplTest {
         assertThatThrownBy(() -> followerService.getFollowers(UUID.randomUUID(), followedId, 1, 0))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(followerRepository, never()).findByFollowedIdAndStatus(any(), any(), any());
+        verify(followerRepository, never()).findAcceptedFollowerPreviews(any(), any());
     }
 
     private void stubFollowersEmptyPage() {
         followedUser.setIsProfilePublic(true);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowedIdAndStatus(any(), any(), any(PageRequest.class))).thenReturn(Page.empty());
+        when(followerRepository.findAcceptedFollowerPreviews(any(), any(PageRequest.class))).thenReturn(Page.empty());
     }
 
     @Test
     @DisplayName("[getFollowing] Should Return Page Of PublicUserDTO - When Target Profile Is Public")
     void shouldReturnPageOfPublicUserDtoWhenTargetProfileIsPublicForFollowing() {
         followedUser.setIsProfilePublic(true);
-        Follower follow = buildFollow(FollowStatus.ACCEPTED);
-        Page<Follower> followerPage = new PageImpl<>(List.of(follow));
         PublicUserDTO followedPublicDto = new PublicUserDTO(
                 followedId, "marina", null, "https://picture.com/pic.png", true, LocalDateTime.now());
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
-                .thenReturn(followerPage);
-        when(userMapper.userToPublicUserDto(followedUser)).thenReturn(followedPublicDto);
+        when(followerRepository.findAcceptedFollowingPreviews(eq(followedId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(followedPublicDto)));
 
         Page<PublicUserDTO> result = followerService.getFollowing(UUID.randomUUID(), followedId, 1, 10);
 
@@ -610,17 +605,9 @@ class FollowerServiceImplTest {
     void shouldHideBiographyForBlockedFollowedUserInAnotherUsersFollowingPage() {
         UUID viewerId = UUID.randomUUID();
         followedUser.setIsProfilePublic(true);
-        Follower follow = Follower.builder()
-                .id(UUID.randomUUID())
-                .follower(followedUser)
-                .followed(followerUser)
-                .status(FollowStatus.ACCEPTED)
-                .createdAt(LocalDateTime.now())
-                .build();
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(follow)));
-        when(userMapper.userToPublicUserDto(followerUser)).thenReturn(publicUserDTO);
+        when(followerRepository.findAcceptedFollowingPreviews(eq(followedId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(publicUserDTO)));
         when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(viewerId, List.of(followerId)))
                 .thenReturn(Set.of(followerId));
 
@@ -638,7 +625,7 @@ class FollowerServiceImplTest {
     void shouldReturnEmptyPageWhenTargetFollowsNoOne() {
         followedUser.setIsProfilePublic(true);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowingPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         Page<PublicUserDTO> result = followerService.getFollowing(UUID.randomUUID(), followedId, 1, 10);
@@ -667,7 +654,7 @@ class FollowerServiceImplTest {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, followedId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowingPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(followerService.getFollowing(viewerId, followedId, 1, 10).getContent()).isEmpty();
@@ -686,7 +673,7 @@ class FollowerServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
-        verify(followerRepository, never()).findByFollowerIdAndStatus(any(), any(), any());
+        verify(followerRepository, never()).findAcceptedFollowingPreviews(any(), any());
     }
 
     @Test
@@ -694,7 +681,7 @@ class FollowerServiceImplTest {
     void shouldReturnPageWhenTargetProfileIsPrivateAndViewerIsTheTargetThemselvesForFollowing() {
         followedUser.setIsProfilePublic(false);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), any(PageRequest.class)))
+        when(followerRepository.findAcceptedFollowingPreviews(eq(followedId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(followerService.getFollowing(followedId, followedId, 1, 10).getContent()).isEmpty();
@@ -706,13 +693,81 @@ class FollowerServiceImplTest {
     void shouldDefaultPageAndSizeWhenBothAreNullForFollowing() {
         followedUser.setIsProfilePublic(true);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(followerRepository.findByFollowerIdAndStatus(any(), any(), any(PageRequest.class))).thenReturn(Page.empty());
+        when(followerRepository.findAcceptedFollowingPreviews(any(), any(PageRequest.class))).thenReturn(Page.empty());
 
         followerService.getFollowing(UUID.randomUUID(), followedId, null, null);
 
-        verify(followerRepository).findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
+        verify(followerRepository).findAcceptedFollowingPreviews(eq(followedId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldMaskDescriptionsInOneBatchWithoutChangingOtherFieldsOrPagination(boolean followers) {
+        UUID viewerId = followerId;
+        UUID blockedId = UUID.randomUUID();
+        LocalDateTime createdAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        var viewer = new PublicUserDTO(viewerId, "viewer", "Viewer", "Viewer bio", null, true, createdAt);
+        var blocked = new PublicUserDTO(blockedId, "blocked", "Blocked", "Bio", null, false, createdAt);
+        var pageRequest = PageRequest.of(1, 2);
+        var projected = new PageImpl<>(List.of(viewer, blocked), pageRequest, 5);
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(viewerId, List.of(viewerId, blockedId)))
+                .thenReturn(Set.of(viewerId, blockedId));
+        if (followers) {
+            when(followerRepository.findAcceptedFollowerPreviews(followedId, pageRequest)).thenReturn(projected);
+        } else {
+            when(followerRepository.findAcceptedFollowingPreviews(followedId, pageRequest)).thenReturn(projected);
+        }
+
+        Page<PublicUserDTO> result = followers
+                ? followerService.getFollowers(viewerId, followedId, 2, 2)
+                : followerService.getFollowing(viewerId, followedId, 2, 2);
+
+        assertThat(result.getContent()).containsExactly(viewer,
+                new PublicUserDTO(blockedId, "blocked", "Blocked", null, null, false, createdAt));
+        assertThat(result.getPageable()).isEqualTo(pageRequest);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(3);
+        verify(userRepository).findById(followedId);
+        verify(userBlockRepository).findBlockedCounterpartIdsEitherDirection(viewerId, List.of(viewerId, blockedId));
+        verifyNoMoreInteractions(followerRepository, userRepository, userBlockRepository);
+        verifyNoInteractions(userMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldRejectBlockedTargetBeforeLoadingEitherProjection(boolean followers) {
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        doThrow(new ForbiddenException("Blocked")).when(userBlockAccessService)
+                .assertContentVisible(followerId, followedId);
+
+        assertThatThrownBy(() -> {
+            if (followers) {
+                followerService.getFollowers(followerId, followedId, 1, 10);
+            } else {
+                followerService.getFollowing(followerId, followedId, 1, 10);
+            }
+        }).isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(followerRepository, userBlockRepository, userMapper);
+    }
+
+    @Test
+    void shouldKeepSentPendingRequestsOnTheEntityQueryAndMaskBlockedDescriptions() {
+        Follower request = buildFollow(FollowStatus.PENDING);
+        var page = PageRequest.of(0, 10);
+        var preview = new PublicUserDTO(followedId, "target", "Target", "Bio", null, false, null);
+        when(followerRepository.findByFollowerIdAndStatus(followerId, FollowStatus.PENDING, page))
+                .thenReturn(new PageImpl<>(List.of(request), page, 1));
+        when(userMapper.userToPublicUserDto(followedUser)).thenReturn(preview);
+        when(userBlockRepository.findBlockedCounterpartIdsEitherDirection(followerId, List.of(followedId)))
+                .thenReturn(Set.of(followedId));
+
+        assertThat(followerService.getSentPendingFollowRequests(followerId, 1, 10).getContent())
+                .containsExactly(new PublicUserDTO(followedId, "target", "Target", null, null, false, null));
+        verify(followerRepository).findByFollowerIdAndStatus(followerId, FollowStatus.PENDING, page);
+        verifyNoMoreInteractions(followerRepository);
     }
 
     @Test

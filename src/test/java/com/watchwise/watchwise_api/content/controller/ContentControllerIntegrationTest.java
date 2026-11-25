@@ -815,6 +815,8 @@ class ContentControllerIntegrationTest {
                 new TmdbEpisodeFullDetails(
                         201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
                         "/episode-still.jpg", List.of())));
+        when(tmdbClient.getSeasonEpisodeDetails("1399", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
         when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(
                         "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
@@ -869,7 +871,7 @@ class ContentControllerIntegrationTest {
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                         201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
                         "/episode-still.jpg", List.of())));
-        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US"))
+        when(tmdbClient.getSeasonEpisodeDetails("1399", 1, "en-US"))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                         101, "Season 1", null, "/season-poster.jpg", "2008-01-20", 2,
                         List.of(
@@ -887,7 +889,8 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.metadata.presentationPosterPath").value("/season-poster.jpg"))
                 .andExpect(jsonPath("$.metadata.presentationCrew[0].name").value("Vince Gilligan"))
                 .andExpect(jsonPath("$.metadata.crewInherited").value(true))
-                .andExpect(jsonPath("$.details.posterPath").value("/episode-still.jpg"))
+                .andExpect(jsonPath("$.details.posterPath").value("/season-poster.jpg"))
+                .andExpect(jsonPath("$.details.backdropPath").value("/episode-still.jpg"))
                 .andExpect(jsonPath("$.details.crew[0].name").value("Vince Gilligan"))
                 .andExpect(jsonPath("$.navigation.episodeNumber").value(2));
 

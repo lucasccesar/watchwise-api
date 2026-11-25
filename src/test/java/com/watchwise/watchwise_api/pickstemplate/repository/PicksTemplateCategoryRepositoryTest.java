@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.pickstemplate.repository;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +20,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE) @Testcontainers
 class PicksTemplateCategoryRepositoryTest {
     @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");

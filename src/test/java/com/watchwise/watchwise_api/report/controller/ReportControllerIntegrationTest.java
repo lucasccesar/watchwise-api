@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.report.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
@@ -44,7 +45,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class ReportControllerIntegrationTest {

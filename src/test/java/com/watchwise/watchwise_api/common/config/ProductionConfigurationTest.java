@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.mock.env.MockEnvironment;
@@ -158,15 +158,15 @@ class ProductionConfigurationTest {
         return current.getMessage();
     }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     @EnableConfigurationProperties(ImportWorkerProperties.class)
     static class WorkerPropertiesConfiguration { }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     @EnableConfigurationProperties(DataSourceProperties.class)
     static class NativeDataSourceConfiguration { }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     @PropertySource("classpath:application-prod.properties")
     static class ProductionSecretsConfiguration {
         @Bean
@@ -187,7 +187,7 @@ class ProductionConfigurationTest {
     private record ProductionSecrets(String jwtSecret, String cors, String tmdbApiKey,
                                      String resendApiKey, String resendFrom) { }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     static class TestDataSourceConfiguration {
         @Bean(destroyMethod = "close")
         HikariDataSource dataSource() {
@@ -205,7 +205,7 @@ class ProductionConfigurationTest {
         }
     }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     static class ValidTestDataSourceConfiguration {
         @Bean(destroyMethod = "close")
         HikariDataSource dataSource() {

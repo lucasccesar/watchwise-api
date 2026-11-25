@@ -73,6 +73,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.lenient;
@@ -81,6 +82,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -389,6 +391,63 @@ class WatchlistEntryServiceImplTest {
         assertThat(result.hasNext()).isFalse();
         assertThat(result.aggregate()).isEqualTo(new WatchlistAggregateDTO(1, 1, 0, 120, 0));
         assertThat(result.availableGenres()).containsExactly("Comedy", "Drama");
+    }
+
+    @Test
+    void shouldReturnLegacyMenuGenresFromWholeCollectionWithLightweightFallback() {
+        WatchlistEntry filteredMovie = WatchlistEntry.builder()
+                .id(UUID.randomUUID()).user(user).type(ContentType.MOVIE).position(1)
+                .content(content("550", ContentType.MOVIE, 120, List.of("Drama", " Drama ", "", "Drama")))
+                .createdAt(LocalDateTime.of(2020, 1, 1, 0, 0)).build();
+        WatchlistEntry missingGenres = entry(content("1396", ContentType.SERIES, null, null, 480),
+                ContentType.SERIES, 2);
+        WatchlistEntry emptyGenres = entry(content("680", ContentType.MOVIE, 90, List.of()),
+                ContentType.MOVIE, 3);
+        WatchlistEntry repeated = entry(content("13", ContentType.MOVIE, 110,
+                List.of("drama", "Ação", "Drama")), ContentType.MOVIE, 4);
+        List<WatchlistEntry> candidates = new ArrayList<>(
+                List.of(filteredMovie, missingGenres, emptyGenres, repeated));
+        for (int i = 0; i < 1000; i++) {
+            candidates.add(entry(content("9" + i, ContentType.MOVIE, 90, List.of("Drama")),
+                    ContentType.MOVIE, i + 5));
+        }
+        candidates.add(WatchlistEntry.builder()
+                .id(UUID.randomUUID()).user(user).type(ContentType.SERIES).position(1005)
+                .content(content("9999", ContentType.SERIES, null, List.of("Último"), 480))
+                .createdAt(LocalDateTime.of(2019, 1, 1, 0, 0)).build());
+        stubViewCandidates(candidates);
+        stubCards(List.of(filteredMovie));
+        ContentCoordinate missingCoordinate = ContentCoordinate.from(missingGenres.getContent());
+        when(contentCardAssembler.resolveGenres(List.of(missingCoordinate), user.getPreferredLanguage()))
+                .thenReturn(Map.of(missingCoordinate, List.of("Comédia", "Drama")));
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, ContentType.MOVIE, "Drama", WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "ASC", 1, 1, true);
+
+        assertThat(result.content()).extracting(card -> card.card().tmdbId()).containsExactly("550");
+        assertThat(result.totalElements()).isEqualTo(1002);
+        assertThat(result.totalPages()).isEqualTo(1002);
+        assertThat(result.availableGenres())
+                .containsExactlyInAnyOrder("Drama", " Drama ", "", "drama", "Ação", "Comédia", "Último");
+        verify(watchlistEntryRepository).findByUserIdWithContentForView(userId);
+        verify(contentCardAssembler).assemble(argThat(specs -> specs.size() == 1),
+                any(ContentCardContext.class), anySet());
+        verify(contentCardAssembler).resolveGenres(List.of(missingCoordinate), user.getPreferredLanguage());
+        verifyNoMoreInteractions(contentCardAssembler);
+    }
+
+    @Test
+    void shouldReturnEmptyGenreOptionsWithoutResolvingMetadataForEmptyCollection() {
+        stubViewCandidates(List.of());
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL, WatchlistSort.TITLE,
+                "DESC", 1, 18, true);
+
+        assertThat(result.availableGenres()).isEmpty();
+        assertThat(result.content()).isEmpty();
+        verifyNoInteractions(contentCardAssembler);
     }
 
     @Test

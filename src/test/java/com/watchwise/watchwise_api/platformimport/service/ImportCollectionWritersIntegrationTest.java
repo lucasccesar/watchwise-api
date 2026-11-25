@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.platformimport.service;
 
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.platformimport.ImportMovieDetailsFixture;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -38,6 +40,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -58,6 +61,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @Testcontainers
 class ImportCollectionWritersIntegrationTest {
+    @MockitoBean TmdbClient tmdbClient;
+
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -88,6 +93,7 @@ class ImportCollectionWritersIntegrationTest {
 
     @BeforeEach
     void cleanDatabase() {
+        ImportMovieDetailsFixture.stubUnavailableDetails(tmdbClient);
         jdbc.execute("TRUNCATE import_items, external_import_links, user_list_items, user_lists, contents, users CASCADE");
     }
 
@@ -152,6 +158,7 @@ class ImportCollectionWritersIntegrationTest {
 
     @Test
     void appendsEligibleWatchlistItemsAfterExistingAndSkipsWatchedAndDuplicateContent() throws Exception {
+        ImportMovieDetailsFixture.stubReleases(tmdbClient, List.of("52001", "52002", "52003", "52004"));
         User owner = createUser();
         for (String id : List.of("52001", "52002", "52003", "52004")) createMovie(id);
         addWatchlistItem(owner, "52001", 1);
@@ -180,6 +187,7 @@ class ImportCollectionWritersIntegrationTest {
 
     @Test
     void appliesWatchlistItemsByRankWhenSourceRowsAreReversed() throws Exception {
+        ImportMovieDetailsFixture.stubReleases(tmdbClient, List.of("52006", "52007"));
         User owner = createUser();
         createMovie("52006");
         createMovie("52007");
@@ -224,6 +232,7 @@ class ImportCollectionWritersIntegrationTest {
 
     @Test
     void advancesCallerAcrossRankPagesWhenItsSourceOrdinalIsOutsideTheFirstBatch() throws Exception {
+        ImportMovieDetailsFixture.stubReleases(tmdbClient, java.util.stream.IntStream.rangeClosed(60_001, 60_201).mapToObj(Integer::toString).toList());
         User owner = createUser();
         LocalDateTime now = LocalDateTime.now();
         List<Content> movies = new java.util.ArrayList<>(201);
@@ -423,6 +432,7 @@ class ImportCollectionWritersIntegrationTest {
 
     @Test
     void deletingAnImportedWatchlistItemTombstonesItAndPreventsReimport() throws Exception {
+        ImportMovieDetailsFixture.stubReleases(tmdbClient, List.of("56001"));
         User owner = createUser();
         createMovie("56001");
         ImportJob firstJob = createJob(owner);

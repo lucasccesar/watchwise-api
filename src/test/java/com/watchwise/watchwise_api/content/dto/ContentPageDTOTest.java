@@ -46,7 +46,8 @@ class ContentPageDTOTest {
                 "originalLanguage", "certification", "homepageUrl", "tmdbUrl", "imdbUrl", "watchProviders",
                 "presentationPosterPath", "presentationCrew", "crewInherited");
         assertThat(fieldNames(json.get("stats"))).containsExactlyInAnyOrder(
-                "contentId", "averageScore", "ratingsCount", "ratingsDistribution", "playsCount", "commentsCount");
+                "contentId", "averageScore", "ratingsCount", "ratingsDistribution", "playsCount", "commentsCount",
+                "tmdbVoteAverage");
         assertThat(fieldNames(json.get("viewerState"))).containsExactlyInAnyOrder(
                 "watchStatus", "myRating", "myReview", "lastWatchedDate", "lastWatchNumber", "watchedInTheater",
                 "playsCount", "latestDiaryEntryId", "inWatchlist", "watchlistEntryId", "dropped", "droppedEntryId",
@@ -64,6 +65,7 @@ class ContentPageDTOTest {
         assertThat(json.get("metadata").get("presentationCrew")).isEmpty();
         assertThat(json.get("metadata").get("crewInherited").asBoolean()).isFalse();
         assertThat(json.get("stats").get("ratingsDistribution")).isEmpty();
+        assertThat(json.get("stats").get("tmdbVoteAverage").isNull()).isTrue();
         assertThat(json.get("viewerState").get("lists")).isEmpty();
         assertThat(json.get("viewerState").get("reviewIds")).isEmpty();
         assertThat(json.get("sections").get("episodes")).isEmpty();
@@ -109,11 +111,12 @@ class ContentPageDTOTest {
                 "runtimeMinutes", "totalRuntimeMinutes", "numberOfSeasons", "numberOfEpisodes", "genres",
                 "countries", "cast", "guestStars", "creators", "watchProviders", "seasons", "episodes",
                 "recentEpisodes", "budget", "revenue", "productionCompanies", "crew", "videos", "imdb_id",
-                "facebook_id", "instagram_id", "twitter_id", "customPosterUrl", "parentTitle", "parentReleaseYear");
+                "facebook_id", "instagram_id", "twitter_id", "customPosterUrl", "parentTitle", "parentReleaseYear",
+                "tmdbVoteAverage");
         assertThat(fieldNames(details)).doesNotContain(
                 "presentationPosterPath", "presentationCrew", "crewInherited");
         assertThat(fieldNames(stats)).containsExactlyInAnyOrder(
-                "contentId", "averageScore", "playsCount", "reviewsCount", "commentsCount");
+                "contentId", "averageScore", "playsCount", "reviewsCount", "commentsCount", "tmdbVoteAverage");
     }
 
     private ContentDetailsDTO minimalDetails(UUID contentId) {

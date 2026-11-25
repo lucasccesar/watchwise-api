@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
@@ -55,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class AuthControllerIntegrationTest {

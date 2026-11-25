@@ -85,7 +85,7 @@ class PickTargetPreviewAssemblerTest {
         assertThat(previews).hasSize(2);
         assertThat(previews.get(0).person().tmdbId()).isEqualTo("42");
         assertThat(previews.get(0).person().name()).isEqualTo("Ada");
-        assertThat(previews.get(0).person().profileUrl()).endsWith("/w185/ada.jpg");
+        assertThat(previews.get(0).person().profileUrl()).isEqualTo("/ada.jpg");
         assertThat(previews.get(0).contextCard().previewStatus()).isEqualTo(ContentPreviewStatus.UNAVAILABLE);
         verify(tmdbClient, times(1)).getPersonDetails("42");
         ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);

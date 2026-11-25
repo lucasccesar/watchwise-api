@@ -139,7 +139,7 @@ class DiaryEntryControllerTest {
                 dateFrom, dateTo, true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC))
                 .thenReturn(Page.empty());
 
-        diaryEntryController.getDiaryEntries(targetUserId, null, 2, 20, null, dateFrom, dateTo,
+        diaryEntryController.getDiaryEntries(targetUserId, false, null, 2, 20, null, dateFrom, dateTo,
                 true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC);
 
         verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, 2, 20, null,

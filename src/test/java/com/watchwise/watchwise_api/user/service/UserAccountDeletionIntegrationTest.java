@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.service;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.like.repository.AccountLikeFixture;
 import com.watchwise.watchwise_api.like.repository.LikeAccountDeletionOperationsImpl;
@@ -32,7 +33,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @Testcontainers
 class UserAccountDeletionIntegrationTest {
     @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");

@@ -208,13 +208,12 @@ class PersonServiceImplTest {
     }
 
     @Test
-    void shouldReturnEmptyPageWhenPageOffsetExceedsIntegerRange() {
+    void shouldRejectPageOffsetWhenItExceedsIntegerRange() {
         stubAggregate(List.of(credit("1", "movie", "Movie", null, null, "2020-01-01", null, null)), List.of());
 
-        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, Integer.MAX_VALUE, 1000);
-
-        assertThat(result.credits().content()).isEmpty();
-        assertThat(result.credits().page()).isEqualTo(Integer.MAX_VALUE);
+        assertThatThrownBy(() -> service.getPerson(viewerId, "287", PersonParticipation.ALL, Integer.MAX_VALUE, 1000))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Requested page offset exceeds the supported maximum of 2147483647");
     }
 
     @Test

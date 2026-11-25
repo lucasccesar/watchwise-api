@@ -87,17 +87,17 @@ class WatchlistEntryControllerTest {
                 List.of(), 1, 30, 0, 0, false, new WatchlistAggregateDTO(0, 0, 0, 0, 0));
         when(watchlistEntryService.getWatchlistView(
                 currentUserId, targetUserId, ContentType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
-                WatchlistSort.RATING, "DESC", 1, 30)).thenReturn(expected);
+                WatchlistSort.RATING, "DESC", 1, 30, true)).thenReturn(expected);
 
         ResponseEntity<WatchlistViewResponseDTO> result = watchlistEntryController.getWatchlistView(
                 targetUserId, MovieOrSeriesType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
-                WatchlistSort.RATING, "DESC", 1, 30);
+                WatchlistSort.RATING, "DESC", 1, 30, true);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(expected);
         verify(watchlistEntryService).getWatchlistView(
                 currentUserId, targetUserId, ContentType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
-                WatchlistSort.RATING, "DESC", 1, 30);
+                WatchlistSort.RATING, "DESC", 1, 30, true);
     }
 
     @Test

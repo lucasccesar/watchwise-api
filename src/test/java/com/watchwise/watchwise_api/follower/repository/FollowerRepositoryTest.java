@@ -1,8 +1,13 @@
 package com.watchwise.watchwise_api.follower.repository;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
@@ -12,6 +17,9 @@ import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mapstruct.factory.Mappers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -25,8 +33,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +50,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
@@ -434,6 +447,64 @@ class FollowerRepositoryTest {
         userRepository.flush();
 
         assertThat(followerRepository.findById(saved.getId())).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldProjectTheSameOrderedPublicUsersAndPageEnvelopeAsTheEntityQuery(boolean followers) {
+        LocalDateTime tie = LocalDateTime.of(2026, 1, 1, 12, 0);
+        List<Follower> accepted = new ArrayList<>();
+        for (int index = 0; index < 6; index++) {
+            User user = buildUser("projected-" + index, "projected-" + index + "@example.test");
+            user.setProfilePicture(index % 2 == 0 ? null : user.getProfilePicture());
+            user.setDescription(index % 2 == 0 ? null : "Biography " + index);
+            user.setIsProfilePublic(index % 2 == 0);
+            userRepository.save(user);
+            User from = followers ? user : lucas;
+            User to = followers ? lucas : user;
+            FollowStatus status = index < 5 ? FollowStatus.ACCEPTED : FollowStatus.PENDING;
+            Follower link = followerRepository.save(
+                    buildFollowerWithCreatedAt(from, to, status, index < 2 ? tie : tie.plusDays(index)));
+            if (status == FollowStatus.ACCEPTED) {
+                accepted.add(link);
+            }
+        }
+        entityManager.flush();
+        entityManager.clear();
+
+        UserMapper mapper = Mappers.getMapper(UserMapper.class);
+        JsonMapper json = new JsonMapper();
+        List<UUID> ids = accepted.stream()
+                .sorted(Comparator.comparing(Follower::getCreatedAt)
+                        .thenComparing(link -> link.getId().toString()).reversed())
+                .map(link -> (followers ? link.getFollower() : link.getFollowed()).getId())
+                .toList();
+
+        for (int number = 0; number < 4; number++) {
+            PageRequest page = PageRequest.of(number, 2);
+            Page<PublicUserDTO> previous = (followers
+                    ? followerRepository.findByFollowedIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED, page)
+                    : followerRepository.findByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED, page))
+                    .map(link -> mapper.userToPublicUserDto(followers ? link.getFollower() : link.getFollowed()));
+            Page<PublicUserDTO> projected = followers
+                    ? followerRepository.findAcceptedFollowerPreviews(lucas.getId(), page)
+                    : followerRepository.findAcceptedFollowingPreviews(lucas.getId(), page);
+
+            assertThat(projected.getContent()).extracting(PublicUserDTO::id)
+                    .containsExactlyElementsOf(ids.stream().skip(page.getOffset()).limit(page.getPageSize()).toList());
+            assertThat(projected.getTotalElements()).isEqualTo(5);
+            assertThat(projected.getTotalPages()).isEqualTo(3);
+            JsonNode previousJson = json.valueToTree(PageResponseDTO.of(previous));
+            JsonNode projectedJson = json.valueToTree(PageResponseDTO.of(projected));
+            assertThat(projectedJson).isEqualTo(previousJson);
+        }
+
+        PageRequest firstPage = PageRequest.of(0, 2);
+        Page<PublicUserDTO> empty = followers
+                ? followerRepository.findAcceptedFollowerPreviews(joao.getId(), firstPage)
+                : followerRepository.findAcceptedFollowingPreviews(joao.getId(), firstPage);
+        assertThat(empty.getContent()).isEmpty();
+        assertThat(empty.getTotalElements()).isZero();
     }
 
     private Follower buildFollower(User follower, User followed, FollowStatus status) {

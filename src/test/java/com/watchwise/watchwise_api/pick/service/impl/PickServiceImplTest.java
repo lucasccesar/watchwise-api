@@ -94,6 +94,38 @@ class PickServiceImplTest {
     }
 
     @Test
+    void countsOnlyTheAuthenticatedOwnersPicksAndTemplatesWithoutBuildingCards() {
+        UUID viewer = UUID.randomUUID();
+        UUID emptyViewer = UUID.randomUUID();
+        when(pickRepository.countVisibleByUserId(viewer, viewer)).thenReturn(3L);
+        when(templateRepository.countByCreatorId(viewer)).thenReturn(2L);
+
+        assertThat(service.getMyTotals(viewer))
+                .isEqualTo(new com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO(3L, 2L));
+        assertThat(service.getMyTotals(emptyViewer))
+                .isEqualTo(new com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO(0L, 0L));
+
+        verify(pickRepository).countVisibleByUserId(viewer, viewer);
+        verify(pickRepository).countVisibleByUserId(emptyViewer, emptyViewer);
+        verify(templateRepository).countByCreatorId(viewer);
+        verify(templateRepository).countByCreatorId(emptyViewer);
+        verifyNoMoreInteractions(pickRepository, templateRepository);
+        verifyNoInteractions(pickMapper, templatePreviewAssembler, targetService, optionRepository,
+                selectionRepository, categoryRepository, commentRepository, likeService, userRepository);
+    }
+
+    @Test
+    void retainsTheTemplateCountWhenThePickCountFails() {
+        UUID viewer = UUID.randomUUID();
+        when(pickRepository.countVisibleByUserId(viewer, viewer))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("test"));
+        when(templateRepository.countByCreatorId(viewer)).thenReturn(2L);
+
+        assertThat(service.getMyTotals(viewer))
+                .isEqualTo(new com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO(null, 2L));
+    }
+
+    @Test
     @DisplayName("[getMyPicksView] Should Query Only The Requested User Page - When Page Is Nonempty")
     void shouldQueryOnlyRequestedUserPageWhenPageIsNonempty() {
         UUID ownerId = UUID.randomUUID();

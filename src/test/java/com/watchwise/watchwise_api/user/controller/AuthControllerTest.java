@@ -219,12 +219,12 @@ class AuthControllerTest {
         when(userService.getCurrentUser(userId)).thenReturn(userResponseDTO);
         when(userService.getAuthVersion(userId)).thenReturn(3L);
         when(jwtService.generateToken(userId, 3L, TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userId, 3L)).thenReturn("refresh-token");
+        when(refreshTokenService.issueRefreshToken(userId, 3L, false)).thenReturn("refresh-token");
         when(cookieUtil.clearRegistrationProofCookie())
                 .thenReturn(ResponseCookie.from(CookieUtil.REGISTRATION_PROOF_COOKIE, "").maxAge(0).build());
-        when(cookieUtil.buildAccessTokenCookie("access-token"))
+        when(cookieUtil.buildAccessTokenCookie("access-token", false))
                 .thenReturn(ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build());
-        when(cookieUtil.buildRefreshTokenCookie("refresh-token"))
+        when(cookieUtil.buildRefreshTokenCookie("refresh-token", false))
                 .thenReturn(ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build());
 
         ResponseEntity<Void> result = authController.confirmEmail(
@@ -233,7 +233,7 @@ class AuthControllerTest {
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(cookieUtil).clearRegistrationProofCookie();
         verify(csrfAuthenticationStrategy).onAuthentication(null, request, response);
-        verify(refreshTokenService).issueRefreshToken(userId, 3L);
+        verify(refreshTokenService).issueRefreshToken(userId, 3L, false);
         verify(cookieUtil, times(3)).addCookie(eq(response), any());
     }
 
@@ -334,9 +334,9 @@ class AuthControllerTest {
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
         when(userService.loginForAuthentication(loginUserDTO)).thenReturn(new AuthenticatedUser(userResponseDTO, 0L));
         when(jwtService.generateToken(userResponseDTO.id(), 0L, TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L)).thenReturn("refresh-token");
-        when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
-        when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L, false)).thenReturn("refresh-token");
+        when(cookieUtil.buildAccessTokenCookie("access-token", false)).thenReturn(accessCookie);
+        when(cookieUtil.buildRefreshTokenCookie("refresh-token", false)).thenReturn(refreshCookie);
 
         authController.login(loginUserDTO, request, response);
 
@@ -484,9 +484,9 @@ class AuthControllerTest {
         when(userService.findByEmailForAuthentication(userResponseDTO.email()))
                 .thenReturn(Optional.of(new AuthenticatedUser(userResponseDTO, 0L)));
         when(jwtService.generateToken(userResponseDTO.id(), 0L, TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L)).thenReturn("refresh-token");
-        when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
-        when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), 0L, false)).thenReturn("refresh-token");
+        when(cookieUtil.buildAccessTokenCookie("access-token", false)).thenReturn(accessCookie);
+        when(cookieUtil.buildRefreshTokenCookie("refresh-token", false)).thenReturn(refreshCookie);
 
         authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
 
@@ -577,8 +577,8 @@ class AuthControllerTest {
         ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "new-access-token").build();
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "new-refresh-token").build();
         when(refreshTokenService.rotateRefreshToken("old-refresh-token")).thenReturn(tokens);
-        when(cookieUtil.buildAccessTokenCookie("new-access-token")).thenReturn(accessCookie);
-        when(cookieUtil.buildRefreshTokenCookie("new-refresh-token")).thenReturn(refreshCookie);
+        when(cookieUtil.buildAccessTokenCookie("new-access-token", false)).thenReturn(accessCookie);
+        when(cookieUtil.buildRefreshTokenCookie("new-refresh-token", false)).thenReturn(refreshCookie);
 
         ResponseEntity<Void> result = authController.refresh("old-refresh-token", request, response);
 

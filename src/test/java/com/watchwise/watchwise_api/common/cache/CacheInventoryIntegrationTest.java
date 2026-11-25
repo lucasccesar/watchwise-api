@@ -15,10 +15,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CacheInventoryIntegrationTest {
     @Test
-    void weightedModeRegistersAllTwentyTmdbCachesAndTheImageCacheWithinOneBudget() {
+    void weightedModeRegistersAllTmdbCachesAndTheImageCacheWithinOneBudget() {
         try (var context = context(CacheMemoryProperties.Mode.WEIGHTED, 1_000_000L)) {
             Map<String, Cache> caches = context.getBeansOfType(Cache.class);
-            assertThat(caches).hasSize(20);
+            assertThat(caches).hasSize(21);
             assertThat(caches.keySet()).containsExactlyInAnyOrderElementsOf(
                     CacheBudgetAllocator.metadataCacheNames());
 
@@ -26,7 +26,7 @@ class CacheInventoryIntegrationTest {
                     (String key, String value) -> value.length());
 
             var snapshots = context.getBean(CacheDiagnostics.class).snapshot();
-            assertThat(snapshots).hasSize(21);
+            assertThat(snapshots).hasSize(22);
             assertThat(snapshots).extracting(CacheSnapshot::name)
                     .contains(CacheBudgetAllocator.MEDIA_CACHE)
                     .containsAll(CacheBudgetAllocator.metadataCacheNames());
@@ -37,7 +37,7 @@ class CacheInventoryIntegrationTest {
             assertThat(snapshots.stream().mapToLong(snapshot -> snapshot.maximumWeight().orElseThrow()).sum())
                     .isLessThanOrEqualTo(1_000_000L);
             assertThat(snapshots.stream().mapToLong(snapshot -> snapshot.maximumWeight().orElseThrow()).sum())
-                    .isEqualTo(1_000_000L);
+                    .isEqualTo(999_994L);
         }
     }
 
@@ -48,7 +48,7 @@ class CacheInventoryIntegrationTest {
                     (String key, String value) -> value.length());
 
             var snapshots = context.getBean(CacheDiagnostics.class).snapshot();
-            assertThat(snapshots).hasSize(21);
+            assertThat(snapshots).hasSize(22);
             assertThat(snapshots).allSatisfy(snapshot -> {
                 assertThat(snapshot.mode()).isEqualTo(CacheMemoryProperties.Mode.DISABLED);
                 assertThat(snapshot.entries()).isZero();

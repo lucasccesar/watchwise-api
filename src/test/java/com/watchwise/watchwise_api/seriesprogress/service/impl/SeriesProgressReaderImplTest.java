@@ -1,6 +1,5 @@
 package com.watchwise.watchwise_api.seriesprogress.service.impl;
 
-import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
@@ -25,9 +24,13 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -65,12 +68,6 @@ class SeriesProgressReaderImplTest {
                 presentationEnricher,
                 userRepository,
                 clock);
-        when(userRepository.findById(viewerId())).thenReturn(Optional.of(viewer));
-        when(viewer.getPreferredLanguage()).thenReturn("en-US");
-        when(presentationEnricher.enrich(
-                eq(viewer), org.mockito.ArgumentMatchers.anyList(),
-                org.mockito.ArgumentMatchers.anyMap(), org.mockito.ArgumentMatchers.anySet(),
-                org.mockito.ArgumentMatchers.anyMap())).thenReturn(Map.of());
     }
 
     @Test
@@ -78,6 +75,9 @@ class SeriesProgressReaderImplTest {
         List<String> seriesIds = List.of("1396", "94605");
         SeriesProgressReadRepository.SeriesProgressCandidate unwatched = row("1396", 0L);
         SeriesProgressReadRepository.SeriesProgressCandidate completed = row("94605", 2L);
+        when(userRepository.findById(viewerId())).thenReturn(Optional.of(viewer));
+        when(presentationEnricher.enrich(eq(viewer), anyList(), anyMap(), anySet(), anyMap()))
+                .thenReturn(Map.of());
         when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(viewerId(), seriesIds))
                 .thenReturn(List.of(unwatched, completed));
         when(metadataRefreshService.getSnapshotsForRead(eq(seriesIds), eq(LocalDate.of(2026, 9, 25))))
@@ -101,6 +101,8 @@ class SeriesProgressReaderImplTest {
                 viewerId(), java.util.Arrays.asList(null, "", "  "));
 
         assertThat(result.progressBySeriesId()).isEmpty();
+        verifyNoInteractions(seriesProgressReadRepository, diaryEntryRepository, metadataRefreshService,
+                presentationEnricher, userRepository);
     }
 
     private SeriesProgressReadRepository.SeriesProgressCandidate row(String seriesTmdbId, long watchedEpisodeCount) {

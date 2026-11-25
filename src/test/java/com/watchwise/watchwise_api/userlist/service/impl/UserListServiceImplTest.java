@@ -858,7 +858,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PRIVATE);
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
         UserListDetailedResponseDTO dto = buildDetailedResponseDto(list, items);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
@@ -878,7 +878,7 @@ class UserListServiceImplTest {
                 UUID.randomUUID(), null, null, 1, null, LocalDateTime.now(), LocalDateTime.now(), null, null);
         UserListItemResponseDTO movie = buildItemResponseDtoWithContent(ContentType.MOVIE, null, null, 2);
         List<UserListItemResponseDTO> allItems = List.of(inaccessiblePlaceholder, movie);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(allItems, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.LIST);
@@ -907,7 +907,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO unwatchedSeriesBase = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
         UserListItemResponseDTO unwatchedSeries = new UserListItemResponseDTO(
                 unwatchedSeriesBase.id(), unwatchedSeriesBase.content(), null, 2, null, null, null, null, unwatched);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(watchedMovie, unwatchedSeries), 50.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
@@ -929,7 +929,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO movieItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, null, 1);
         UserListItemResponseDTO seriesItem = buildItemResponseDtoWithContent(ContentType.SERIES, null, null, 2);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(movieItem, seriesItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any(),
@@ -947,7 +947,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO dramaItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), 1);
         UserListItemResponseDTO comedyItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Comedy"), 2);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(dramaItem, comedyItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any(),
@@ -966,10 +966,14 @@ class UserListServiceImplTest {
         List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 30)
                 .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.EPISODE, null, List.of("Drama"), position))
                 .toList();
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(allItems, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.EPISODE);
+
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(),
+                anyLong(), anyLong(), anyLong(), any(), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
+                .thenAnswer(call -> buildDetailedResponseDto(list, call.getArgument(1)));
 
         userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 2, 99);
 
@@ -1002,10 +1006,14 @@ class UserListServiceImplTest {
         List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 31)
                 .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), position))
                 .toList();
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(allItems, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(),
+                anyLong(), anyLong(), anyLong(), any(), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
+                .thenAnswer(call -> buildDetailedResponseDto(list, call.getArgument(1)));
 
         userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 1, 99);
 
@@ -1038,10 +1046,14 @@ class UserListServiceImplTest {
         List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 31)
                 .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), position))
                 .toList();
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(allItems, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(),
+                anyLong(), anyLong(), anyLong(), any(), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
+                .thenAnswer(call -> buildDetailedResponseDto(list, call.getArgument(1)));
 
         userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 3, 99);
 
@@ -1068,7 +1080,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Reject A Zero Page Number")
     void shouldRejectAZeroPageNumber() {
         UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
 
         assertThatThrownBy(() -> userListService.getUserListById(
                 lucasId, list.getId(), null, null, null, null, 0, null))
@@ -1094,10 +1106,14 @@ class UserListServiceImplTest {
                 .toList();
         List<UserListItemResponseDTO> allItems = new ArrayList<>(nonMatchingItems);
         allItems.addAll(matchingItems);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(allItems, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MIXED);
+
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(),
+                anyLong(), anyLong(), anyLong(), any(), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
+                .thenAnswer(call -> buildDetailedResponseDto(list, call.getArgument(1)));
 
         userListService.getUserListById(lucasId, list.getId(), ContentType.EPISODE, "Drama", null, null, 2, 24);
 
@@ -1129,7 +1145,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO shortItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 90, null, 1);
         UserListItemResponseDTO longItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 180, null, 2);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(shortItem, longItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any(),
@@ -1147,7 +1163,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO seriesItem = buildItemResponseDtoWithContent(ContentType.SERIES, 48, null, 1);
         UserListItemResponseDTO movieItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 120, null, 2);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(seriesItem, movieItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any(),
@@ -1166,7 +1182,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO seriesWithoutAverage = buildItemResponseDtoWithContent(ContentType.SERIES, null, null, 1);
         UserListItemResponseDTO shortMovie = buildItemResponseDtoWithContent(ContentType.MOVIE, 1, null, 2);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(shortMovie, seriesWithoutAverage), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any(),
@@ -1183,7 +1199,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Throw BadRequestException - When Item SortBy Is Invalid")
     void shouldThrowBadRequestExceptionWhenItemSortByIsInvalid() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
 
         assertThatThrownBy(() -> userListService.getUserListById(lucasId, list.getId(), null, null, "unknownField", null, null, null))
                 .isInstanceOf(BadRequestException.class)
@@ -1196,7 +1212,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Throw BadRequestException - When Item SortDirection Is Invalid")
     void shouldThrowBadRequestExceptionWhenItemSortDirectionIsInvalid() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
 
         assertThatThrownBy(() -> userListService.getUserListById(lucasId, list.getId(), null, null, "duration", "DESC", null, null))
                 .isInstanceOf(BadRequestException.class)
@@ -1215,7 +1231,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO movie = buildRatingItem(ContentType.MOVIE, "500", null, null, null, 4);
         UserListItemResponseDTO nested = buildNestedListItem(5);
         List<UserListItemResponseDTO> items = List.of(series, season, episode, movie, nested);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(5L), anyLong(), anyLong(), any(),
@@ -1261,7 +1277,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO secondEpisode = buildRatingItem(ContentType.EPISODE, null, "100", 1, 2, 4);
         UserListItemResponseDTO unratedSeason = buildRatingItem(ContentType.SEASON, null, "100", 2, null, 5);
         List<UserListItemResponseDTO> items = List.of(series, season, firstEpisode, secondEpisode, unratedSeason);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(5L), anyLong(), anyLong(), any(),
@@ -1291,7 +1307,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO highPublic = buildRatingItem(ContentType.SERIES, "200", null, null, null, 2);
         UserListItemResponseDTO unratedMovie = buildRatingItem(ContentType.MOVIE, "300", null, null, null, 3);
         List<UserListItemResponseDTO> items = List.of(unratedMovie, highPublic, lowPublic);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(3L), anyLong(), anyLong(), any(),
@@ -1327,7 +1343,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO highRated = buildRatingItem(ContentType.MOVIE, "200", null, null, null, 2);
         UserListItemResponseDTO unrated = buildRatingItem(ContentType.MOVIE, "300", null, null, null, 3);
         List<UserListItemResponseDTO> items = List.of(unrated, highRated, lowRated);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(3L), anyLong(), anyLong(), any(),
@@ -1357,7 +1373,7 @@ class UserListServiceImplTest {
     void shouldRejectPrivateOwnerAverageSortBeforeLoadingItemState() {
         User privateOwner = buildUser(lucasId, "lucas", false);
         UserList list = buildList(privateOwner, "Public list", null, UserListVisibility.PUBLIC);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
 
@@ -1374,7 +1390,7 @@ class UserListServiceImplTest {
         User privateOwner = buildUser(lucasId, "lucas", false);
         UserList list = buildList(privateOwner, "Public list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO series = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
         when(userListItemService.getItemsWithState(marinaId, list.getId()))
@@ -1403,7 +1419,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO lowRated = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
         UserListItemResponseDTO highRated = buildRatingItem(ContentType.SERIES, "200", null, null, null, 2);
         List<UserListItemResponseDTO> items = List.of(lowRated, highRated);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
@@ -1486,7 +1502,7 @@ class UserListServiceImplTest {
     void shouldPopulateWatchedPercentageUsingTheViewersOwnWatchHistoryNotTheOwnersOnGetById() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(marinaId, list.getId()))
                 .thenReturn(new UserListItemsWithState(items, 50.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
@@ -1503,7 +1519,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Return Detailed List - When List Is Public And Viewer Is A Different User")
     void shouldReturnDetailedListWhenListIsPublicAndViewerIsADifferentUser() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(marinaId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(),
@@ -1519,7 +1535,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Return Detailed List - When List Is Followers-Only And Viewer Follows The Owner")
     void shouldReturnDetailedListWhenListIsFollowersOnlyAndViewerFollowsTheOwner() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.FOLLOWERS);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
         when(userListItemService.getItemsWithState(marinaId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(), 0.0));
@@ -1535,7 +1551,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Throw ForbiddenException - When List Is Followers-Only And Viewer Does Not Follow The Owner")
     void shouldThrowForbiddenExceptionWhenListIsFollowersOnlyAndViewerDoesNotFollowTheOwner() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.FOLLOWERS);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(false);
 
         assertThatThrownBy(() -> userListService.getUserListById(marinaId, list.getId(), null, null, null, null, null, null))
@@ -1549,7 +1565,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Throw ForbiddenException - When List Is Private And Viewer Is A Different User")
     void shouldThrowForbiddenExceptionWhenListIsPrivateAndViewerIsADifferentUser() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PRIVATE);
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
 
         assertThatThrownBy(() -> userListService.getUserListById(marinaId, list.getId(), null, null, null, null, null, null))
                 .isInstanceOf(ForbiddenException.class)
@@ -1562,7 +1578,7 @@ class UserListServiceImplTest {
     @DisplayName("[getUserListById] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnGetById() {
         UUID missingId = UUID.randomUUID();
-        when(userListRepository.findById(missingId)).thenReturn(Optional.empty());
+        when(userListRepository.findByIdWithUser(missingId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userListService.getUserListById(lucasId, missingId, null, null, null, null, null, null))
                 .isInstanceOf(NotFoundException.class)
@@ -1574,7 +1590,7 @@ class UserListServiceImplTest {
     void shouldPassTheResolvedItemScopeToTheMapperWhenListHasContentItems() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO movieItem = buildItemResponseDto(buildContentRef("550", ContentType.MOVIE));
-        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
                 .thenReturn(new UserListItemsWithState(List.of(movieItem), 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
@@ -2299,6 +2315,9 @@ class UserListServiceImplTest {
         UserList deletedList = buildList(lucas, "Deleted", null, UserListVisibility.PUBLIC);
         deletedList.setRank(2);
         when(userListRepository.findByIdForUpdate(deletedList.getId())).thenReturn(Optional.of(deletedList));
+        UserListItem ownedItem = UserListItem.builder().userList(deletedList).build();
+        when(userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(deletedList.getId()))
+                .thenReturn(List.of(ownedItem));
         UserList laterList = buildList(lucas, "Later", null, UserListVisibility.PUBLIC);
         laterList.setRank(3);
         UserList lastList = buildList(lucas, "Last", null, UserListVisibility.PUBLIC);
@@ -2318,6 +2337,7 @@ class UserListServiceImplTest {
         inOrder.verify(userListRepository).findByIdForUpdate(deletedList.getId());
         inOrder.verify(userListItemRepository).findByUserListIdForUpdateOrderByPositionAsc(deletedList.getId());
         inOrder.verify(userListItemService).removeItemsReferencingChildLists(List.of(deletedList.getId()));
+        inOrder.verify(userListItemRepository).deleteAll(List.of(ownedItem));
         inOrder.verify(userListRepository).delete(deletedList);
         inOrder.verify(userListRepository).flush();
         inOrder.verify(userListRepository).findByUserIdAndRankGreaterThanOrderByRankAscIdAsc(lucasId, 2);

@@ -10,8 +10,14 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentSchedule;
+import com.watchwise.watchwise_api.content.service.ContentScheduleEpisode;
+import com.watchwise.watchwise_api.content.service.ContentScheduleKey;
+import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
@@ -31,17 +37,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,8 +63,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -252,7 +268,7 @@ class UserListItemPageReaderImplTest {
     @DisplayName("[read] Should Reject Private Owner Rating Sort Before Loading Items - When The Owner Profile Is Private")
     void shouldRejectPrivateOwnerRatingSortBeforeLoadingItemsWhenTheOwnerProfileIsPrivate() {
         owner.setIsProfilePublic(false);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(listId)).thenReturn(Optional.of(list));
 
         assertThatThrownBy(() -> reader.read(request(null, null, "episodeAvgRating", null, null, null, null)))
                 .isInstanceOf(ForbiddenException.class)
@@ -260,8 +276,265 @@ class UserListItemPageReaderImplTest {
         verify(userListItemService, never()).getItemsWithState(any(), any());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "position,asc,1,1,2", "position,asc,2,3,4", "position,asc,3,5,0",
+            "position,desc,1,5,4", "dateAdded,asc,1,2,4", "dateAdded,asc,2,1,3",
+            "dateAdded,desc,1,5,1", "duration,asc,1,3,1", "duration,asc,2,4,2",
+            "duration,desc,1,2,5", "NULL,desc,1,1,2"
+    })
+    void shouldEnrichOnlyTheSelectedVisualPageForIndependentSorts(
+            String sort, String direction, int page, int first, int second) {
+        List<UserListItemResponseDTO> items = List.of(
+                sortableItem(ContentType.MOVIE, 1, 2, 70),
+                sortableItem(ContentType.SERIES, 2, 1, 90),
+                sortableItem(ContentType.MOVIE, 3, 2, null),
+                sortableItem(ContentType.SERIES, 4, 1, 70),
+                sortableItem(ContentType.SERIES, 5, 3, 90));
+        stubListRead(items, 40.0);
+        List<UserListItemResponseDTO> expected = second == 0
+                ? List.of(items.get(first - 1)) : List.of(items.get(first - 1), items.get(second - 1));
+
+        Double score = 25.0 / 3;
+        DiaryEntryRepository.ContentStats movieStats = mock(DiaryEntryRepository.ContentStats.class);
+        lenient().when(movieStats.getContentId()).thenReturn(items.getFirst().content().id());
+        lenient().when(movieStats.getAverageScore()).thenReturn(score);
+        lenient().when(diaryEntryRepository.findContentStatsByContentIdIn(anyCollection()))
+                .thenAnswer(call -> call.<Set<UUID>>getArgument(0).contains(items.getFirst().content().id())
+                        ? List.of(movieStats) : List.of());
+
+        UserListItemPage result = reader.read(request(
+                null, null, "NULL".equals(sort) ? null : sort, direction, null, page, 2));
+
+        Set<UUID> movies = expected.stream()
+                .filter(row -> row.content().type() == ContentType.MOVIE)
+                .map(row -> row.content().id()).collect(Collectors.toSet());
+        List<ContentRefDTO> series = expected.stream().map(UserListItemResponseDTO::content)
+                .filter(content -> content.type() == ContentType.SERIES).toList();
+        verify(diaryEntryRepository, times(movies.isEmpty() ? 0 : 1)).findContentStatsByContentIdIn(eq(movies));
+        verify(diaryEntryRepository, times(series.isEmpty() ? 0 : 1))
+                .findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(
+                        eq(series.stream().map(ContentRefDTO::tmdbId).collect(Collectors.toSet())));
+        verify(diaryEntryRepository, times(series.isEmpty() ? 0 : 1))
+                .findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(
+                        eq(ownerId), eq(series.stream().map(ContentRefDTO::tmdbId).collect(Collectors.toSet())));
+        verify(contentRatingRepository, times(series.isEmpty() ? 0 : 1))
+                .findPublicStatsByContentIdIn(eq(series.stream().map(ContentRefDTO::id).collect(Collectors.toSet())));
+        verifyNoMoreInteractions(diaryEntryRepository, contentRatingRepository);
+        assertThat(result.items()).containsExactlyElementsOf(expected.stream().map(row ->
+                row.position() == 1 ? row.withRatingAverages(null, null, score) : row).toList());
+        assertThat(result.totalElements()).isEqualTo(5);
+        assertThat(result.itemsCount()).isEqualTo(5);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.hasNext()).isEqualTo(page < 3);
+        assertThat(result.watchedPercentage()).isEqualTo(40.0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "episodeAvgRating,asc,1,1,2", "episodeAvgRating,desc,1,2,3",
+            "globalEpisodeAvgRating,asc,1,1,2", "globalEpisodeAvgRating,desc,1,3,1",
+            "contentAvgRating,asc,1,3,1", "contentAvgRating,desc,1,1,3",
+            "contentAvgRating,asc,2,2,4", "contentAvgRating,desc,2,2,4",
+            "episodeAvgRating,desc,2,1,4", "globalEpisodeAvgRating,desc,2,2,4"
+    })
+    void shouldSortUsingRatingsFromAllCandidatesWithStableTiesAndNullsLast(
+            String sort, String direction, int page, int first, int second) {
+        List<UserListItemResponseDTO> items = IntStream.rangeClosed(1, 4)
+                .mapToObj(position -> sortableItem(ContentType.SERIES, position, 1, 90)).toList();
+        stubListRead(items, 0);
+        Set<String> tmdbIds = items.stream().map(row -> row.content().tmdbId()).collect(Collectors.toSet());
+        Set<UUID> contentIds = items.stream().map(row -> row.content().id()).collect(Collectors.toSet());
+        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(ownerId, tmdbIds))
+                .thenReturn(List.of(ownerScore("tmdb-1", 2), ownerScore("tmdb-2", 8), ownerScore("tmdb-3", 8)));
+        List<DiaryEntryRepository.PublicEpisodeRatingAggregate> episodeStats = List.of(
+                publicEpisodeScore("tmdb-1", 1, 7L, 1L), publicEpisodeScore("tmdb-1", 2, 14L, 3L),
+                publicEpisodeScore("tmdb-2", 1, 21L, 4L), publicEpisodeScore("tmdb-3", 1, 9L, 1L));
+        List<ContentRatingRepository.PublicRatingStats> contentStats = List.of(
+                publicRating(items.getFirst(), 7.25), publicRating(items.get(2), 2.5));
+        when(diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(tmdbIds)).thenReturn(episodeStats);
+        when(contentRatingRepository.findPublicStatsByContentIdIn(contentIds)).thenReturn(contentStats);
+
+        UserListItemPage result = reader.read(request(null, null, sort, direction, null, page, 2));
+
+        List<UserListItemResponseDTO> baseline = List.of(items.get(0).withRatingAverages(2.0, 5.25, 7.25),
+                items.get(1).withRatingAverages(8.0, 5.25, null),
+                items.get(2).withRatingAverages(8.0, 9.0, 2.5), items.get(3));
+        assertThat(result.items()).containsExactly(baseline.get(first - 1), baseline.get(second - 1));
+        assertThat(result.totalElements()).isEqualTo(4);
+        assertThat(result.totalPages()).isEqualTo(2);
+        verify(diaryEntryRepository).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(ownerId, tmdbIds);
+        verify(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(tmdbIds);
+        verify(contentRatingRepository).findPublicStatsByContentIdIn(contentIds);
+        verifyNoMoreInteractions(diaryEntryRepository, contentRatingRepository);
+    }
+
+    @Test
+    void shouldNotQueryRatingsForAnEmptyOrOutOfRangeVisualPage() {
+        stubListRead(List.of(sortableItem(ContentType.MOVIE, 1, 1, 50)), 0);
+
+        UserListItemPage outside = reader.read(request(null, null, "position", "asc", null, 2, 1));
+        UserListItemPage empty = reader.read(request(ContentType.SERIES, "Drama", "position", "asc", null, 1, 1));
+
+        assertThat(outside.items()).isEmpty();
+        assertThat(outside.totalElements()).isEqualTo(1);
+        assertThat(empty.items()).isEmpty();
+        assertThat(empty.totalElements()).isZero();
+        assertThat(empty.totalPages()).isZero();
+        assertThat(empty.itemsCount()).isEqualTo(1);
+        verifyNoInteractions(diaryEntryRepository, contentRatingRepository);
+    }
+
+    @Test
+    void shouldPreserveGlobalEnrichmentForTheRawContract() {
+        UserListItemResponseDTO first = sortableItem(ContentType.MOVIE, 1, 1, 50);
+        UserListItemResponseDTO second = sortableItem(ContentType.MOVIE, 2, 2, 60);
+        stubListRead(List.of(first, second), 0);
+
+        UserListItemPage result = reader.read(
+                request(UserListItemPageMode.RAW, null, null, "position", "asc", null, 2, 1));
+
+        assertThat(result.items()).containsExactly(second);
+        verify(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(first.content().id(), second.content().id()));
+    }
+
+    @Test
+    void shouldKeepTheVisualPageIdenticalToTheGlobalEnrichmentReference() {
+        UserListItemResponseDTO first = sortableItem(ContentType.SERIES, 1, 1, 75);
+        UserListItemResponseDTO second = seriesWithResolvedState(2, WatchStatus.PARTIALLY_WATCHED);
+        stubListRead(List.of(first, second), 30.0);
+        ContentRatingRepository.PublicRatingStats rating = publicRating(second, 19.0 / 3);
+        when(contentRatingRepository.findPublicStatsByContentIdIn(Set.of(first.content().id(), second.content().id())))
+                .thenReturn(List.of(rating));
+        when(contentRatingRepository.findPublicStatsByContentIdIn(Set.of(second.content().id())))
+                .thenReturn(List.of(rating));
+
+        UserListItemPage global = reader.read(
+                request(UserListItemPageMode.RAW, null, null, "position", "asc", null, 2, 1));
+        UserListItemPage paged = reader.read(
+                request(UserListItemPageMode.VISUAL, null, null, "position", "asc", null, 2, 1));
+
+        assertThat(paged).isEqualTo(global);
+        assertThat(paged.items()).containsExactly(second.withRatingAverages(null, null, 19.0 / 3));
+    }
+
+    @Test
+    void shouldRejectPrivateListForThirdPartyAndAllowItsOwner() {
+        list.setVisibility(UserListVisibility.PRIVATE);
+        owner.setIsProfilePublic(false);
+        when(userListRepository.findByIdWithUser(listId)).thenReturn(Optional.of(list));
+        assertThatThrownBy(() -> reader.read(request(null, null, "position", "asc", null, 1, 1)))
+                .isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(userListItemService, diaryEntryRepository, contentRatingRepository);
+
+        UserListItemResponseDTO entry = sortableItem(ContentType.SERIES, 1, 1, 50);
+        when(userListItemService.getItemsWithState(ownerId, listId))
+                .thenReturn(new UserListItemsWithState(List.of(entry), 0));
+        UserListItemPage ownerPage = reader.read(new UserListItemPageRequest(
+                ownerId, listId, null, null, "position", "asc", null, 1, 1, UserListItemPageMode.VISUAL));
+        assertThat(ownerPage.items()).containsExactly(entry);
+        verify(diaryEntryRepository)
+                .findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(ownerId, Set.of(entry.content().tmdbId()));
+    }
+
+    @ParameterizedTest
+    @EnumSource(WatchStatus.class)
+    void shouldPreserveResolvedStatesAndFilterThemBeforeSelectingTheNotesPage(WatchStatus requested) {
+        List<UserListItemResponseDTO> items = List.of(
+                seriesWithResolvedState(1, WatchStatus.WATCHED), seriesWithResolvedState(2, WatchStatus.UNWATCHED),
+                seriesWithResolvedState(3, WatchStatus.PARTIALLY_WATCHED), seriesWithResolvedState(4, WatchStatus.UNKNOWN),
+                seriesWithResolvedState(5, WatchStatus.WATCHED), seriesWithResolvedState(6, WatchStatus.UNWATCHED),
+                seriesWithResolvedState(7, WatchStatus.PARTIALLY_WATCHED), seriesWithResolvedState(8, WatchStatus.UNKNOWN),
+                sortableItem(ContentType.MOVIE, 9, 1, 80));
+        stubListRead(items, 100.0 * 2 / 9);
+        List<UserListItemResponseDTO> matching = items.subList(0, 8).stream()
+                .filter(entry -> entry.contentState().watchStatus() == requested).toList();
+        assertThat(matching).hasSize(2);
+        UserListItemResponseDTO expected = matching.get(1);
+        ContentRatingRepository.PublicRatingStats rating = publicRating(expected, 6.125);
+        when(contentRatingRepository.findPublicStatsByContentIdIn(Set.of(expected.content().id())))
+                .thenReturn(List.of(rating));
+
+        UserListItemPage result = reader.read(request(
+                ContentType.SERIES, "Drama", "position", "asc", requested, 2, 1));
+
+        assertThat(result.items()).containsExactly(expected.withRatingAverages(null, null, 6.125));
+        ContentStateDTO state = result.items().getFirst().contentState();
+        assertThat(state.watchStatus()).isEqualTo(requested);
+        assertThat(state.releasedEpisodeCount()).isEqualTo(requested == WatchStatus.UNKNOWN ? null : 2);
+        assertThat(state.watchedEpisodeCount()).isEqualTo(switch (requested) {
+            case WATCHED -> 2;
+            case PARTIALLY_WATCHED -> 1;
+            case UNWATCHED -> 0;
+            case UNKNOWN -> null;
+        });
+        assertThat(result.totalElements()).isEqualTo(2);
+        assertThat(result.totalPages()).isEqualTo(2);
+        assertThat(result.hasNext()).isFalse();
+        assertThat(result.itemsCount()).isEqualTo(9);
+        assertThat(result.watchedPercentage()).isEqualTo(100.0 * 2 / 9);
+        verify(diaryEntryRepository)
+                .findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of(expected.content().tmdbId()));
+        verify(contentRatingRepository).findPublicStatsByContentIdIn(Set.of(expected.content().id()));
+        verifyNoMoreInteractions(contentRatingRepository);
+    }
+
+    private UserListItemResponseDTO sortableItem(ContentType type, int position, int day, Integer runtime) {
+        LocalDateTime date = LocalDateTime.of(2026, 1, day, 12, 0);
+        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "tmdb-" + position, type,
+                null, null, null, null, null, date, date, runtime, List.of("Drama"));
+        return new UserListItemResponseDTO(UUID.randomUUID(), content, null, position, "description",
+                date, date, "/poster.jpg", new ContentStateDTO(WatchStatus.UNWATCHED, null, null, null, null));
+    }
+
+    private UserListItemResponseDTO seriesWithResolvedState(int position, WatchStatus requested) {
+        UserListItemResponseDTO row = sortableItem(ContentType.SERIES, position, 1, 90);
+        String tmdbId = row.content().tmdbId();
+        LocalDate cutoff = LocalDate.of(2026, 1, 10);
+        Clock clock = Clock.fixed(cutoff.atStartOfDay(ZoneOffset.UTC).toInstant(), ZoneOffset.UTC);
+        Content series = Content.builder().id(row.content().id()).type(ContentType.SERIES).tmdbId(tmdbId).build();
+        ContentSchedule schedule = new ContentSchedule(ContentScheduleKey.series(tmdbId), cutoff.minusDays(4),
+                "Returning Series", List.of(new ContentScheduleEpisode(tmdbId, 1, 1, cutoff.minusDays(1)),
+                        new ContentScheduleEpisode(tmdbId, 1, 2, cutoff),
+                        new ContentScheduleEpisode(tmdbId, 1, 3, cutoff.plusDays(1))),
+                requested != WatchStatus.UNKNOWN, false);
+        Set<WatchedEpisodeCoordinate> watched = switch (requested) {
+            case WATCHED -> Set.of(new WatchedEpisodeCoordinate(tmdbId, 1, 1),
+                    new WatchedEpisodeCoordinate(tmdbId, 1, 2));
+            case PARTIALLY_WATCHED, UNKNOWN -> Set.of(new WatchedEpisodeCoordinate(tmdbId, 1, 1));
+            case UNWATCHED -> Set.of();
+        };
+        ContentStateDTO state = new ContentStateResolver().resolve(series, schedule, Set.of(), watched, clock);
+        return new UserListItemResponseDTO(row.id(), row.content(), null, position, row.description(),
+                row.createdAt(), row.updatedAt(), row.customPosterUrl(), state);
+    }
+
+    private DiaryEntry ownerScore(String series, int score) {
+        return DiaryEntry.builder().content(Content.builder().type(ContentType.EPISODE)
+                .seriesTmdbId(series).seasonNumber(1).episodeNumber(1).build()).score(score).build();
+    }
+
+    private DiaryEntryRepository.PublicEpisodeRatingAggregate publicEpisodeScore(
+            String series, int episode, long sum, long count) {
+        DiaryEntryRepository.PublicEpisodeRatingAggregate result =
+                mock(DiaryEntryRepository.PublicEpisodeRatingAggregate.class);
+        when(result.getSeriesTmdbId()).thenReturn(series);
+        when(result.getSeasonNumber()).thenReturn(1);
+        when(result.getEpisodeNumber()).thenReturn(episode);
+        when(result.getScoreSum()).thenReturn(sum);
+        when(result.getScoreCount()).thenReturn(count);
+        return result;
+    }
+
+    private ContentRatingRepository.PublicRatingStats publicRating(UserListItemResponseDTO row, double score) {
+        ContentRatingRepository.PublicRatingStats result = mock(ContentRatingRepository.PublicRatingStats.class);
+        when(result.getContentId()).thenReturn(row.content().id());
+        when(result.getAverageScore()).thenReturn(score);
+        return result;
+    }
+
     private void stubListRead(List<UserListItemResponseDTO> items, double watchedPercentage) {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(list));
+        when(userListRepository.findByIdWithUser(listId)).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(viewerId, listId))
                 .thenReturn(new UserListItemsWithState(items, watchedPercentage));
     }

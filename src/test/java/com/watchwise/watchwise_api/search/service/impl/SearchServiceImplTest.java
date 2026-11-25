@@ -391,7 +391,7 @@ class SearchServiceImplTest {
 
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId,
-                new UserPreviewDTO(ownerId, "owner", "https://default-image.png", true),
+                new UserPreviewDTO(ownerId, "owner", null, true),
                 "Sci-fi",
                 List.of(),
                 0L));

@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
@@ -27,6 +29,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
+import com.watchwise.watchwise_api.content.service.impl.TmdbCardMetadataResolver;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -77,6 +80,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -110,6 +116,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -180,6 +188,9 @@ class SummaryServiceImplTest {
 
     @Mock
     private ContentCardAssembler contentCardAssembler;
+
+    @Mock
+    private TmdbCardMetadataResolver tmdbCardMetadataResolver;
 
     @Mock
     private com.watchwise.watchwise_api.summary.service.ProfileSummaryReader profileSummaryReader;
@@ -291,6 +302,8 @@ class SummaryServiceImplTest {
                 .thenReturn(Map.of());
         lenient().when(currentRatingSummaryReader.readSeriesRatings(any(), anyInt()))
                 .thenReturn(CurrentRatingSummaryReader.Ratings.empty());
+        lenient().when(tmdbCardMetadataResolver.resolve(any(ContentCoordinate.class), any()))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
     }
 
     @Test
@@ -305,6 +318,142 @@ class SummaryServiceImplTest {
     }
 
     // ---------- getHomeSummary ----------
+
+    @ParameterizedTest
+    @EnumSource(value = ContentType.class, names = {"MOVIE", "EPISODE"})
+    void shouldUseTheSameTotalsAndBackdropWithoutBuildingHome(ContentType type) throws Exception {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(homeWatchAggregate.getTotalMinutesWatchedMovies()).thenReturn(6000L);
+        when(homeWatchAggregate.getTotalMinutesWatchedEpisodes()).thenReturn(3000L);
+        when(homeWatchAggregate.getTotalMoviesWatched()).thenReturn(42L);
+        when(homeWatchAggregate.getTotalDistinctMoviesWatched()).thenReturn(40L);
+        when(homeWatchAggregate.getTotalEpisodesWatched()).thenReturn(128L);
+        when(homeWatchAggregate.getDistinctSeriesWatched()).thenReturn(7L);
+        Content content = type == ContentType.MOVIE ? buildContent("1399", type) : buildEpisode("1399", 1, 2);
+        DiaryEntry recent = buildDiaryEntry(content, LocalDateTime.of(2026, 10, 8, 12, 0));
+        ContentCoordinate key = type == ContentType.MOVIE ? ContentCoordinate.from(content)
+                : new ContentCoordinate(ContentType.SERIES, content.getSeriesTmdbId(), null, null, null);
+        when(diaryEntryRepository.findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 4)))
+                .thenReturn(List.of(recent));
+        when(diaryEntryRepository.findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1)))
+                .thenReturn(List.of(recent));
+        when(tmdbCardMetadataResolver.resolve(key, lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Found<>(
+                        new TmdbCardMetadata("Title", null, null, null, null, null, "/backdrop.jpg")));
+
+        HomeSummaryResponseDTO home = summaryService.getHomeSummary(lucasId, lucasId);
+        verify(feedService).getFeed(lucasId, null, 3);
+        verify(calendarService).getUpcoming(lucasId, 6);
+        verify(diaryEntryService).getHomeNextEpisodeCandidates(lucasId, lucasId, 4);
+        verify(contentCardAssembler).assemble(anyCollection(), any(ContentCardContext.class), anySet());
+        verify(tmdbCardMetadataResolver).resolve(key, lucas.getPreferredLanguage());
+        clearInvocations(feedService, calendarService, diaryEntryService, homeNextEpisodeAssembler,
+                contentCardAssembler, watchCompanionRepository, notificationRepository,
+                tmdbCardMetadataResolver, diaryEntryRepository);
+
+        var reviews = summaryService.getDiaryReviewsSummary(lucasId, lucasId);
+
+        JsonNode previous = objectMapper.valueToTree(home);
+        JsonNode dedicated = objectMapper.valueToTree(reviews);
+        assertThat(previous.size()).isEqualTo(16);
+        assertThat(dedicated.size()).isEqualTo(7);
+        for (String field : List.of("totalMinutesWatchedMovies", "totalMinutesWatchedEpisodes", "totalMoviesWatched",
+                "totalDistinctMoviesWatched", "totalEpisodesWatched", "distinctSeriesWatched",
+                "latestWatchedBackdropPath")) {
+            assertThat(dedicated.get(field)).isEqualTo(previous.get(field));
+        }
+        assertThat(reviews.latestWatchedBackdropPath()).isEqualTo("/backdrop.jpg");
+        int homeBytes = objectMapper.writeValueAsBytes(home).length;
+        int dedicatedBytes = objectMapper.writeValueAsBytes(reviews).length;
+        assertThat(dedicatedBytes).isLessThan(homeBytes);
+        System.out.printf("Reviews summary %s fixture: Home %d bytes, dedicated %d bytes%n",
+                type, homeBytes, dedicatedBytes);
+        verifyNoInteractions(feedService, calendarService, diaryEntryService, homeNextEpisodeAssembler,
+                contentCardAssembler, watchCompanionRepository, notificationRepository);
+        verify(diaryEntryRepository).findHomeWatchAggregate(lucasId);
+        verify(diaryEntryRepository).findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1));
+        verify(tmdbCardMetadataResolver).resolve(key, lucas.getPreferredLanguage());
+        verifyNoMoreInteractions(diaryEntryRepository, tmdbCardMetadataResolver);
+
+        clearInvocations(diaryEntryRepository, tmdbCardMetadataResolver, userBlockAccessService);
+        var backdrop = summaryService.getLatestWatchedBackdrop(lucasId);
+        assertThat(backdrop.latestWatchedBackdropPath()).isEqualTo(home.latestWatchedBackdropPath());
+        verify(userBlockAccessService).assertContentVisible(lucasId, lucasId);
+        verify(diaryEntryRepository).findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1));
+        verify(tmdbCardMetadataResolver).resolve(key, lucas.getPreferredLanguage());
+        verifyNoMoreInteractions(diaryEntryRepository, tmdbCardMetadataResolver);
+        verifyNoInteractions(feedService, calendarService, diaryEntryService, homeNextEpisodeAssembler,
+                contentCardAssembler, watchCompanionRepository, notificationRepository);
+    }
+
+    @Test
+    void shouldReturnNullDedicatedBackdropWithoutAnEligibleEntry() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThat(summaryService.getLatestWatchedBackdrop(lucasId).latestWatchedBackdropPath()).isNull();
+        verify(diaryEntryRepository).findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1));
+        verifyNoMoreInteractions(diaryEntryRepository);
+        verifyNoInteractions(tmdbCardMetadataResolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void shouldPreserveNullDedicatedBackdropWithoutUsableMetadata(boolean metadataAvailable) {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("1399", ContentType.MOVIE);
+        when(diaryEntryRepository.findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1)))
+                .thenReturn(List.of(buildDiaryEntry(movie, LocalDateTime.of(2026, 10, 8, 12, 0))));
+        TmdbLookupResult<TmdbCardMetadata> result = metadataAvailable
+                ? new TmdbLookupResult.Found<>(new TmdbCardMetadata("Title", null, null, null, null, null, null))
+                : new TmdbLookupResult.Unavailable<>();
+        when(tmdbCardMetadataResolver.resolve(ContentCoordinate.from(movie), lucas.getPreferredLanguage()))
+                .thenReturn(result);
+
+        assertThat(summaryService.getLatestWatchedBackdrop(lucasId).latestWatchedBackdropPath()).isNull();
+        verifyNoInteractions(feedService, calendarService, diaryEntryService, contentCardAssembler);
+    }
+
+    @Test
+    void shouldReturnZeroTotalsAndNullBackdropForEmptyDiary() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        var reviews = summaryService.getDiaryReviewsSummary(lucasId, lucasId);
+
+        assertThat(reviews.totalMoviesWatched()).isZero();
+        assertThat(reviews.totalEpisodesWatched()).isZero();
+        assertThat(reviews.latestWatchedBackdropPath()).isNull();
+        verifyNoInteractions(tmdbCardMetadataResolver, contentCardAssembler);
+    }
+
+    @Test
+    void shouldKeepNullBackdropWhenMetadataIsUnavailableForAnAcceptedFollower() {
+        User target = buildUser(lucasId, false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(target));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        Content movie = buildContent("1399", ContentType.MOVIE);
+        when(diaryEntryRepository.findRecentHomeEntries(lucasId, Set.of("MOVIE", "EPISODE"), PageRequest.of(0, 1)))
+                .thenReturn(List.of(buildDiaryEntry(movie, LocalDateTime.of(2026, 10, 8, 12, 0))));
+        when(tmdbCardMetadataResolver.resolve(ContentCoordinate.from(movie), target.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThat(summaryService.getDiaryReviewsSummary(marinaId, lucasId).latestWatchedBackdropPath()).isNull();
+        verify(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+        verifyNoInteractions(feedService, calendarService, diaryEntryService);
+    }
+
+    @Test
+    void shouldRejectPrivateOrBlockedTargetBeforeLoadingDiaryReviewsSummary() {
+        User target = buildUser(lucasId, false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(target));
+        assertThatThrownBy(() -> summaryService.getDiaryReviewsSummary(marinaId, lucasId))
+                .isInstanceOf(ForbiddenException.class);
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+        assertThatThrownBy(() -> summaryService.getDiaryReviewsSummary(marinaId, lucasId))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(diaryEntryRepository, tmdbCardMetadataResolver);
+    }
 
     @Test
     @DisplayName("[HomeSummaryResponseDTO] Should Preserve Legacy Recently Watched Rows")

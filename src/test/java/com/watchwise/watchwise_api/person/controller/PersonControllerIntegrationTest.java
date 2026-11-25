@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.person.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
@@ -46,7 +47,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "spring.docker.compose.enabled=false")
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class, properties = "spring.docker.compose.enabled=false")
 @AutoConfigureMockMvc
 @Testcontainers
 class PersonControllerIntegrationTest {

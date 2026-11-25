@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.jayway.jsonpath.JsonPath;
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
@@ -104,7 +105,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class DiaryEntryControllerIntegrationTest {
@@ -961,18 +962,18 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getSeriesInProgress] Should Exclude The Series - When User Already Completed It")
-    void shouldExcludeTheSeriesWhenUserAlreadyCompletedIt() throws Exception {
+    @DisplayName("[getSeriesInProgress] Should Include The Series - When User Already Completed It")
+    void shouldIncludeTheSeriesWhenUserAlreadyCompletedIt() throws Exception {
         RegisteredUser user = registerUser("seriesinprogresscompleted");
         User entity = userRepository.findById(user.id()).orElseThrow();
-        Content episode = contentRepository.save(Content.builder()
-                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE)
-                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
-        Content series = persistContent("1399", ContentType.SERIES);
-        DiaryEntry anchor = persistEntry(entity, episode);
+        String seriesTmdbId = "completed-series";
+        Content series = persistContent(seriesTmdbId, ContentType.SERIES);
+        persistEntry(entity, persistEpisodeWithRuntime(seriesTmdbId, 1, 1, 45));
+        persistEntry(entity, persistEpisodeWithRuntime(seriesTmdbId, 1, 2, 45));
+        DiaryEntry anchor = persistEntry(entity, persistEpisodeWithRuntime(seriesTmdbId, 1, 3, 45));
         Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
         userSeriesHistoryStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
-                .id(new UserSeriesHistoryState.Key(user.id(), "1399"))
+                .id(new UserSeriesHistoryState.Key(user.id(), seriesTmdbId))
                 .historyRevision(1L)
                 .computedRevision(1L)
                 .scheduleVersion(1L)
@@ -992,10 +993,10 @@ class DiaryEntryControllerIntegrationTest {
                 .build());
         calendarScheduleCompletenessRepository.saveAndFlush(CalendarScheduleCompleteness.builder()
                 .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
-                .seriesTmdbId("1399")
+                .seriesTmdbId(seriesTmdbId)
                 .region(entity.getPreferredRegion())
                 .language(entity.getPreferredLanguage())
-                .expectedEpisodeCount(1)
+                .expectedEpisodeCount(3)
                 .complete(true)
                 .lastCheckedAt(LocalDateTime.now())
                 .scopeVersion(1L)
@@ -1003,7 +1004,12 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].seriesTmdbId").value(seriesTmdbId))
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(100.0))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.aggregate.totalSeriesCount").value(1))
+                .andExpect(jsonPath("$.aggregate.watchedEpisodeCount").value(3));
     }
 
     @Test
@@ -1085,7 +1091,7 @@ class DiaryEntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         persistEntry(entity, persistEpisodeWithRuntime("cold-series", 1, 1, 45));
         when(tmdbClient.getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(foundTv("cold-series", 0, 1));
+                .thenReturn(foundTv("cold-series", 1, 2));
         when(tmdbClient.getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null,
                         LocalDate.now().minusDays(1).toString(), 45, null, null),
@@ -1095,12 +1101,17 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].totalReleasedEpisodeCount").value(1))
-                .andExpect(jsonPath("$.content[0].seasonProgress.length()").value(1))
-                .andExpect(jsonPath("$.content[0].seasonProgress[0].seasonNumber").value(1))
-                .andExpect(jsonPath("$.content[0].seasonProgress[0].totalEpisodeCount").value(1));
+                .andExpect(jsonPath("$.content[0].seasonProgress.length()").value(0))
+                .andExpect(jsonPath("$.content[0].completedSeasonProgress.length()").value(1))
+                .andExpect(jsonPath("$.content[0].completedSeasonProgress[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$.content[0].completedSeasonProgress[0].totalEpisodeCount").value(1))
+                .andExpect(jsonPath("$.content[0].completedSeasonProgress[0].watchedPercentage").value(100.0))
+                .andExpect(jsonPath("$.content[0].nextEpisode.episodeNumber").value(2))
+                .andExpect(jsonPath("$.content[0].nextEpisode.availableToWatch").value(false));
 
         verify(tmdbClient, times(2)).getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
-        verify(tmdbClient, times(1)).getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, times(2)).getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, never()).getSeasonFullDetails(eq("cold-series"), eq(0), any());
         assertThat(seriesProgressMetadataRepository.findById("cold-series")).isPresent();
         assertThat(seriesProgressSeasonMetadataRepository.findBySeriesTmdbIdAndSeasonNumber("cold-series", 1))
                 .isPresent();

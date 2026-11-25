@@ -158,18 +158,17 @@ class PickPreviewAssemblerTest {
                 pick.getId(), null, null, "nice", false, LocalDateTime.now(), LocalDateTime.now(), 0, false);
 
         when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
-        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
-                .thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of());
         when(commentPreviewAssembler.assemblePickPreviews(List.of(pick.getId()), viewerId))
                 .thenReturn(Map.of(pick.getId(), new CommentPreviewData(7, List.of(comment))));
         when(userMapper.userToUserPreviewDto(user)).thenReturn(new UserPreviewDTO(user.getId(), "marina", null, true));
 
-        PickPreviewDTO preview = assembler.assembleForFeed(List.of(pick), viewerId).get(pick.getId());
+        PickPreviewDTO preview = assembler.assembleForFeed(List.of(pick), viewerId, Map.of()).get(pick.getId());
 
         assertThat(preview.commentsCount()).isEqualTo(7);
         assertThat(preview.recentComments()).containsExactly(comment);
         verify(commentRepository, never()).countByPickIdIn(any());
+        verify(categoryRepository, never()).findByPicksTemplateIdInOrderByDisplayOrder(any());
     }
 
     @Test

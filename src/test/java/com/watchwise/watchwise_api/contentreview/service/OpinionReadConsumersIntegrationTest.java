@@ -1,7 +1,10 @@
 package com.watchwise.watchwise_api.contentreview.service;
 
+import org.springframework.test.context.ContextConfiguration;
+import com.watchwise_test.WatchwiseJpaTestApplication;
 import com.watchwise.watchwise_api.content.service.impl.ContentPageStatsServiceImpl;
 import com.watchwise.watchwise_api.content.service.impl.ContentStatsServiceImpl;
+import com.watchwise.watchwise_api.content.service.impl.TmdbVoteAverageBatchResolver;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.summary.repository.AllTimeStatsQueryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -19,6 +22,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -27,6 +31,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ContextConfiguration(classes = WatchwiseJpaTestApplication.class)
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ContentStatsServiceImpl.class, ContentPageStatsServiceImpl.class})
@@ -41,6 +46,7 @@ class OpinionReadConsumersIntegrationTest {
 
     @Autowired JdbcTemplate jdbc;
     @Autowired ContentStatsServiceImpl stats;
+    @MockitoBean TmdbVoteAverageBatchResolver tmdbVoteAverageBatchResolver;
     @Autowired ContentPageStatsServiceImpl pageStats;
     @Autowired ProfileSummaryQueryRepository profileQueries;
     @Autowired AllTimeStatsQueryRepository allTimeQueries;

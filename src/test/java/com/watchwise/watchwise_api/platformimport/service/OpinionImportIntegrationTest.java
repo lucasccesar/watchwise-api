@@ -779,9 +779,15 @@ class OpinionImportIntegrationTest {
         ImportItem summary = createSummaryItem(owner, "show-summary-1", SERIES_ID,
                 "{\"declaredPlays\":1,\"declaredLastWatchedOn\":\"2025-06-03\",\"airedEpisodeCount\":84}");
 
-        apply(summary);
         ImportItem rating = createRatingItem(owner, summary.getJobId(), "show-rating-1", 8, SERIES_ID);
+        apply(summary);
         apply(rating);
+        apply(rating);
+
+        ImportJob job = jobs.findById(summary.getJobId()).orElseThrow();
+        assertThat(job.getProgressTotalItems()).isEqualTo(2L);
+        assertThat(job.getProgressAppliedItems()).isEqualTo(2L);
+        assertThat(job.getProgressSkippedItems()).isZero();
 
         assertThat(assertions.findAll()).singleElement().satisfies(assertion -> {
             assertThat(assertion.getContent().getId()).isEqualTo(series.getId());

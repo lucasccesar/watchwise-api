@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.platformimport.controller;
 
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.platformimport.ImportMovieDetailsFixture;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -40,6 +42,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -61,6 +64,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 })
 @Testcontainers
 class StandaloneCollectionImportIntegrationTest {
+    @MockitoBean TmdbClient tmdbClient;
+
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -91,11 +96,13 @@ class StandaloneCollectionImportIntegrationTest {
 
     @BeforeEach
     void cleanDatabase() {
+        ImportMovieDetailsFixture.stubUnavailableDetails(tmdbClient);
         jdbc.execute("TRUNCATE import_items, external_import_links, user_list_items, user_lists, contents, users CASCADE");
     }
 
     @Test
     void standaloneWatchlistAppendsOnlyEligibleDistinctContentAndSucceedsWithZeroInsertions() throws Exception {
+        ImportMovieDetailsFixture.stubReleases(tmdbClient, List.of("71001", "71002", "71003", "71004"));
         User owner = createUser();
         for (String id : List.of("71001", "71002", "71003", "71004")) createMovie(id);
         addWatchlistItem(owner, "71001", 1);

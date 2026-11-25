@@ -75,6 +75,24 @@ class ContentCardAssemblerTest {
     private UserContentPosterService userContentPosterService;
 
     @Test
+    void shouldResolveOnlyGenreMetadataForDistinctCoordinates() {
+        ContentCoordinate found = movie("550");
+        ContentCoordinate missing = movie("680");
+        when(tmdbCardMetadataResolver.resolve(found, "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata(
+                        "Movie", null, null, null, List.of("Ação", " drama ", ""), null)));
+        when(tmdbCardMetadataResolver.resolve(missing, "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThat(assembler().resolveGenres(List.of(found, missing, found), "pt-BR"))
+                .containsOnlyKeys(found)
+                .containsEntry(found, List.of("Ação", " drama ", ""));
+        verify(tmdbCardMetadataResolver).resolve(found, "pt-BR");
+        verify(tmdbCardMetadataResolver).resolve(missing, "pt-BR");
+        verifyNoInteractions(contentViewerStateService, contentStatsService, userContentPosterService);
+    }
+
+    @Test
     @DisplayName("[assemble] Should Deduplicate Coordinates Before Resolving Any Facet")
     void shouldDeduplicateCoordinatesBeforeResolvingAnyFacet() {
         ContentCoordinate coordinate = movie("550");

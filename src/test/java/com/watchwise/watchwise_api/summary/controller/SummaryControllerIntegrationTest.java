@@ -1,8 +1,7 @@
 package com.watchwise.watchwise_api.summary.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
-import com.watchwise.watchwise_api.DemoDataSeedApplication;
-import com.watchwise.watchwise_api.WatchwiseApiApplication;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
@@ -40,19 +39,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.SpringBootConfiguration;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.FilterType;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -80,26 +72,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(classes = SummaryControllerIntegrationTest.SummaryTestApplication.class)
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class SummaryControllerIntegrationTest {
-
-    @SpringBootConfiguration
-    @EnableAutoConfiguration
-    @EntityScan(basePackageClasses = WatchwiseApiApplication.class)
-    @EnableJpaRepositories(basePackageClasses = WatchwiseApiApplication.class)
-    @ComponentScan(
-            basePackages = "com.watchwise.watchwise_api",
-            excludeFilters = {
-                    @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
-                            classes = {WatchwiseApiApplication.class, DemoDataSeedApplication.class}),
-                    @ComponentScan.Filter(type = FilterType.REGEX,
-                            pattern = "com\\.watchwise\\.watchwise_api\\..*Test\\$.*"),
-                    @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = TestConfiguration.class)
-            })
-    static class SummaryTestApplication {
-    }
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -264,13 +240,17 @@ class SummaryControllerIntegrationTest {
     }
 
     private void persistEntry(User user, Content content, Integer score, boolean watchedInTheater) {
+        persistEntryOn(user, content, score, watchedInTheater, LocalDate.now());
+    }
+
+    private void persistEntryOn(User user, Content content, Integer score, boolean watchedInTheater, LocalDate watchedDate) {
         LocalDateTime now = LocalDateTime.now();
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
                 .score(score)
                 .watchedInTheater(watchedInTheater)
-                .watchedDate(LocalDate.now())
+                .watchedDate(watchedDate)
                 .watchNumber(1)
                 .createdAt(now)
                 .updatedAt(now)
@@ -697,7 +677,7 @@ class SummaryControllerIntegrationTest {
         RegisteredUser user = registerUser("monthreviewcardunavailable");
         User entity = userRepository.findById(user.id()).orElseThrow();
         Content movie = persistContent("month-review-card", ContentType.MOVIE, 139);
-        persistEntry(entity, movie, 8, false);
+        persistEntryOn(entity, movie, 8, false, LocalDate.of(2026, 10, 15));
 
         mockMvc.perform(get("/users/" + user.id() + "/summary/month")
                         .param("type", "MOVIE")

@@ -990,6 +990,15 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    void rejectsInvalidExactScoreInPagedDiary() {
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, null, 11, null, null, DiaryEntrySort.NEWEST))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("score must be between 1 and 10");
+        verifyNoInteractions(userRepository, diaryEntryReadRepository, tmdbClient);
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Throw BadRequestException - When Series ID Is Blank")
     void shouldThrowBadRequestExceptionWhenSeriesIdIsBlank() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

@@ -27,7 +27,7 @@ class DailyGameAttemptDetailsCodecTest {
                 1,
                 new DailyGameCandidateDTO(
                         DailyGameTargetKind.MOVIE, "550", null, null, null, null,
-                        "Fight Club", "https://image.test/fight.jpg", LocalDate.of(1999, 10, 15)),
+                        "Fight Club", "/fight.jpg", LocalDate.of(1999, 10, 15)),
                 new DailyGameGuessFeedbackDTO(true, true, true, true), null, null);
         Map<String, Object> original = new HashMap<>(Map.of("keep", "me"));
 

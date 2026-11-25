@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.pick.controller;
 
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PicksTotalsDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
@@ -59,6 +60,19 @@ class PickControllerTest {
     @AfterEach
     void cleanUp() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void returnsOnlyHeaderTotalsForTheAuthenticatedUser() throws Exception {
+        when(pickService.getMyTotals(currentUserId)).thenReturn(new PicksTotalsDTO(3L, 2L));
+
+        mockMvc.perform(get("/users/me/picks/totals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.picksCount").value(3))
+                .andExpect(jsonPath("$.templatesCount").value(2));
+
+        verify(pickService).getMyTotals(currentUserId);
     }
 
     @Test

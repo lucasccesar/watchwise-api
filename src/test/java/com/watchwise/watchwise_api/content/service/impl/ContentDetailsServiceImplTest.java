@@ -518,8 +518,8 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetails] Should Return Last 3 Already Aired Episodes Sorted By Date Desc - When Content Is A Series")
-    void shouldReturnLast3AlreadyAiredEpisodesSortedByDateDescWhenContentIsASeries() {
+    @DisplayName("[getDetails] Should Return Last 4 Already Aired Episodes Sorted By Date Desc - When Content Is A Series")
+    void shouldReturnLast4AlreadyAiredEpisodesSortedByDateDescWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
@@ -550,7 +550,8 @@ class ContentDetailsServiceImplTest {
         assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber").containsExactly(
                 org.assertj.core.groups.Tuple.tuple(3, 1),
                 org.assertj.core.groups.Tuple.tuple(2, 1),
-                org.assertj.core.groups.Tuple.tuple(1, 2));
+                org.assertj.core.groups.Tuple.tuple(1, 2),
+                org.assertj.core.groups.Tuple.tuple(1, 1));
     }
 
     @Test
@@ -578,7 +579,8 @@ class ContentDetailsServiceImplTest {
         assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber").containsExactly(
                 org.assertj.core.groups.Tuple.tuple(1, 5),
                 org.assertj.core.groups.Tuple.tuple(1, 4),
-                org.assertj.core.groups.Tuple.tuple(1, 3));
+                org.assertj.core.groups.Tuple.tuple(1, 3),
+                org.assertj.core.groups.Tuple.tuple(1, 2));
     }
 
     @Test
@@ -860,6 +862,8 @@ class ContentDetailsServiceImplTest {
                 62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg",
                 List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")),
                 new TmdbExternalIds("tt0959621", null, null, null))));
+        when(tmdbClient.getSeasonEpisodeDetails("1396", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null, null)));
@@ -921,6 +925,8 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(episode));
         when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                 62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg", List.of())));
+        when(tmdbClient.getSeasonEpisodeDetails("1396", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,

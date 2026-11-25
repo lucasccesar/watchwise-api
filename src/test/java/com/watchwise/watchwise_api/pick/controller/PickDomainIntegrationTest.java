@@ -1,20 +1,25 @@
 package com.watchwise.watchwise_api.pick.controller;
 
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.service.impl.PickResponseAssembler;
 import com.watchwise.watchwise_api.pick.support.PicksDomainIntegrationSupport;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePatchDTO;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
@@ -24,6 +29,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
+
+    @MockitoSpyBean
+    private PickResponseAssembler responses;
 
     @Test
     @DisplayName("[createPick] Should Persist Valid Pick And Roll Back Invalid Pick - When Requests Reach Real Services")
@@ -47,13 +55,16 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
-    @DisplayName("[createPick] Should Roll Back Pick And Selections - When Response Revalidation Cannot Reach TMDB")
-    void shouldRollBackPickAndSelectionsWhenResponseRevalidationIsUnavailable() throws Exception {
+    @DisplayName("[createPick] Should Roll Back Pick And Selections - When Response Assembly Fails After The Write")
+    void shouldRollBackPickAndSelectionsWhenResponseAssemblyFailsAfterTheWrite() throws Exception {
         var template = template();
-        when(tmdb.getMovieFullDetails(eq("550"), anyString())).thenReturn(
-                new TmdbLookupResult.Found<>(movie("550", "2025-06-01")),
-                new TmdbLookupResult.Found<>(movie("550", "2025-06-01")),
-                new TmdbLookupResult.Unavailable<>());
+        doAnswer(call -> {
+            call.callRealMethod();
+            Pick written = call.getArgument(0);
+            assertThat(picks.existsById(written.getId())).isTrue();
+            assertThat(selectedMovieTmdbId(written.getId(), template.movie())).isEqualTo("550");
+            throw new TmdbUnavailableException("Injected response assembly failure");
+        }).when(responses).assemblePrepared(any(Pick.class), eq(owner.getId()), any());
 
         mvc.perform(authenticated(owner, HttpMethod.POST, "/picks-templates/" + template.id() + "/picks", """
                 {"selections":[{"categoryId":"%s","target":{"content":{"type":"MOVIE","tmdbId":"550"}}}]}
@@ -80,15 +91,16 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
-    @DisplayName("[upsertSelection] Should Restore Existing Target - When Response Revalidation Fails After Replacement")
-    void shouldRestoreExistingTargetWhenResponseRevalidationFailsAfterReplacement() throws Exception {
+    @DisplayName("[upsertSelection] Should Restore Existing Target - When Response Assembly Fails After Replacement")
+    void shouldRestoreExistingTargetWhenResponseAssemblyFailsAfterReplacement() throws Exception {
         var template = template();
         var pick = personPick(template, PickVisibility.PUBLIC);
         selectionService.upsertSelection(owner.getId(), pick.id(), template.movie(), movieTarget("550"));
-        when(tmdb.getMovieFullDetails(eq("551"), anyString())).thenReturn(
-                new TmdbLookupResult.Found<>(movie("551", "2025-06-01")),
-                new TmdbLookupResult.Found<>(movie("551", "2025-06-01")),
-                new TmdbLookupResult.Unavailable<>());
+        doAnswer(call -> {
+            call.callRealMethod();
+            assertThat(selectedMovieTmdbId(pick.id(), template.movie())).isEqualTo("551");
+            throw new TmdbUnavailableException("Injected response assembly failure");
+        }).when(responses).assemblePrepared(any(Pick.class), eq(owner.getId()), any());
 
         mvc.perform(authenticated(owner, HttpMethod.PUT,
                 "/picks/" + pick.id() + "/categories/" + template.movie() + "/selection", """
@@ -156,30 +168,35 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
-    @DisplayName("[upsertSelection] Should Serialize Period Change - When First Content Selection Is Being Validated")
+    @DisplayName("[upsertSelection] Should Serialize Period Change - When First Content Selection Is Being Written")
     void shouldSerializePeriodChangeWithFirstContentSelection() throws Exception {
         var template = template();
         var pick = personPick(template, PickVisibility.PUBLIC);
-        var validating = new CountDownLatch(1);
+        var writePending = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        when(tmdb.getMovieFullDetails(eq("550"), anyString())).thenAnswer(call -> {
-            validating.countDown();
+        var writerPid = new AtomicInteger();
+        doAnswer(call -> {
+            Object response = call.callRealMethod();
+            writerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+            writePending.countDown();
             if (!release.await(10, TimeUnit.SECONDS)) {
-                throw new AssertionError("Validation was not released");
+                throw new AssertionError("Selection write was not released");
             }
-            return new TmdbLookupResult.Found<>(movie("550", "2025-06-01"));
-        });
+            return response;
+        }).when(responses).assemblePrepared(any(Pick.class), eq(owner.getId()), any());
         var executor = Executors.newFixedThreadPool(2);
         try {
             var selection = executor.submit(() ->
                     selectionService.upsertSelection(owner.getId(), pick.id(), template.movie(), movieTarget("550")));
-            assertThat(validating.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(writePending.await(5, TimeUnit.SECONDS)).isTrue();
             var patch = executor.submit(() -> templateService.updateTemplate(owner.getId(), template.id(),
                     new PicksTemplatePatchDTO(null, null, null, null,
                             LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), false)));
-            await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject(
-                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%picks_templates%'",
-                    Integer.class)).isPositive());
+            await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject("""
+                    SELECT count(*) FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock' AND query LIKE '%picks_templates%'
+                      AND ? = ANY(pg_blocking_pids(pid))
+                    """, Integer.class, writerPid.get())).isPositive());
             assertThat(patch.isDone()).isFalse();
             release.countDown();
             assertThat(selection.get(10, TimeUnit.SECONDS).selections()).hasSize(2);
@@ -189,6 +206,7 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
         } finally {
             release.countDown();
             executor.shutdownNow();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
         }
     }
 

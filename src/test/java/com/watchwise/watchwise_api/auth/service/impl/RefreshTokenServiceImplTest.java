@@ -82,7 +82,7 @@ class RefreshTokenServiceImplTest {
         Date expiration = new Date(System.currentTimeMillis() + 60_000);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH)).thenReturn(token);
+        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH, false)).thenReturn(token);
         when(jwtService.extractJti(token)).thenReturn(jti);
         when(jwtService.extractExpiration(token)).thenReturn(expiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
@@ -203,7 +203,7 @@ class RefreshTokenServiceImplTest {
         when(jwtService.extractJti(oldToken)).thenReturn(oldJti);
         when(refreshTokenRepository.findById(oldJti)).thenReturn(Optional.of(storedToken));
         when(jwtService.generateToken(userId, 0L, TokenType.ACCESS)).thenReturn(newAccessToken);
-        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH)).thenReturn(newRefreshToken);
+        when(jwtService.generateToken(userId, 0L, TokenType.REFRESH, false)).thenReturn(newRefreshToken);
         when(jwtService.extractJti(newRefreshToken)).thenReturn(newJti);
         when(jwtService.extractExpiration(newRefreshToken)).thenReturn(newExpiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);

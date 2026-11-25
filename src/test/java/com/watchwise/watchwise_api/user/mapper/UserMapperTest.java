@@ -98,7 +98,7 @@ class UserMapperTest {
 
         User result = userMapper.postUserDtoToUser(dto);
 
-        assertThat(result.getIsEmailVerified()).isTrue();
+        assertThat(result.getIsEmailVerified()).isFalse();
     }
 
     @Test

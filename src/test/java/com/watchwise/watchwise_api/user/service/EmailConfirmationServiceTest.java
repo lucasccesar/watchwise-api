@@ -58,6 +58,7 @@ class EmailConfirmationServiceTest {
         sender = mock(EmailConfirmationSender.class);
         refreshTokenService = mock(RefreshTokenService.class);
         when(senderProvider.getIfAvailable()).thenReturn(sender);
+        when(sender.isConfigured()).thenReturn(true);
         service = new EmailConfirmationService(users, pendingRegistrations, senderProvider, refreshTokenService, CLOCK);
         ReflectionTestUtils.setField(service, "tokenTtlMinutes", 30L);
         ReflectionTestUtils.setField(service, "maxPendingAttemptsPerEmail", 3);
@@ -258,7 +259,8 @@ class EmailConfirmationServiceTest {
 
         assertThatThrownBy(service::requireDeliveryConfigured)
                 .isInstanceOf(ServiceUnavailableException.class)
-                .hasMessage("Email confirmation is not configured");
+                .hasMessage("Email delivery is not configured");
+        verifyNoInteractions(users, pendingRegistrations, sender);
     }
 
     private User registrationDraft(String username) {

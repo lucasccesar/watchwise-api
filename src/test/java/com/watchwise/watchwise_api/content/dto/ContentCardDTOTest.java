@@ -53,7 +53,7 @@ class ContentCardDTOTest {
 
         assertThat(fieldNames(json)).containsExactlyInAnyOrder(
                 "contentId", "type", "tmdbId", "seriesTmdbId", "seasonNumber", "episodeNumber",
-                "title", "posterPath", "customPosterUrl", "releaseDate", "releaseYear", "runtimeMinutes",
+                "title", "posterPath", "backdropPath", "customPosterUrl", "releaseDate", "releaseYear", "runtimeMinutes",
                 "tmdbVoteAverage", "totalRuntimeMinutes", "numberOfSeasons", "numberOfEpisodes", "genres",
                 "stats", "viewerState", "previewStatus");
         assertThat(json.get("contentId").asString()).isEqualTo("bd072932-47a6-4ef2-9752-475c228107d4");
@@ -69,6 +69,7 @@ class ContentCardDTOTest {
         assertThat(json.get("seriesTmdbId").isNull()).isTrue();
         assertThat(json.get("seasonNumber").isNull()).isTrue();
         assertThat(json.get("episodeNumber").isNull()).isTrue();
+        assertThat(json.get("backdropPath").isNull()).isTrue();
         assertThat(json.get("customPosterUrl").isNull()).isTrue();
         assertThat(json.get("totalRuntimeMinutes").isNull()).isTrue();
         assertThat(json.get("numberOfSeasons").isNull()).isTrue();
@@ -89,7 +90,7 @@ class ContentCardDTOTest {
         WatchlistEntryResponseDTO entry = new WatchlistEntryResponseDTO(
                 entryId, ContentType.MOVIE, content, 2,
                 LocalDateTime.of(2026, 1, 2, 3, 4), LocalDateTime.of(2026, 1, 3, 4, 5),
-                LocalDate.of(2026, 2, 1));
+                LocalDate.of(2026, 2, 1), null, 8.4, 8.2);
         WatchlistPageResponseDTO response = new WatchlistPageResponseDTO(
                 List.of(entry), 3, 20, 41, 3, false, 7);
 
@@ -106,10 +107,14 @@ class ContentCardDTOTest {
         assertThat(json.get("hasNext").asBoolean()).isFalse();
         assertThat(json.get("upcomingCount").asLong()).isEqualTo(7);
         assertThat(fieldNames(serializedEntry)).containsExactlyInAnyOrder(
-                "id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate");
+                "id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate",
+                "numberOfEpisodes", "tmdbVoteAverage", "communityAverageScore");
         assertThat(serializedEntry.get("id").asString()).isEqualTo("c261c2aa-25de-47e8-a82b-06544f0647a5");
         assertThat(serializedEntry.get("position").asInt()).isEqualTo(2);
         assertThat(serializedEntry.get("releaseDate").asString()).isEqualTo("2026-02-01");
+        assertThat(serializedEntry.get("numberOfEpisodes").isNull()).isTrue();
+        assertThat(serializedEntry.get("tmdbVoteAverage").asDouble()).isEqualTo(8.4);
+        assertThat(serializedEntry.get("communityAverageScore").asDouble()).isEqualTo(8.2);
         assertThat(fieldNames(serializedContent)).containsExactlyInAnyOrder(
                 "id", "tmdbId", "type", "seriesTmdbId", "seasonNumber", "episodeNumber", "isSeasonFinale",
                 "isSeriesFinale", "createdAt", "updatedAt", "runtimeMinutes", "totalRuntimeMinutes", "genres",
@@ -139,7 +144,8 @@ class ContentCardDTOTest {
                 ContentPreviewStatus.AVAILABLE);
         CardEnrichedWatchlistEntryResponseDTO enrichedEntry = new CardEnrichedWatchlistEntryResponseDTO(
                 legacyEntry.id(), legacyEntry.type(), legacyEntry.content(), legacyEntry.position(),
-                legacyEntry.createdAt(), legacyEntry.updatedAt(), legacyEntry.releaseDate(), card);
+                legacyEntry.createdAt(), legacyEntry.updatedAt(), legacyEntry.releaseDate(), legacyEntry.numberOfEpisodes(),
+                legacyEntry.tmdbVoteAverage(), legacyEntry.communityAverageScore(), card);
         CardEnrichedWatchlistPageResponseDTO enrichedResponse = new CardEnrichedWatchlistPageResponseDTO(
                 List.of(enrichedEntry), legacyResponse.page(), legacyResponse.size(), legacyResponse.totalElements(),
                 legacyResponse.totalPages(), legacyResponse.hasNext(), legacyResponse.upcomingCount());
@@ -157,8 +163,9 @@ class ContentCardDTOTest {
                     .isEqualTo(legacyJson.get(field));
         }
         assertThat(fieldNames(enrichedEntryJson)).containsExactlyInAnyOrder(
-                "id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate", "card");
-        for (String field : List.of("id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate")) {
+                "id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate",
+                "numberOfEpisodes", "tmdbVoteAverage", "communityAverageScore", "card");
+        for (String field : legacyEntryJson.propertyNames()) {
             assertThat(enrichedEntryJson.get(field)).as("legacy entry field %s", field)
                     .isEqualTo(legacyEntryJson.get(field));
         }
@@ -201,6 +208,7 @@ class ContentCardDTOTest {
                 ContentCardFieldSet.TMDB_VOTE_AVERAGE,
                 ContentCardFieldSet.STATS,
                 ContentCardFieldSet.VIEWER_STATE,
+                ContentCardFieldSet.WATCHLIST_MEMBERSHIP,
                 ContentCardFieldSet.WATCHLIST_PROGRESS,
                 ContentCardFieldSet.SOCIAL_METADATA);
     }
@@ -213,6 +221,9 @@ class ContentCardDTOTest {
             LocalDateTime createdAt,
             LocalDateTime updatedAt,
             LocalDate releaseDate,
+            Integer numberOfEpisodes,
+            Double tmdbVoteAverage,
+            Double communityAverageScore,
             ContentCardDTO card) {
     }
 

@@ -53,6 +53,7 @@ import com.watchwise.watchwise_api.pick.service.impl.PickPreviewAssembler;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
@@ -68,10 +69,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mapstruct.factory.Mappers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -84,14 +89,19 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.Collection;
+import java.util.Objects;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -230,7 +240,7 @@ class FeedServiceImplTest {
         ContentCardDTO sharedCard = new ContentCardDTO(sharedContent.getId(), ContentType.MOVIE, "550", null,
                 null, null, "Fight Club", "/fight-club.jpg", null, null, null, null, null, null, null,
                 List.of(), null, null, null);
-        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+        when(contentCardAssembler.assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class), anyMap()))
                 .thenReturn(Map.of(sharedCoordinate, sharedCard));
 
         FeedPageViewDTO result = feedService.getFeedView(viewerId, null, 2);
@@ -239,7 +249,7 @@ class FeedServiceImplTest {
         assertThat(result.content()).extracting(FeedItemViewDTO::card).containsOnly(sharedCard);
         ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
         ArgumentCaptor<ContentCardContext> context = ArgumentCaptor.forClass(ContentCardContext.class);
-        verify(contentCardAssembler).assemble(specs.capture(), context.capture(), any(Set.class));
+        verify(contentCardAssembler).assembleBasicMetadataWithKnownIds(specs.capture(), context.capture(), anyMap());
         assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(sharedCoordinate);
         assertThat(specs.getValue()).hasSize(1);
         assertThat(specs.getValue()).noneMatch(spec -> spec.coordinate().tmdbId().equals("680"));
@@ -290,15 +300,21 @@ class FeedServiceImplTest {
         when(likeService.getLikedDroppedEntryIds(eq(viewerId), any())).thenReturn(Set.of());
         when(commentPreviewAssembler.assembleDiaryEntryPreviews(any(), eq(viewerId))).thenReturn(Map.of());
         when(commentPreviewAssembler.assembleDroppedEntryPreviews(any(), eq(viewerId))).thenReturn(Map.of());
-        when(pickPreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
+        when(pickPreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap())).thenReturn(Map.of());
         when(top5EntryRepository.findCurrentPreviewsByUserIdsAndType(any(), eq(ContentType.MOVIE)))
                 .thenReturn(List.of(selectedTop5));
         when(top5EntryMapper.top5EntryToResponseDto(selectedTop5)).thenReturn(new Top5EntryResponseDTO(
                 selectedTop5.getId(), ContentType.MOVIE, null, 1, selectedTop5.getCreatedAt(), selectedTop5.getUpdatedAt()));
         when(userContentPosterService.findByUserAndContentPairs(any())).thenReturn(Map.of());
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap())).thenReturn(Map.of());
+
+        Map<UUID, List<PicksTemplateCategory>> categories = Map.of(selectedTemplate.getId(), List.of());
+        when(picksTemplatePreviewAssembler.loadCategoriesByTemplate(Set.of(selectedTemplate.getId())))
+                .thenReturn(categories);
 
         feedService.getFeedView(viewerId, null, 5);
+
+        verify(picksTemplatePreviewAssembler).loadCategoriesByTemplate(Set.of(selectedTemplate.getId()));
 
         verify(likeService).getLikedDiaryEntryIds(viewerId, List.of(selectedDiary.getId()));
         verify(likeService).getLikedDroppedEntryIds(viewerId, List.of(selectedDropped.getId()));
@@ -306,31 +322,114 @@ class FeedServiceImplTest {
         verify(commentPreviewAssembler).assembleDiaryEntryPreviews(List.of(selectedDiary.getId()), viewerId);
         verify(commentPreviewAssembler).assembleDroppedEntryPreviews(List.of(selectedDropped.getId()), viewerId);
         verify(top5EntryRepository).findCurrentPreviewsByUserIdsAndType(List.of(followedId), ContentType.MOVIE);
-        verify(pickPreviewAssembler).assembleForFeed(List.of(selectedPick), viewerId);
+        verify(pickPreviewAssembler).assembleForFeed(eq(List.of(selectedPick)), eq(viewerId), same(categories));
         ArgumentCaptor<Collection<PicksTemplate>> templates = ArgumentCaptor.forClass(Collection.class);
-        verify(picksTemplatePreviewAssembler).assembleForFeed(templates.capture(), eq(viewerId));
+        verify(picksTemplatePreviewAssembler).assembleForFeed(templates.capture(), eq(viewerId), same(categories));
         assertThat(templates.getValue()).extracting(PicksTemplate::getId).containsExactly(selectedTemplate.getId());
         assertThat(templates.getValue()).extracting(PicksTemplate::getId).doesNotContain(discardedTemplate.getId());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 3, 5, 8, 65, 250})
+    void shouldKeepAllEligiblePreviewsInInputOrderWithoutLoadingFullUsers(int followingCount) {
+        List<User> eligible = IntStream.range(0, followingCount)
+                .mapToObj(index -> User.builder().id(new UUID(0, 1000 - index))
+                        .username("following-" + index).name("Same display name")
+                        .profilePicture(index % 3 == 0 ? null : "/avatar-" + index + ".png")
+                        .isProfilePublic(index % 2 == 0).build())
+                .toList();
+        List<UUID> followedIds = eligible.stream().map(User::getId).toList();
+        when(followerRepository.findVisibleFollowedIdsByFollowerId(viewerId)).thenReturn(followedIds);
+
+        UserMapper originalMapper = Mappers.getMapper(UserMapper.class);
+        List<UserPreviewDTO> expected = eligible.stream().map(originalMapper::userToUserPreviewDto).toList();
+        if (!eligible.isEmpty()) {
+            List<UserPreviewDTO> projected = eligible.reversed().stream()
+                    .map(user -> new UserPreviewDTO(user.getId(), user.getUsername(), user.getName(),
+                            user.getProfilePicture(), user.getIsProfilePublic()))
+                    .toList();
+            when(userRepository.findPreviewsByIdIn(followedIds)).thenReturn(projected);
+        }
+
+        List<UserDailyGameResult> activities = List.of();
+        if (followingCount == 65) {
+            DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+            LocalDateTime latest = LocalDateTime.of(2026, 9, 29, 12, 0);
+            User authorOutsideFirstFive = eligible.get(7);
+            activities = IntStream.range(0, 21)
+                    .mapToObj(index -> buildDailyGameResult(authorOutsideFirstFive, challenge,
+                            latest.minusMinutes(index), 1, 10, DailyGameResultStatus.COMPLETED, true))
+                    .toList();
+            when(dailyGameResultRepository.findFeedCandidates(followedIds, null, null, PageRequest.of(0, 21)))
+                    .thenReturn(activities);
+        }
+
+        FeedPageViewDTO result = feedService.getFeedView(viewerId, null, 20);
+
+        assertThat(result.followingCount()).isEqualTo(followingCount);
+        assertThat(result.followedUsersPreview()).containsExactlyElementsOf(expected);
+        JsonMapper json = JsonMapper.builder().build();
+        assertThat(json.readTree(json.writeValueAsBytes(result)).get("followedUsersPreview"))
+                .isEqualTo(json.readTree(json.writeValueAsBytes(expected)));
+        assertThat(result.size()).isEqualTo(20);
+        assertThat(result.content()).extracting(FeedItemViewDTO::id)
+                .containsExactlyElementsOf(activities.stream().limit(20).map(UserDailyGameResult::getId).toList());
+        if (followingCount == 65) {
+            assertThat(result.hasNext()).isTrue();
+            assertThat(result.nextCursor()).isNotBlank();
+            assertThat(result.followedUsersPreview().stream()
+                    .filter(preview -> !preview.id().equals(followedIds.get(1)))
+                    .map(UserPreviewDTO::profilePicture).filter(Objects::nonNull).limit(5))
+                    .containsExactly("/avatar-2.png", "/avatar-4.png", "/avatar-5.png",
+                            "/avatar-7.png", "/avatar-8.png");
+        } else {
+            assertThat(result.hasNext()).isFalse();
+            assertThat(result.nextCursor()).isNull();
+        }
+        verify(userRepository, never()).findAllById(any());
+        if (eligible.isEmpty()) {
+            verify(userRepository, never()).findPreviewsByIdIn(any());
+        } else {
+            verify(userRepository).findPreviewsByIdIn(followedIds);
+        }
+    }
+
     @Test
-    @DisplayName("[getFeedView] Should Expose Following Count And Ordered User Previews - When Following Is Accepted")
-    void shouldExposeFollowingCountAndOrderedUserPreviewsWhenFollowingIsAccepted() {
+    void shouldLoadCategoriesAgainWhenThePreviousFeedResponseHadNone() {
         stubFollowedIds();
         stubEmptySources(21);
-        User first = User.builder().id(followedId).username("followed").name("Followed")
-                .profilePicture("/followed.jpg").isProfilePublic(true).build();
-        when(userRepository.findAllById(List.of(followedId))).thenReturn(List.of(first));
-        UserPreviewDTO preview = new UserPreviewDTO(followedId, "followed", "Followed", "/followed.jpg", true);
-        when(userMapper.userToUserPreviewDto(first)).thenReturn(preview);
+        PicksTemplate template = buildTemplate(LocalDateTime.of(2026, 8, 20, 12, 0));
+        when(picksTemplateRepository.findFeedCandidates(List.of(followedId), null, null, PageRequest.of(0, 21)))
+                .thenReturn(List.of(template));
+        Map<UUID, List<PicksTemplateCategory>> empty = Map.of();
+        Map<UUID, List<PicksTemplateCategory>> populated = Map.of(template.getId(), List.of(
+                PicksTemplateCategory.builder().id(UUID.randomUUID()).name("Added").picksTemplate(template).build()));
+        when(picksTemplatePreviewAssembler.loadCategoriesByTemplate(Set.of(template.getId())))
+                .thenReturn(empty, populated);
 
-        FeedPageViewDTO result = feedService.getFeedView(viewerId, null, null);
+        feedService.getFeedView(viewerId, null, 20);
+        feedService.getFeedView(viewerId, null, 20);
 
-        assertThat(result.followingCount()).isEqualTo(1);
+        var order = inOrder(picksTemplatePreviewAssembler);
+        order.verify(picksTemplatePreviewAssembler).loadCategoriesByTemplate(Set.of(template.getId()));
+        order.verify(picksTemplatePreviewAssembler).assembleForFeed(any(), eq(viewerId), same(empty));
+        order.verify(picksTemplatePreviewAssembler).loadCategoriesByTemplate(Set.of(template.getId()));
+        order.verify(picksTemplatePreviewAssembler).assembleForFeed(any(), eq(viewerId), same(populated));
+        verify(picksTemplatePreviewAssembler, times(2)).loadCategoriesByTemplate(Set.of(template.getId()));
+    }
+
+    @Test
+    void shouldSkipMissingUsersWithoutChangingFollowingCount() {
+        UUID missingId = UUID.randomUUID();
+        List<UUID> followedIds = List.of(missingId, followedId);
+        when(followerRepository.findVisibleFollowedIdsByFollowerId(viewerId)).thenReturn(followedIds);
+        UserPreviewDTO preview = new UserPreviewDTO(followedId, "following", "Display name", null, false);
+        when(userRepository.findPreviewsByIdIn(followedIds)).thenReturn(List.of(preview));
+
+        FeedPageViewDTO result = feedService.getFeedView(viewerId, null, 20);
+
+        assertThat(result.followingCount()).isEqualTo(2);
         assertThat(result.followedUsersPreview()).containsExactly(preview);
-        assertThat(result.content()).isEmpty();
-        assertThat(result.nextCursor()).isNull();
-        assertThat(result.hasNext()).isFalse();
     }
 
     @Test
@@ -361,7 +460,7 @@ class FeedServiceImplTest {
         assertThat(item.card()).isNull();
         verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
                 eq(viewerId), eq(List.of(challenge.getId())));
-        verify(contentCardAssembler, never()).assemble(any(), any(ContentCardContext.class), any(Set.class));
+        verify(contentCardAssembler, never()).assembleBasicMetadataWithKnownIds(any(), any(), anyMap());
     }
 
     @Test
@@ -415,9 +514,9 @@ class FeedServiceImplTest {
                 .thenReturn(List.of(pick));
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of());
-        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(pick.getId(), pickPreview));
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(template.getId(), new PicksTemplatePreviewDTO(
                         template.getId(), PickOrigin.COMMUNITY, template.getName(), null, null)));
         ContentCoordinate coordinate = ContentCoordinate.from(targetContent);
@@ -425,7 +524,7 @@ class FeedServiceImplTest {
         ContentCardDTO card = new ContentCardDTO(targetContent.getId(), ContentType.MOVIE, "550", null, null, null,
                 "Fight Club", "/fight-club.jpg", null, null, null, null, null, null, null, List.of(), null, null,
                 ContentPreviewStatus.PARTIAL);
-        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+        when(contentCardAssembler.assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class), anyMap()))
                 .thenReturn(Map.of(coordinate, card));
 
         FeedItemViewDTO item = feedService.getFeedView(viewerId, null, null).content().getFirst();
@@ -433,8 +532,42 @@ class FeedServiceImplTest {
         assertThat(item.eventType()).isEqualTo(FeedEventType.PICK_CREATED);
         assertThat(item.pickTargetCards()).containsExactly(card, null);
         ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
-        verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), any(Set.class));
+        verify(contentCardAssembler).assembleBasicMetadataWithKnownIds(specs.capture(), any(ContentCardContext.class),
+                eq(Map.of(coordinate, targetContent.getId(), missingCoordinate, missingTargetContent.getId())));
         assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(coordinate, missingCoordinate);
+    }
+
+    @Test
+    void shouldKeepConflictingMediaIdsOutOfTheFeedHints() {
+        UUID sharedId = UUID.randomUUID();
+        Content movie = Content.builder().type(ContentType.MOVIE).tmdbId("100").id(sharedId).build();
+        Content series = Content.builder().type(ContentType.SERIES).tmdbId("100").id(sharedId).build();
+        Content disputed = Content.builder().type(ContentType.MOVIE).tmdbId("100").id(UUID.randomUUID()).build();
+        Content episode = Content.builder().type(ContentType.EPISODE).seriesTmdbId("100").seasonNumber(2)
+                .episodeNumber(3).id(UUID.randomUUID()).build();
+        Content noId = Content.builder().type(ContentType.EPISODE).seriesTmdbId("100").seasonNumber(2)
+                .episodeNumber(3).runtimeMinutes(42).build();
+        List<FeedItemDTO> items = java.util.stream.Stream.of(movie, series, disputed, noId, episode)
+                .map(content -> {
+                    var item = org.mockito.Mockito.mock(FeedItemDTO.class);
+                    when(item.content()).thenReturn(contentRef(content));
+                    return item;
+                }).toList();
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(feedService, "assembleCards", items, viewerId);
+
+        ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
+        verify(contentCardAssembler).assembleBasicMetadataWithKnownIds(specs.capture(), any(ContentCardContext.class),
+                eq(Map.of(ContentCoordinate.from(episode), episode.getId())));
+        assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(
+                ContentCoordinate.from(movie), ContentCoordinate.from(series), ContentCoordinate.from(episode));
+        assertThat(specs.getValue().stream().toList().getLast().runtimeMinutes()).isEqualTo(42);
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(feedService, "assembleCards",
+                List.of(items.get(3)), viewerId);
+
+        verify(contentCardAssembler).assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class),
+                eq(Map.of()));
     }
 
     @Test
@@ -458,7 +591,7 @@ class FeedServiceImplTest {
         ContentCardDTO card = new ContentCardDTO(top5Entry.getContent().getId(), ContentType.MOVIE, "300", null,
                 null, null, "The Shawshank Redemption", "/shawshank.jpg", null, null, null, null, null, null,
                 null, List.of(), null, null, ContentPreviewStatus.AVAILABLE);
-        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+        when(contentCardAssembler.assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class), anyMap()))
                 .thenReturn(Map.of(coordinate, card));
 
         FeedItemViewDTO item = feedService.getFeedView(viewerId, null, null).content().getFirst();
@@ -498,7 +631,7 @@ class FeedServiceImplTest {
         ContentCardDTO firstCard = new ContentCardDTO(first.getContent().getId(), ContentType.MOVIE, "300", null,
                 null, null, "The Shawshank Redemption", "/shawshank.jpg", null, null, null, null, null, null,
                 null, List.of(), null, null, ContentPreviewStatus.AVAILABLE);
-        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+        when(contentCardAssembler.assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class), anyMap()))
                 .thenReturn(Map.of(firstCoordinate, firstCard));
 
         FeedTop5PreviewDTO preview = feedService.getFeedView(viewerId, null, null)
@@ -534,9 +667,9 @@ class FeedServiceImplTest {
                 .thenReturn(List.of(pick));
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of(template));
-        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(pick.getId(), pickPreview));
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(template.getId(), templatePreview));
         when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
 
@@ -755,10 +888,10 @@ class FeedServiceImplTest {
                 .thenReturn(List.of(first, beyondLimit));
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 2))))
                 .thenReturn(List.of());
-        when(pickPreviewAssembler.assembleForFeed(eq(List.of(first)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(first)), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(first.getId(), new PickPreviewDTO(first.getId(), null, PickVisibility.PUBLIC,
                         first.getCreatedAt(), 0, 0, false, List.of())));
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap())).thenReturn(Map.of());
 
         CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, 1);
 
@@ -1223,9 +1356,9 @@ class FeedServiceImplTest {
         PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(template.getId(), null,
                 PickOrigin.COMMUNITY, template.getName(), null, null, null, 0, 0, List.of(), 0, 1, false, 0, null,
                 List.of(templateComment));
-        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(pick.getId(), pickPreview));
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(template.getId(), templatePreview));
 
         FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);
@@ -1252,7 +1385,7 @@ class FeedServiceImplTest {
         PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(template.getId(), null,
                 PickOrigin.COMMUNITY, template.getName(), null, null, null, 0, 0, List.of(), 0, 1, false, 0, null,
                 List.of(templateComment));
-        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId), anyMap()))
                 .thenReturn(Map.of(template.getId(), templatePreview));
 
         FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);

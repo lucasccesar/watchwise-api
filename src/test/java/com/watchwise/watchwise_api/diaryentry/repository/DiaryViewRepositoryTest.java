@@ -50,6 +50,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -146,7 +148,8 @@ class DiaryViewRepositoryTest {
         Content movie = persistContent(ContentType.MOVIE, "550", null, null, null);
 
         DiaryEntry importedEpisode = persistEntry(user, episode, LocalDate.of(2020, 1, 2), EPISODE_RECORDED_AT);
-        persistEntry(user, movie, LocalDate.of(2025, 5, 1), EPISODE_RECORDED_AT.minusDays(1));
+        DiaryEntry olderRecording = persistEntry(
+                user, movie, LocalDate.of(2025, 5, 1), EPISODE_RECORDED_AT.minusDays(1));
         historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
                 .id(new UserSeriesHistoryState.Key(owner.id(), SERIES_TMDB_ID))
                 .historyRevision(1L)
@@ -172,11 +175,11 @@ class DiaryViewRepositoryTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andExpect(jsonPath("$.content.length()").value(2))
-                .andExpect(jsonPath("$.content[0].kind").value("DERIVED_COMPLETION"))
-                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.content[0].kind").value("PERSISTED_ENTRY"))
+                .andExpect(jsonPath("$.content[0].diaryEntryId").value(olderRecording.getId().toString()))
+                .andExpect(jsonPath("$.content[0].content.type").value("MOVIE"))
                 .andExpect(jsonPath("$.content[1].kind").value("DERIVED_COMPLETION"))
-                .andExpect(jsonPath("$.content[1].content.type").value("SEASON"))
-                .andExpect(jsonPath("$.content[1].completionKey").value("SEASON:1396:1:pass:1"));
+                .andExpect(jsonPath("$.content[1].content.type").value("SERIES"));
 
         mockMvc.perform(get("/users/{userId}/diary/view", owner.id())
                         .cookie(owner.accessToken())
@@ -185,21 +188,25 @@ class DiaryViewRepositoryTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andExpect(jsonPath("$.content.length()").value(2))
-                .andExpect(jsonPath("$.content[0].kind").value("PERSISTED_ENTRY"))
-                .andExpect(jsonPath("$.content[0].diaryEntryId").value(importedEpisode.getId().toString()))
-                .andExpect(jsonPath("$.content[0].content.type").value("EPISODE"))
+                .andExpect(jsonPath("$.content[0].kind").value("DERIVED_COMPLETION"))
+                .andExpect(jsonPath("$.content[0].content.type").value("SEASON"))
+                .andExpect(jsonPath("$.content[0].completionKey").value("SEASON:1396:1:pass:1"))
                 .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"))
-                .andExpect(jsonPath("$.content[1].content.type").value("MOVIE"));
+                .andExpect(jsonPath("$.content[1].diaryEntryId").value(importedEpisode.getId().toString()))
+                .andExpect(jsonPath("$.content[1].content.type").value("EPISODE"));
         mockMvc.perform(get("/users/{userId}/diary/view", owner.id())
                         .cookie(owner.accessToken()).param("grouped", "true"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(2))
-                .andExpect(jsonPath("$.content[0].kind").value("GROUPED"))
-                .andExpect(jsonPath("$.content[0].content.id").value(series.getId().toString()))
-                .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
-                .andExpect(jsonPath("$.content[0].groupType").value("SERIES"))
-                .andExpect(jsonPath("$.content[0].episodeCount").value(1))
-                .andExpect(jsonPath("$.content[0].seasonCount").value(1));
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.nextCursor").doesNotExist())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].diaryEntryId").value(olderRecording.getId().toString()))
+                .andExpect(jsonPath("$.content[1].kind").value("GROUPED"))
+                .andExpect(jsonPath("$.content[1].content.id").value(series.getId().toString()))
+                .andExpect(jsonPath("$.content[1].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.content[1].groupType").value("SERIES"))
+                .andExpect(jsonPath("$.content[1].episodeCount").value(1))
+                .andExpect(jsonPath("$.content[1].seasonCount").value(1));
     }
 
     @Test
@@ -386,7 +393,7 @@ class DiaryViewRepositoryTest {
         LocalDate date = LocalDate.of(2026, 11, 4);
         for (int episodeNumber = 1; episodeNumber <= 4; episodeNumber++) {
             Content episode = persistContent(ContentType.EPISODE, null, "910001", 1, episodeNumber);
-            episode.setRuntimeMinutes(40);
+            episode.setRuntimeMinutes(episodeNumber >= 3 ? 40 : 30);
             contentRepository.saveAndFlush(episode);
             DiaryEntry watched = persistEntry(user, episode, date, EPISODE_RECORDED_AT.plusMinutes(episodeNumber * 2));
             if (episodeNumber >= 3) {
@@ -395,7 +402,7 @@ class DiaryViewRepositoryTest {
             }
         }
         Content movie = persistContent(ContentType.MOVIE, "910002", null, null, null);
-        persistEntry(user, movie, date, EPISODE_RECORDED_AT.plusMinutes(5));
+        DiaryEntry interruption = persistEntry(user, movie, date, EPISODE_RECORDED_AT.plusMinutes(5));
         var filter = new DiaryViewFilter(null, null, null, null, null, null);
         var page = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(), filter,
                 org.springframework.data.domain.PageRequest.of(0, 2));
@@ -410,15 +417,19 @@ class DiaryViewRepositoryTest {
         assertThat(next.getContent()).singleElement().satisfies(group -> {
             assertThat(group.groupSize()).isEqualTo(2);
             assertThat(group.episodeCount()).isEqualTo(2);
+            assertThat(group.totalRuntimeMinutes()).isEqualTo(60L);
         });
         historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
                 .id(new UserSeriesHistoryState.Key(owner.id(), "910001"))
                 .historyRevision(0L).computedRevision(0L).scheduleVersion(0L)
                 .validUntil(Instant.parse("2099-01-01T00:00:00Z")).build());
-        mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
+        var firstPage = mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
                         .param("grouped", "true").param("size", "2"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalElements").doesNotExist())
+                .andExpect(jsonPath("$.hasNext").value(true))
+                .andExpect(jsonPath("$.nextCursor").isNotEmpty())
+                .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].kind").value("GROUPED"))
                 .andExpect(jsonPath("$.content[0].content.type").value("SERIES"))
                 .andExpect(jsonPath("$.content[0].content.tmdbId").value("910001"))
@@ -426,7 +437,20 @@ class DiaryViewRepositoryTest {
                 .andExpect(jsonPath("$.content[0].totalRuntimeMinutes").value(80))
                 .andExpect(jsonPath("$.content[0].items").doesNotExist())
                 .andExpect(jsonPath("$.content[0].diaryEntryId").doesNotExist())
-                .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"));
+                .andExpect(jsonPath("$.content[1].kind").value("PERSISTED_ENTRY"))
+                .andExpect(jsonPath("$.content[1].diaryEntryId").value(interruption.getId().toString()))
+                .andReturn();
+        String cursor = JsonPath.read(firstPage.getResponse().getContentAsString(), "$.nextCursor");
+        mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
+                        .param("grouped", "true").param("size", "2").param("cursor", cursor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.nextCursor").doesNotExist())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].kind").value("GROUPED"))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("910001"))
+                .andExpect(jsonPath("$.content[0].episodeCount").value(2))
+                .andExpect(jsonPath("$.content[0].totalRuntimeMinutes").value(60));
         mockMvc.perform(get("/users/{userId}/diary/view", owner.id()).cookie(owner.accessToken())
                         .param("grouped", "true").param("hasReview", "true"))
                 .andExpect(status().isOk())
@@ -469,6 +493,8 @@ class DiaryViewRepositoryTest {
         persistContent(ContentType.SERIES, seriesId, null, null, null);
         LocalDate date = LocalDate.of(2026, 11, 4);
         Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
+        List<UUID> completionDayEntries = new ArrayList<>();
+        List<UUID> previousDayEntries = new ArrayList<>();
         historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
                 .id(new UserSeriesHistoryState.Key(owner.id(), seriesId))
                 .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
@@ -481,13 +507,14 @@ class DiaryViewRepositoryTest {
                 contentRepository.saveAndFlush(episode);
                 anchor = persistEntry(user, episode, episodeNumber == 1 ? date.minusDays(1) : date,
                         EPISODE_RECORDED_AT.plusMinutes(seasonNumber * 10 + episodeNumber));
+                (episodeNumber == 1 ? previousDayEntries : completionDayEntries).add(anchor.getId());
             }
             completenessRepository.saveAndFlush(markerFor(seriesId,
                     CalendarScheduleCompleteness.GroupType.SEASON, seasonNumber).toBuilder().scopeVersion(1L).build());
             projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
                     .userId(owner.id()).contentId(season.getId()).contentType(ContentType.SEASON)
                     .watchNumber(1).anchorDiaryEntryId(anchor.getId()).completedOn(date)
-                    .orderedAt(Instant.parse("2026-11-04T12:00:00Z"))
+                    .orderedAt(date.atStartOfDay(ZoneOffset.UTC).toInstant())
                     .historyRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
         }
         var filtered = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(),
@@ -499,12 +526,27 @@ class DiaryViewRepositoryTest {
             assertThat(group.episodeCount()).isEqualTo(2);
             assertThat(group.seasonCount()).isEqualTo(2);
             assertThat(group.totalRuntimeMinutes()).isEqualTo(60L);
+            assertThat(group.memberEntryIds()).containsExactlyElementsOf(completionDayEntries.reversed());
         });
         var unfiltered = diaryViewRepository.findGroupedPage(owner.id(), "US", "en-US", Instant.now(),
                 new DiaryViewFilter(null, null, null, null, null, null),
                 org.springframework.data.domain.PageRequest.of(0, 20));
-        assertThat(unfiltered.getContent().getFirst().episodeCount()).isEqualTo(1);
-        assertThat(unfiltered.getContent().getFirst().groupType()).isEqualTo(ContentType.SEASON);
+        assertThat(unfiltered.getTotalElements()).isEqualTo(2);
+        assertThat(unfiltered.getContent()).satisfiesExactly(completionDay -> {
+            assertThat(completionDay.groupDate()).isEqualTo(date);
+            assertThat(completionDay.groupType()).isEqualTo(ContentType.SEASON);
+            assertThat(completionDay.groupSize()).isEqualTo(4);
+            assertThat(completionDay.episodeCount()).isEqualTo(2);
+            assertThat(completionDay.totalRuntimeMinutes()).isEqualTo(60L);
+            assertThat(completionDay.memberEntryIds()).containsExactlyElementsOf(completionDayEntries.reversed());
+        }, previousDay -> {
+            assertThat(previousDay.groupDate()).isEqualTo(date.minusDays(1));
+            assertThat(previousDay.groupType()).isEqualTo(ContentType.EPISODE);
+            assertThat(previousDay.groupSize()).isEqualTo(2);
+            assertThat(previousDay.episodeCount()).isEqualTo(2);
+            assertThat(previousDay.totalRuntimeMinutes()).isEqualTo(60L);
+            assertThat(previousDay.memberEntryIds()).containsExactlyElementsOf(previousDayEntries.reversed());
+        });
     }
 
     private RegisteredUser registerUser() throws Exception {

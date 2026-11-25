@@ -53,13 +53,16 @@ class PicksTemplatePreviewAssemblerTest {
                 template.getId(), new CommentPreviewData(9, List.of(comment)),
                 other.getId(), new CommentPreviewData(0, List.of())));
 
-        Map<UUID, PicksTemplatePreviewDTO> result = assembler.assembleForFeed(List.of(template, other), viewerId);
+        var categoriesByTemplate = assembler.loadCategoriesByTemplate(ids);
+        Map<UUID, PicksTemplatePreviewDTO> result = assembler.assembleForFeed(
+                List.of(template, other), viewerId, categoriesByTemplate);
 
         assertThat(result.get(template.getId()).commentsCount()).isEqualTo(9);
         assertThat(result.get(template.getId()).recentComments()).containsExactly(comment);
         assertThat(result.get(other.getId()).commentsCount()).isZero();
         assertThat(result.get(other.getId()).recentComments()).isEmpty();
         verify(commentRepository, never()).countByPicksTemplateIdIn(any());
+        verify(categoryRepository).findByPicksTemplateIdInOrderByDisplayOrder(ids);
     }
 
     @Test

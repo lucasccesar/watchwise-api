@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.feed.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
@@ -82,9 +83,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class FeedControllerIntegrationTest {
@@ -627,6 +629,8 @@ class FeedControllerIntegrationTest {
                 "Fight Club", "/fight-club.jpg", null, null, null, null, null, null, null, List.of(),
                 null, null, null);
         when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+                .thenReturn(Map.of(coordinate, card));
+        when(contentCardAssembler.assembleBasicMetadataWithKnownIds(any(), any(ContentCardContext.class), anyMap()))
                 .thenReturn(Map.of(coordinate, card));
 
         mockMvc.perform(get("/feed").cookie(viewer.accessToken()))

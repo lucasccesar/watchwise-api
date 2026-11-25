@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
+import com.watchwise.watchwise_api.user.dto.SessionIdentityDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
@@ -491,6 +492,19 @@ class UserServiceImplTest {
         assertThat(result.isContentRestrictedByBlock()).isTrue();
         verify(userVisibilityService, never()).assertCanView(any(), any());
         verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void resolvesSessionIdentityWithoutProfileStats() {
+        UUID id = UUID.randomUUID();
+        var identity = new SessionIdentityDTO(id, "viewer", "viewer@example.test", "Viewer",
+                null, null, null, false, "pt-BR", "BR");
+        when(userRepository.findSessionIdentityById(id)).thenReturn(Optional.of(identity));
+
+        assertThat(userService.getSessionIdentity(id)).isEqualTo(identity);
+        verify(userRepository).findSessionIdentityById(id);
+        org.mockito.Mockito.verifyNoMoreInteractions(userRepository);
+        org.mockito.Mockito.verifyNoInteractions(diaryEntryRepository, followerRepository, userMapper);
     }
 
     @Test

@@ -15,10 +15,11 @@ class CacheBudgetAllocatorTest {
 
         Map<String, Long> budgets = new CacheBudgetAllocator().allocate(properties);
 
-        assertThat(budgets).hasSize(21);
+        assertThat(budgets).hasSize(22);
         assertThat(budgets.get(CacheBudgetAllocator.MEDIA_CACHE)).isEqualTo(200L);
-        assertThat(budgets.get("tmdbMovieSearchCache")).isEqualTo(40L);
-        assertThat(budgets.values().stream().mapToLong(Long::longValue).sum()).isEqualTo(1000L);
+        assertThat(budgets.get("tmdbMovieSearchCache")).isEqualTo(38L);
+        assertThat(budgets.get("tmdbTvContentRatingsCache")).isEqualTo(38L);
+        assertThat(budgets.values().stream().mapToLong(Long::longValue).sum()).isEqualTo(998L);
     }
 
     @Test
@@ -29,8 +30,9 @@ class CacheBudgetAllocatorTest {
         Map<String, Long> budgets = new CacheBudgetAllocator().allocate(properties);
 
         assertThat(budgets.get("dailyGameMedia")).isEqualTo(201L);
-        assertThat(budgets.get("tmdbMovieSearchCache")).isEqualTo(76L);
-        assertThat(budgets.values().stream().mapToLong(Long::longValue).sum()).isEqualTo(999L);
+        assertThat(budgets.get("tmdbMovieSearchCache")).isEqualTo(72L);
+        assertThat(budgets.get("tmdbTvContentRatingsCache")).isEqualTo(36L);
+        assertThat(budgets.values().stream().mapToLong(Long::longValue).sum()).isEqualTo(993L);
     }
 
     @Test

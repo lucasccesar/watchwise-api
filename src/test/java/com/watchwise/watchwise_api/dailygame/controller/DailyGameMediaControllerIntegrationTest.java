@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.controller;
 
+import com.watchwise_test.WatchwiseIntegrationTestApplication;
 import com.watchwise.watchwise_api.common.cache.TestCacheFactory;
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
@@ -54,7 +55,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest
+@SpringBootTest(classes = WatchwiseIntegrationTestApplication.class)
 @AutoConfigureMockMvc
 @Testcontainers
 class DailyGameMediaControllerIntegrationTest {
