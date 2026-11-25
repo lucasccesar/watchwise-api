@@ -145,7 +145,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
             WatchlistSort sort,
             String direction,
             Integer pageNumber,
-            Integer pageSize) {
+            Integer pageSize,
+            boolean includeGenreOptions) {
         validateType(type);
 
         User target = userRepository.findById(userId)
@@ -161,7 +162,6 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         List<WatchlistEntry> allEntries = watchlistEntryRepository.findByUserIdWithContentForView(userId).stream()
                 .filter(entry -> entry != null && entry.getContent() != null)
                 .toList();
-        List<String> availableGenres = availableGenres(allEntries);
         List<WatchlistEntry> candidates = allEntries.stream()
                 .filter(entry -> type == null || entry.getType() == type)
                 .filter(entry -> matchesGenre(entry.getContent(), normalizedGenre))
@@ -213,7 +213,48 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 page.hasNext(),
                 aggregate,
                 cards.isEmpty() || cards.get(0).card() == null ? null : cards.get(0).card().backdropPath(),
-                availableGenres);
+                includeGenreOptions
+                        ? genreOptions(target, allEntries, pageCards, sortCards)
+                        : availableGenres(allEntries));
+    }
+
+    private List<String> genreOptions(
+            User target,
+            List<WatchlistEntry> entries,
+            Map<ContentCoordinate, ContentCardDTO> pageCards,
+            Map<ContentCoordinate, ContentCardDTO> sortCards) {
+        List<ContentCoordinate> missingGenres = entries.stream()
+                .map(WatchlistEntry::getContent)
+                .filter(content -> content.getGenres() == null)
+                .map(ContentCoordinate::from)
+                .filter(coordinate -> !pageCards.containsKey(coordinate) && !sortCards.containsKey(coordinate))
+                .distinct()
+                .toList();
+        Map<ContentCoordinate, List<String>> fallback = missingGenres.isEmpty()
+                ? Map.of()
+                : contentCardAssembler.resolveGenres(missingGenres, target.getPreferredLanguage());
+
+        // The previous menu visited the unfiltered DATE_ADDED DESC pages before its stable locale sort.
+        Set<String> genres = new LinkedHashSet<>();
+        entries.stream().sorted((left, right) -> {
+            int date = compareNullable(left.getCreatedAt(), right.getCreatedAt(), true);
+            return date != 0 ? date : compareIds(left.getId(), right.getId());
+        }).forEach(entry -> {
+            Content content = entry.getContent();
+            List<String> names = content.getGenres();
+            if (names == null) {
+                ContentCoordinate coordinate = ContentCoordinate.from(content);
+                ContentCardDTO card = pageCards.get(coordinate);
+                if (card == null) {
+                    card = sortCards.get(coordinate);
+                }
+                names = card == null ? fallback.get(coordinate) : card.genres();
+            }
+            if (names != null) {
+                names.stream().filter(Objects::nonNull).forEach(genres::add);
+            }
+        });
+        return List.copyOf(genres);
     }
 
     private List<String> availableGenres(List<WatchlistEntry> entries) {

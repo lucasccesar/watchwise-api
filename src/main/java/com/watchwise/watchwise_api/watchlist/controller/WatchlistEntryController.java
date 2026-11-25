@@ -55,11 +55,12 @@ public class WatchlistEntryController {
             @RequestParam(required = false) WatchlistSort sort,
             @RequestParam(required = false) String direction,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) Integer size,
+            @RequestParam(defaultValue = "false") boolean includeGenreOptions
     ) {
         WatchlistViewResponseDTO view = watchlistEntryService.getWatchlistView(
                 getCurrentUserId(), userId, type == null ? null : type.toContentType(), genre, status, sort,
-                direction, page, size);
+                direction, page, size, includeGenreOptions);
         return ResponseEntity.ok(view);
     }
 

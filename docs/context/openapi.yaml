@@ -1433,13 +1433,21 @@ paths:
         filmes) e stats.averageScore como média comunitária pública (null sem notas públicas); metadata
         TMDB não é armazenada em Content. `availableGenres` lista gêneros distintos presentes em toda a
         watchlist visível do dono, antes dos filtros e da paginação, mesmo quando a página filtrada está
-        vazia. Nomes nulos/vazios são omitidos e diferenças de caixa contam como o mesmo gênero.
+        vazia. Por padrão, ignora nomes nulos/vazios e agrupa variantes de caixa.
+        Com includeGenreOptions=true, usa os nomes dos cards do menu legado, inclusive o fallback
+        TMDB para arrays locais nulos. Preserva caixa, espaços e nomes vazios, deduplica por igualdade
+        exata e deixa a ordenação por locale para o cliente. O filtro continua consultando gêneros locais.
         Com sort=RATING, stats.averageScore ordena primeiro e
         tmdbVoteAverage desempata; direction se aplica às duas notas, valores nulos ficam por último
         e empates completos seguem o UUID crescente da entrada.
       parameters:
         - $ref: "#/components/parameters/userId"
         - $ref: "#/components/parameters/watchlistTypeQuery"
+        - name: includeGenreOptions
+          in: query
+          required: false
+          description: Aplicar a semântica do menu legado ao campo global availableGenres.
+          schema: { type: boolean, default: false }
         - name: genre
           in: query
           required: false
@@ -7497,7 +7505,7 @@ components:
               description: Raw TMDB image path from the first card in the filtered and sorted page.
             availableGenres:
               type: array
-              description: Distinct, non-blank genre names in the owner's complete visible watchlist, independent of request filters and pagination.
+              description: Genre names in the owner's complete visible watchlist, independent of request filters and pagination. See includeGenreOptions for menu semantics.
               items: { type: string }
 
     DroppedEntry:

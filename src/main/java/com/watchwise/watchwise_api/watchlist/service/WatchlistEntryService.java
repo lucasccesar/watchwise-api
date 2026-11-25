@@ -19,6 +19,19 @@ public interface WatchlistEntryService {
 
     WatchlistPageResponseDTO getWatchlist(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize);
 
+    default WatchlistViewResponseDTO getWatchlistView(
+            UUID viewerId,
+            UUID userId,
+            ContentType type,
+            String genre,
+            WatchlistStatus status,
+            WatchlistSort sort,
+            String direction,
+            Integer pageNumber,
+            Integer pageSize) {
+        return getWatchlistView(viewerId, userId, type, genre, status, sort, direction, pageNumber, pageSize, false);
+    }
+
     WatchlistViewResponseDTO getWatchlistView(
             UUID viewerId,
             UUID userId,
@@ -28,7 +41,8 @@ public interface WatchlistEntryService {
             WatchlistSort sort,
             String direction,
             Integer pageNumber,
-            Integer pageSize);
+            Integer pageSize,
+            boolean includeGenreOptions);
 
     WatchlistEntryResponseDTO insertEntry(UUID userId, ContentType type, WatchlistEntryCreationDTO watchlistEntryCreationDTO);
 

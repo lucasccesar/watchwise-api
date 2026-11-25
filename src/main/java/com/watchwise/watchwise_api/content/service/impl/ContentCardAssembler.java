@@ -87,6 +87,22 @@ public class ContentCardAssembler {
         return assembleWithViewerStates(specs, context, fields).cardsByCoordinate();
     }
 
+    public Map<ContentCoordinate, List<String>> resolveGenres(
+            Collection<ContentCoordinate> coordinates, String language) {
+        List<ContentCardSpec> specs = coordinates.stream()
+                .map(coordinate -> new ContentCardSpec(coordinate, null, null, null, null))
+                .toList();
+        Map<ContentCoordinate, List<String>> genres = new LinkedHashMap<>();
+        metadataByCoordinate(specs, new ContentCardContext(language, null, null, null),
+                Set.of(ContentCardFieldSet.BASIC_METADATA), false)
+                .forEach((coordinate, card) -> {
+                    if (card.metadata() != null && card.metadata().genres() != null) {
+                        genres.put(coordinate, card.metadata().genres());
+                    }
+                });
+        return genres;
+    }
+
     public Map<ContentCoordinate, ContentCardDTO> assembleBasicMetadataWithKnownIds(
             Collection<ContentCardSpec> specs, ContentCardContext context,
             Map<ContentCoordinate, UUID> knownContentIds) {
