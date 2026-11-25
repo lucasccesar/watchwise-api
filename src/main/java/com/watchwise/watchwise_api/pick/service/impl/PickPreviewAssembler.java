@@ -129,27 +129,35 @@ public class PickPreviewAssembler {
         return loaded.picks().stream().collect(Collectors.toMap(Pick::getId, pick -> toPreview(pick, loaded)));
     }
 
-    public Map<UUID, PickPreviewDTO> assembleForFeed(Collection<Pick> picks, UUID viewerId) {
+    public Map<UUID, PickPreviewDTO> assembleForFeed(Collection<Pick> picks, UUID viewerId,
+            Map<UUID, List<PicksTemplateCategory>> categoriesByTemplate) {
         if (picks.isEmpty()) {
             return Map.of();
         }
         List<UUID> pickIds = picks.stream().map(Pick::getId).toList();
         Map<UUID, CommentPreviewData> comments = commentPreviewAssembler.assemblePickPreviews(pickIds, viewerId);
-        LoadedData loaded = load(picks, viewerId, comments);
+        LoadedData loaded = load(picks, viewerId, comments, Objects.requireNonNull(categoriesByTemplate));
         return loaded.picks().stream().collect(Collectors.toMap(Pick::getId, pick -> toPreview(pick, loaded)));
     }
 
     private LoadedData load(Collection<Pick> picks, UUID viewerId,
                             Map<UUID, CommentPreviewData> commentPreviews) {
+        return load(picks, viewerId, commentPreviews, null);
+    }
+
+    private LoadedData load(Collection<Pick> picks, UUID viewerId,
+            Map<UUID, CommentPreviewData> commentPreviews,
+            Map<UUID, List<PicksTemplateCategory>> preloadedCategories) {
         List<Pick> pickList = List.copyOf(picks);
         List<UUID> pickIds = pickList.stream().map(Pick::getId).toList();
         List<UUID> templateIds = pickList.stream().map(pick -> pick.getPicksTemplate().getId()).distinct().toList();
         Map<UUID, List<PickSelection>> selectionsByPickId = selectionRepository.findByPickIdIn(pickIds).stream()
                 .collect(Collectors.groupingBy(selection -> selection.getPick().getId()));
-        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = categoryRepository
-                .findByPicksTemplateIdInOrderByDisplayOrder(templateIds).stream()
-                .collect(Collectors.groupingBy(category -> category.getPicksTemplate().getId()));
-        List<UUID> fixedCategoryIds = categoriesByTemplateId.values().stream().flatMap(Collection::stream)
+        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = preloadedCategories != null
+                ? preloadedCategories : categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(templateIds)
+                        .stream().collect(Collectors.groupingBy(category -> category.getPicksTemplate().getId()));
+        List<UUID> fixedCategoryIds = templateIds.stream()
+                .flatMap(templateId -> categoriesByTemplateId.getOrDefault(templateId, List.of()).stream())
                 .filter(category -> category.getOptionMode() == PickCategoryOptionMode.FIXED)
                 .map(PicksTemplateCategory::getId).toList();
         Map<UUID, List<PicksTemplateOption>> optionsByCategory = fixedCategoryIds.isEmpty() ? Map.of()

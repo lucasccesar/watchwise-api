@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.repository;
 
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import jakarta.persistence.LockModeType;
@@ -13,10 +14,21 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
+
+    @Query("""
+        SELECT new com.watchwise.watchwise_api.user.dto.UserPreviewDTO(
+            u.id, u.username, u.name, u.profilePicture, u.isProfilePublic
+        )
+        FROM User u
+        WHERE u.id IN :ids
+        """)
+    List<UserPreviewDTO> findPreviewsByIdIn(@Param("ids") Collection<UUID> ids);
 
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("SELECT u FROM User u WHERE u.id = :id")

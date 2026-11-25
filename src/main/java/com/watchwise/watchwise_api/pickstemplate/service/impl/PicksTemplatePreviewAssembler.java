@@ -44,27 +44,35 @@ public class PicksTemplatePreviewAssembler {
     }
 
     public Map<UUID, PicksTemplatePreviewDTO> assemble(Collection<PicksTemplate> templates, UUID viewerId) {
-        return assemble(templates, viewerId, null);
-    }
-
-    public Map<UUID, PicksTemplatePreviewDTO> assembleForFeed(Collection<PicksTemplate> templates, UUID viewerId) {
         if (templates.isEmpty()) {
             return Map.of();
         }
         List<UUID> templateIds = templates.stream().map(PicksTemplate::getId).toList();
-        return assemble(templates, viewerId, commentPreviewAssembler.assemblePicksTemplatePreviews(templateIds, viewerId));
+        return assemble(templates, templateIds, viewerId, null, loadCategoriesByTemplate(templateIds));
     }
 
-    private Map<UUID, PicksTemplatePreviewDTO> assemble(Collection<PicksTemplate> templates, UUID viewerId,
-            Map<UUID, CommentPreviewData> commentPreviews) {
+    public Map<UUID, PicksTemplatePreviewDTO> assembleForFeed(Collection<PicksTemplate> templates, UUID viewerId,
+            Map<UUID, List<PicksTemplateCategory>> categoriesByTemplate) {
         if (templates.isEmpty()) {
             return Map.of();
         }
-
         List<UUID> templateIds = templates.stream().map(PicksTemplate::getId).toList();
-        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplate = categoryRepository
+        return assemble(templates, templateIds, viewerId,
+                commentPreviewAssembler.assemblePicksTemplatePreviews(templateIds, viewerId), categoriesByTemplate);
+    }
+
+    public Map<UUID, List<PicksTemplateCategory>> loadCategoriesByTemplate(Collection<UUID> templateIds) {
+        if (templateIds.isEmpty()) {
+            return Map.of();
+        }
+        return categoryRepository
                 .findByPicksTemplateIdInOrderByDisplayOrder(templateIds).stream()
                 .collect(Collectors.groupingBy(category -> category.getPicksTemplate().getId()));
+    }
+
+    private Map<UUID, PicksTemplatePreviewDTO> assemble(Collection<PicksTemplate> templates,
+            List<UUID> templateIds, UUID viewerId, Map<UUID, CommentPreviewData> commentPreviews,
+            Map<UUID, List<PicksTemplateCategory>> categoriesByTemplate) {
         Map<UUID, Long> visiblePickCounts = pickRepository.countVisibleByTemplateIds(viewerId, templateIds).stream()
                 .collect(Collectors.toMap(PickRepository.VisiblePickCount::getTemplateId, PickRepository.VisiblePickCount::getCount));
         Map<UUID, Long> commentsCounts = commentPreviews != null ? Map.of()

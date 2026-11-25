@@ -87,6 +87,24 @@ public class ContentCardAssembler {
         return assembleWithViewerStates(specs, context, fields).cardsByCoordinate();
     }
 
+    public Map<ContentCoordinate, ContentCardDTO> assembleBasicMetadataWithKnownIds(
+            Collection<ContentCardSpec> specs, ContentCardContext context,
+            Map<ContentCoordinate, UUID> knownContentIds) {
+        Set<ContentCardFieldSet> fields = Set.of(ContentCardFieldSet.BASIC_METADATA);
+        if (knownContentIds.isEmpty()) {
+            return assemble(specs, context, fields);
+        }
+        Map<ContentCoordinate, UUID> contentIds = new LinkedHashMap<>(knownContentIds);
+        List<ContentCoordinate> pending = distinctSpecs(specs).stream().map(ContentCardSpec::coordinate)
+                .filter(coordinate -> !knownContentIds.containsKey(coordinate)).toList();
+        if (!pending.isEmpty()) {
+            contentIds.putAll(contentViewerStateService.resolve(null, pending, Map.of())
+                    .existingContentIdsByCoordinate());
+        }
+        var resolution = new ContentViewerStateService.Resolution(Map.of(), contentIds);
+        return assembleWithViewerStates(specs, context, fields, true, resolution, null).cardsByCoordinate();
+    }
+
     AssemblyResult assembleWithViewerStates(
             Collection<ContentCardSpec> specs,
             ContentCardContext context,

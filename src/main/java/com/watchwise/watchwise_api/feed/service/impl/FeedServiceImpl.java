@@ -6,7 +6,6 @@ import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
-import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -48,6 +47,7 @@ import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pick.service.impl.PickPreviewAssembler;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
@@ -71,6 +71,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,7 +90,6 @@ public class FeedServiceImpl implements FeedService {
     private static final String CURSOR_SEPARATOR = "|";
     private static final String DEFAULT_LANGUAGE = "en-US";
     private static final String DEFAULT_REGION = "US";
-    private static final Set<ContentCardFieldSet> FEED_CARD_FIELDS = Set.of(ContentCardFieldSet.BASIC_METADATA);
 
     private final FollowerRepository followerRepository;
     private final DiaryEntryRepository diaryEntryRepository;
@@ -230,13 +231,16 @@ public class FeedServiceImpl implements FeedService {
         Map<UUID, CommentPreviewData> droppedCommentPreviews = droppedEntries.isEmpty() ? Map.of()
                 : commentPreviewAssembler.assembleDroppedEntryPreviews(
                         droppedEntries.stream().map(DroppedEntry::getId).toList(), userId);
-        Map<UUID, PickPreviewDTO> pickPreviews = pickEntries.isEmpty()
-                ? Map.of() : pickPreviewAssembler.assembleForFeed(pickEntries, userId);
         Map<UUID, PicksTemplate> templatesById = new LinkedHashMap<>();
         pickEntries.forEach(pick -> templatesById.put(pick.getPicksTemplate().getId(), pick.getPicksTemplate()));
         picksTemplateEntries.forEach(template -> templatesById.put(template.getId(), template));
+        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplate = templatesById.isEmpty()
+                ? Map.of() : picksTemplatePreviewAssembler.loadCategoriesByTemplate(templatesById.keySet());
+        Map<UUID, PickPreviewDTO> pickPreviews = pickEntries.isEmpty()
+                ? Map.of() : pickPreviewAssembler.assembleForFeed(pickEntries, userId, categoriesByTemplate);
         Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews = templatesById.isEmpty()
-                ? Map.of() : picksTemplatePreviewAssembler.assembleForFeed(templatesById.values(), userId);
+                ? Map.of() : picksTemplatePreviewAssembler.assembleForFeed(
+                        templatesById.values(), userId, categoriesByTemplate);
 
         List<FeedItemDTO> content = rawPage.candidates().stream()
                 .map(candidate -> toEnrichedFeedItem(candidate, reviewContext,
@@ -332,27 +336,18 @@ public class FeedServiceImpl implements FeedService {
         if (followedIds == null || followedIds.isEmpty() || userRepository == null) {
             return List.of();
         }
-        Map<UUID, User> usersById = new LinkedHashMap<>();
-        Iterable<User> users = userRepository.findAllById(followedIds);
-        if (users != null) {
-            for (User user : users) {
-                if (user != null && user.getId() != null) {
-                    usersById.putIfAbsent(user.getId(), user);
-                }
-            }
-        }
-        if (userMapper == null) {
-            return List.of();
+        Map<UUID, UserPreviewDTO> previewsById = new LinkedHashMap<>();
+        for (UserPreviewDTO preview : userRepository.findPreviewsByIdIn(followedIds)) {
+            previewsById.putIfAbsent(preview.id(), preview);
         }
         return followedIds.stream()
-                .map(usersById::get)
-                .filter(Objects::nonNull)
-                .map(userMapper::userToUserPreviewDto)
+                .map(previewsById::get)
                 .filter(Objects::nonNull)
                 .toList();
     }
 
-    private List<ContentCardSpec> cardSpecs(List<FeedItemDTO> items) {
+    private List<ContentCardSpec> cardSpecs(List<FeedItemDTO> items,
+            Map<ContentCoordinate, Set<UUID>> contentIdsByCoordinate) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
@@ -361,7 +356,7 @@ public class FeedServiceImpl implements FeedService {
             if (item == null) {
                 continue;
             }
-            addCardSpec(specsByCoordinate, item.content());
+            addCardSpec(specsByCoordinate, contentIdsByCoordinate, item.content());
             ContentCoordinate episodeSeriesCoordinate = episodeSeriesCoordinate(item);
             if (episodeSeriesCoordinate != null) {
                 specsByCoordinate.putIfAbsent(episodeSeriesCoordinate,
@@ -370,7 +365,7 @@ public class FeedServiceImpl implements FeedService {
             if (item.top5() != null) {
                 item.top5().stream()
                         .map(Top5EntryResponseDTO::content)
-                        .forEach(content -> addCardSpec(specsByCoordinate, content));
+                        .forEach(content -> addCardSpec(specsByCoordinate, contentIdsByCoordinate, content));
             }
             if (item.pick() != null) {
                 safeAnsweredCategories(item.pick()).stream()
@@ -378,15 +373,16 @@ public class FeedServiceImpl implements FeedService {
                         .map(answered -> answered.target())
                         .filter(Objects::nonNull)
                         .forEach(target -> {
-                            addCardSpec(specsByCoordinate, target.content());
-                            addCardSpec(specsByCoordinate, target.contextContent());
+                            addCardSpec(specsByCoordinate, contentIdsByCoordinate, target.content());
+                            addCardSpec(specsByCoordinate, contentIdsByCoordinate, target.contextContent());
                         });
             }
         }
         return List.copyOf(specsByCoordinate.values());
     }
 
-    private void addCardSpec(Map<ContentCoordinate, ContentCardSpec> specsByCoordinate, ContentRefDTO content) {
+    private void addCardSpec(Map<ContentCoordinate, ContentCardSpec> specsByCoordinate,
+            Map<ContentCoordinate, Set<UUID>> contentIdsByCoordinate, ContentRefDTO content) {
         if (content == null || content.type() == null) {
             return;
         }
@@ -394,10 +390,43 @@ public class FeedServiceImpl implements FeedService {
                 content.seasonNumber(), content.episodeNumber());
         specsByCoordinate.putIfAbsent(coordinate,
                 new ContentCardSpec(coordinate, null, null, null, content.runtimeMinutes()));
+        if (content.id() != null && hasCanonicalCoordinate(coordinate)) {
+            contentIdsByCoordinate.computeIfAbsent(coordinate, ignored -> new HashSet<>()).add(content.id());
+        }
+    }
+
+    private boolean hasCanonicalCoordinate(ContentCoordinate coordinate) {
+        return switch (coordinate.type()) {
+            case MOVIE, SERIES -> hasText(coordinate.tmdbId()) && coordinate.seriesTmdbId() == null
+                    && coordinate.seasonNumber() == null && coordinate.episodeNumber() == null;
+            case SEASON, EPISODE -> coordinate.tmdbId() == null && hasText(coordinate.seriesTmdbId())
+                    && coordinate.seasonNumber() != null
+                    && (coordinate.episodeNumber() != null) == (coordinate.type() == ContentType.EPISODE);
+        };
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private Map<ContentCoordinate, UUID> unambiguousContentIds(Map<ContentCoordinate, Set<UUID>> candidates) {
+        Map<UUID, Long> claimsById = candidates.values().stream().flatMap(Set::stream)
+                .collect(Collectors.groupingBy(id -> id, Collectors.counting()));
+        Map<ContentCoordinate, UUID> known = new HashMap<>();
+        candidates.forEach((coordinate, ids) -> {
+            if (ids.size() == 1) {
+                UUID id = ids.iterator().next();
+                if (claimsById.get(id) == 1) {
+                    known.put(coordinate, id);
+                }
+            }
+        });
+        return known;
     }
 
     private Map<ContentCoordinate, ContentCardDTO> assembleCards(List<FeedItemDTO> items, UUID viewerId) {
-        List<ContentCardSpec> specs = cardSpecs(items);
+        Map<ContentCoordinate, Set<UUID>> contentIdsByCoordinate = new HashMap<>();
+        List<ContentCardSpec> specs = cardSpecs(items, contentIdsByCoordinate);
         if (specs.isEmpty() || contentCardAssembler == null) {
             return Map.of();
         }
@@ -406,8 +435,9 @@ public class FeedServiceImpl implements FeedService {
                 ? DEFAULT_LANGUAGE : viewer.getPreferredLanguage();
         String region = viewer == null || viewer.getPreferredRegion() == null
                 ? DEFAULT_REGION : viewer.getPreferredRegion();
-        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
-                specs, new ContentCardContext(language, region, null, null), FEED_CARD_FIELDS);
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assembleBasicMetadataWithKnownIds(
+                specs, new ContentCardContext(language, region, null, null),
+                unambiguousContentIds(contentIdsByCoordinate));
         return cards == null ? Map.of() : cards;
     }
 
