@@ -12,6 +12,10 @@ target/
 /.m2/
 /.obsidian/
 /.testcontainers.properties
+/.local/
+/benchmark-fixtures/.local/
+/benchmark-fixtures/.env
+/benchmark-fixtures/.env.local
 graphify-out/
 /docs/
 /AGENTS.md

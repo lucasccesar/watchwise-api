@@ -19,6 +19,8 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<watchwise.build.directory>${project.basedir}/target</watchwise.build.directory>
+		<benchmark.observation.exclude>**/common/performance/**</benchmark.observation.exclude>
 		<org.mapstruct.version>1.6.3</org.mapstruct.version>
 		<io.jsonwebtoken.version>0.12.6</io.jsonwebtoken.version>
 		<com.google.api-client.version>2.9.0</com.google.api-client.version>
@@ -225,6 +227,7 @@
 	</dependencies>
 
 	<build>
+		<directory>${watchwise.build.directory}</directory>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
@@ -241,8 +244,24 @@
 
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<excludes>
+						<exclude>${benchmark.observation.exclude}</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
 				<configuration>
+					<excludes>
+						<exclude>${benchmark.observation.exclude}</exclude>
+					</excludes>
+					<testExcludes>
+						<testExclude>${benchmark.observation.exclude}</testExclude>
+					</testExcludes>
 					<source>${java.version}</source>
 					<target>${java.version}</target>
 					<annotationProcessorPaths>
@@ -279,4 +298,13 @@
 			</plugin>
 		</plugins>
 	</build>
+	<profiles>
+		<profile>
+			<id>benchmark-observation</id>
+			<properties>
+				<watchwise.build.directory>${project.basedir}/target/benchmark-instrumented</watchwise.build.directory>
+				<benchmark.observation.exclude>**/common/performance/.none</benchmark.observation.exclude>
+			</properties>
+		</profile>
+	</profiles>
 </project>
