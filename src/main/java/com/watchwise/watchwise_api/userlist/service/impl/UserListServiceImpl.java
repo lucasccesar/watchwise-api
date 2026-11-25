@@ -668,11 +668,15 @@ public class UserListServiceImpl implements UserListService {
     @Transactional
     public void deleteUserList(UUID userId, UUID listId) {
         advisoryLock.lock(UserListStructureLock.IDENTITY);
-        UserList userList = lockListAndInboundReferencesForDeletion(userId, listId);
+        LockedListDeletion deletion = lockListAndInboundReferencesForDeletion(userId, listId);
+        UserList userList = deletion.list();
         Integer deletedRank = userList.getRank();
 
         importLedger.markDeletedByTarget(userId, "USER_LIST", listId);
         userListItemService.removeItemsReferencingChildLists(List.of(listId));
+        if (!deletion.ownedItems().isEmpty()) {
+            userListItemRepository.deleteAll(deletion.ownedItems());
+        }
         userListRepository.delete(userList);
         userListRepository.flush();
 
@@ -689,7 +693,7 @@ public class UserListServiceImpl implements UserListService {
         }
     }
 
-    private UserList lockListAndInboundReferencesForDeletion(UUID userId, UUID listId) {
+    private LockedListDeletion lockListAndInboundReferencesForDeletion(UUID userId, UUID listId) {
         findOwnedList(userId, listId);
         Set<UUID> parentListIds = Set.copyOf(
                 userListItemRepository.findDistinctParentListIdsByChildListIdIn(List.of(listId)));
@@ -728,11 +732,18 @@ public class UserListServiceImpl implements UserListService {
                 lockedTarget = affectedList;
             }
         }
+        List<UserListItem> targetItems = List.of();
         for (UUID affectedListId : listIdsToLock) {
-            userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(affectedListId);
+            List<UserListItem> items = userListItemRepository.findByUserListIdForUpdateOrderByPositionAsc(affectedListId);
+            if (affectedListId.equals(listId)) {
+                targetItems = items;
+            }
         }
 
-        return Objects.requireNonNull(lockedTarget);
+        return new LockedListDeletion(Objects.requireNonNull(lockedTarget), targetItems);
+    }
+
+    private record LockedListDeletion(UserList list, List<UserListItem> ownedItems) {
     }
 
     private void lockOwners(Collection<UUID> ownerIds) {

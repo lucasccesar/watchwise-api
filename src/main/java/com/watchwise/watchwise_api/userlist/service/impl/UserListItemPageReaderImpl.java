@@ -110,7 +110,7 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
 
     @Override
     public UserListItemPage read(UserListItemPageRequest request) {
-        UserList userList = userListRepository.findById(request.listId())
+        UserList userList = userListRepository.findByIdWithUser(request.listId())
                 .orElseThrow(() -> new NotFoundException("List not found"));
         assertListIsVisibleTo(request.viewerId(), userList);
 
@@ -140,8 +140,13 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
                         .filter(item -> item.content() != null || item.childList() != null)
                         .toList()
                 : allItems;
-        List<UserListItemResponseDTO> filtered = filterAndSortItems(
-                visibleItems, request, userList.getUser().getId(), canViewOwnerRatings);
+        UUID ownerId = userList.getUser().getId();
+        boolean enrichRatingsOnPage = request.mode() == UserListItemPageMode.VISUAL && !isRatingSort(request.sortBy());
+        List<UserListItemResponseDTO> filtered = filterItems(visibleItems, request);
+        if (!enrichRatingsOnPage) {
+            filtered = enrichRatingAverages(filtered, ownerId, canViewOwnerRatings);
+        }
+        List<UserListItemResponseDTO> sorted = sortItems(filtered, request);
         int maxPageSize = itemScope == UserListItemScope.EPISODE ? 24 : 30;
         PageRequest pageRequest = pageRequestFactory.build(request.page(), request.size(), maxPageSize);
         long offset = pageRequest.getOffset();
@@ -150,7 +155,10 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
         int totalPages = filtered.isEmpty()
                 ? 0
                 : (int) Math.ceil((double) filtered.size() / pageRequest.getPageSize());
-        List<UserListItemResponseDTO> pageItems = filtered.subList(fromIndex, toIndex);
+        List<UserListItemResponseDTO> pageItems = sorted.subList(fromIndex, toIndex);
+        if (enrichRatingsOnPage) {
+            pageItems = enrichRatingAverages(pageItems, ownerId, canViewOwnerRatings);
+        }
         if (request.mode() != UserListItemPageMode.VISUAL) {
             pageItems = enrichTmdbVoteAverages(pageItems);
         }
@@ -199,9 +207,8 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
                 content.seasonNumber(), content.episodeNumber());
     }
 
-    private List<UserListItemResponseDTO> filterAndSortItems(
-            List<UserListItemResponseDTO> items, UserListItemPageRequest request, UUID ownerId,
-            boolean includeOwnerRatings) {
+    private List<UserListItemResponseDTO> filterItems(
+            List<UserListItemResponseDTO> items, UserListItemPageRequest request) {
         List<UserListItemResponseDTO> filtered = items.stream()
                 .filter(item -> request.type() == null
                         || item.content() != null && item.content().type() == request.type())
@@ -219,9 +226,13 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
                     .toList();
         }
 
-        filtered = enrichRatingAverages(filtered, ownerId, includeOwnerRatings);
+        return filtered;
+    }
+
+    private List<UserListItemResponseDTO> sortItems(
+            List<UserListItemResponseDTO> items, UserListItemPageRequest request) {
         if (request.sortBy() == null) {
-            return filtered;
+            return items;
         }
 
         Comparator<UserListItemResponseDTO> comparator = switch (request.sortBy()) {
@@ -237,7 +248,7 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
         if ("desc".equals(request.sortDirection()) && !isRatingSort(request.sortBy())) {
             comparator = comparator.reversed();
         }
-        return filtered.stream().sorted(comparator).toList();
+        return items.stream().sorted(comparator).toList();
     }
 
     private Map<String, List<String>> loadSeriesGenres(List<UserListItemResponseDTO> items, String genre) {

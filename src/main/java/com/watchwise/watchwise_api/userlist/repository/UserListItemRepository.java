@@ -188,6 +188,8 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     @Query("""
             SELECT uli FROM UserListItem uli
+            JOIN FETCH uli.userList ownerList
+            JOIN FETCH ownerList.user
             LEFT JOIN FETCH uli.content
             LEFT JOIN FETCH uli.childList cl
             LEFT JOIN FETCH cl.user
