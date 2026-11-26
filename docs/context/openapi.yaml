@@ -871,6 +871,26 @@ paths:
         "401": { description: Não autenticado }
         "404": { description: Usuário autenticado não encontrado }
 
+  /users/me/settings/form:
+    get:
+      tags: [Settings]
+      summary: Obter os dados do formulário de configurações do usuário autenticado
+      description: Leitura exclusiva da própria conta, sem contagens ou prévias dos painéis de privacidade.
+      responses:
+        "200":
+          description: Dados do formulário do próprio usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profile, contentPreferences, account]
+                properties:
+                  profile: { $ref: "#/components/schemas/SettingsProfileDTO" }
+                  contentPreferences: { $ref: "#/components/schemas/SettingsContentPreferencesDTO" }
+                  account: { $ref: "#/components/schemas/SettingsAccountDTO" }
+        "401": { description: Não autenticado }
+        "404": { description: Usuário autenticado não encontrado }
+
   /users/me/banner:
     delete:
       tags: [Users]

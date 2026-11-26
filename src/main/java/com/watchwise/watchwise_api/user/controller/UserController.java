@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.AttemptLockout;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.settings.dto.SettingsFormDTO;
 import com.watchwise.watchwise_api.settings.dto.SettingsViewDTO;
 import com.watchwise.watchwise_api.settings.service.SettingsViewService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
@@ -98,6 +99,11 @@ public class UserController {
     @GetMapping("/me/settings")
     public ResponseEntity<SettingsViewDTO> getSettings() {
         return ResponseEntity.ok(settingsViewService.getSettings(getCurrentUserId()));
+    }
+
+    @GetMapping("/me/settings/form")
+    public ResponseEntity<SettingsFormDTO> getSettingsForm() {
+        return ResponseEntity.ok(settingsViewService.getSettingsForm(getCurrentUserId()));
     }
 
     @PatchMapping("/me")

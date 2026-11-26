@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -115,6 +116,30 @@ class SettingsViewServiceImplTest {
         assertFields(SettingsContentPreferencesDTO.class, "preferredLanguage", "preferredRegion");
         assertFields(SettingsAccountDTO.class, "email");
         assertFields(SettingsUserPreviewDTO.class, "id", "username", "name", "profilePicture");
+    }
+
+    @Test
+    @DisplayName("[getSettingsForm] Should Return Editable Fields Without Social Reads - When Owner Exists")
+    void shouldReturnEditableFieldsWithoutSocialReadsWhenOwnerExists() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner(false)));
+
+        SettingsFormDTO result = service.getSettingsForm(ownerId);
+
+        assertThat(result.profile()).isEqualTo(new SettingsProfileDTO(ownerId, "owner", "Owner Name", "Bio",
+                "https://example.com/avatar", "https://example.com/banner", false));
+        assertThat(result.account()).isEqualTo(new SettingsAccountDTO("owner@email.com"));
+        assertThat(result.contentPreferences()).isEqualTo(new SettingsContentPreferencesDTO("pt-BR", "BR"));
+        assertFields(SettingsFormDTO.class, "profile", "contentPreferences", "account");
+        verifyNoInteractions(followerRepository, userBlockRepository);
+    }
+
+    @Test
+    @DisplayName("[getSettingsForm] Should Reject Missing User Without Social Reads - When Owner Is Missing")
+    void shouldRejectMissingUserWithoutSocialReadsWhenOwnerIsMissing() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getSettingsForm(ownerId)).isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(followerRepository, userBlockRepository);
     }
 
     private void assertFields(Class<?> type, String... names) {

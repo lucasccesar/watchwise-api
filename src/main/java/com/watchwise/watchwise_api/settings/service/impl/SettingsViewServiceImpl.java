@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.settings.dto.SettingsContentPreferencesDTO;
 import com.watchwise.watchwise_api.settings.dto.SettingsPrivacyDTO;
 import com.watchwise.watchwise_api.settings.dto.SettingsProfileDTO;
 import com.watchwise.watchwise_api.settings.dto.SettingsUserPreviewDTO;
+import com.watchwise.watchwise_api.settings.dto.SettingsFormDTO;
 import com.watchwise.watchwise_api.settings.dto.SettingsViewDTO;
 import com.watchwise.watchwise_api.settings.service.SettingsViewService;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -35,8 +36,8 @@ public class SettingsViewServiceImpl implements SettingsViewService {
     @Override
     @Transactional(readOnly = true)
     public SettingsViewDTO getSettings(UUID currentUserId) {
-        User user = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new NotFoundException("User not found"));
+        User user = findUser(currentUserId);
+        SettingsFormDTO form = toForm(user);
         PageRequest previewPage = PageRequest.of(0, 10,
                 Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")));
 
@@ -56,10 +57,28 @@ public class SettingsViewServiceImpl implements SettingsViewService {
                 .map(block -> preview(block.getBlocked())).toList();
 
         return new SettingsViewDTO(
-                new SettingsProfileDTO(user.getId(), user.getUsername(), user.getName(), user.getDescription(),
-                        user.getProfilePicture(), user.getBanner(), user.getIsProfilePublic()),
+                form.profile(),
                 new SettingsPrivacyDTO(followersCount, followingCount, pendingCount, pendingRequests,
                         blocks.getTotalElements(), blockedUsers),
+                form.contentPreferences(),
+                form.account());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SettingsFormDTO getSettingsForm(UUID currentUserId) {
+        return toForm(findUser(currentUserId));
+    }
+
+    private User findUser(UUID currentUserId) {
+        return userRepository.findById(currentUserId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+    }
+
+    private SettingsFormDTO toForm(User user) {
+        return new SettingsFormDTO(
+                new SettingsProfileDTO(user.getId(), user.getUsername(), user.getName(), user.getDescription(),
+                        user.getProfilePicture(), user.getBanner(), user.getIsProfilePublic()),
                 new SettingsContentPreferencesDTO(user.getPreferredLanguage(), user.getPreferredRegion()),
                 new SettingsAccountDTO(user.getEmail()));
     }

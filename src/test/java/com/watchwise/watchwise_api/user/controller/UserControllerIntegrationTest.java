@@ -49,6 +49,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.sql.Connection;
@@ -74,17 +76,40 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Testcontainers
 class UserControllerIntegrationTest {
+    private static final String DATABASE = "ww_settings_7p4";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withImagePullPolicy(image -> false);
+            .withImagePullPolicy(image -> false)
+            .withDatabaseName(DATABASE);
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        String host = postgres.getHost();
+        int port = postgres.getMappedPort(5432);
+        String url = postgres.getJdbcUrl();
+        if (!List.of("localhost", "127.0.0.1").contains(host) || port == 15432 || port == 15433
+                || !url.split("[?]", 2)[0].equals("jdbc:postgresql://" + host + ":" + port + "/" + DATABASE)) {
+            throw new IllegalStateException("Unexpected settings test datasource");
+        }
+        try (var connection = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement();
+             var result = statement.executeQuery("SELECT current_database(), current_setting('server_version_num')")) {
+            if (!result.next() || !DATABASE.equals(result.getString(1)) || result.getInt(2) / 10000 != 16) {
+                throw new IllegalStateException("Unexpected settings test database identity");
+            }
+            System.out.println("Verified isolated PostgreSQL datasource before Spring: " + url);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to verify isolated settings test datasource", error);
+        }
+        registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.docker.compose.enabled", () -> "false");
+        registry.add("spring.flyway.url", () -> url);
+        registry.add("spring.flyway.user", postgres::getUsername);
+        registry.add("spring.flyway.password", postgres::getPassword);
+        registry.add("spring.docker.compose.enabled", () -> false);
+        registry.add("app.tmdb.base-url", () -> "http://127.0.0.1:1");
     }
 
     @Autowired
@@ -1431,6 +1456,19 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$..genreCountsMovies").isEmpty())
                 .andExpect(jsonPath("$..totalMinutesWatchedMovies").isEmpty());
 
+        mockMvc.perform(get("/users/me/settings/form").cookie(token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profile.id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.privacy").doesNotExist());
+        mockMvc.perform(get("/users/me/follow-requests").cookie(token).param("page", "2").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(11))
+                .andExpect(jsonPath("$.content[0].username").value("requester0"));
+        mockMvc.perform(get("/users/me/blocked").cookie(token).param("page", "2").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(11))
+                .andExpect(jsonPath("$.content[0].user.username").value("blocked0"));
+
         owner.setIsProfilePublic(true);
         userRepository.saveAndFlush(owner);
         mockMvc.perform(get("/users/me/settings").cookie(token))
@@ -1458,6 +1496,39 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get("/users/me/settings").cookie(second))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.account.email").value("settingssecond@email.com"));
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("[getSettingsForm] Should Preserve Form Fields And Preferences - When Authenticated")
+    void shouldPreserveSettingsFormFieldsAndPreferencesWhenAuthenticated() throws Exception {
+        mockMvc.perform(get("/users/me/settings/form")).andExpect(status().isUnauthorized());
+        MvcResult login = registerConfirmAndLogin("settingsformowner", "settingsformowner@email.com");
+        Cookie token = login.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrf = login.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        Cookie other = registerAndGetAccessToken("settingsother", "settingsother@email.com");
+        mockMvc.perform(patchMeRequest(token, csrf,
+                        """
+                        {"preferredLanguage":"pt-BR","preferredRegion":"BR","isProfilePublic":false}
+                        """))
+                .andExpect(status().isOk());
+
+        String form = mockMvc.perform(get("/users/me/settings/form").cookie(token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profile.username").value("settingsformowner"))
+                .andExpect(jsonPath("$.profile.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.contentPreferences.preferredLanguage").value("pt-BR"))
+                .andExpect(jsonPath("$.contentPreferences.preferredRegion").value("BR"))
+                .andExpect(jsonPath("$.account.email").value("settingsformowner@email.com"))
+                .andExpect(jsonPath("$.privacy").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+        mockMvc.perform(get("/users/me/settings").cookie(token))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .json(form, org.springframework.test.json.JsonCompareMode.LENIENT))
+                .andExpect(jsonPath("$.privacy.blockedUsersCount").value(0));
+        mockMvc.perform(get("/users/me/settings/form").cookie(other))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.account.email").value("settingsother@email.com"));
     }
 
     private void seedMovieWatch(User user, String tmdbId, int runtimeMinutes, List<String> genres, LocalDate watchedDate) {
