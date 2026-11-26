@@ -26,10 +26,13 @@ import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -41,6 +44,8 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -291,11 +297,11 @@ class CalendarServiceImplTest {
                 List.of(), CalendarAssemblyInput.Completeness.empty(), Set.of(key));
         when(interestReader.read(USER_ID)).thenReturn(interest);
         when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
-        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
 
         assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
 
         verifyNoInteractions(scheduleProvider, synchronizer);
+        verifyNoInteractions(watchedReader);
     }
 
     @Test
@@ -306,11 +312,11 @@ class CalendarServiceImplTest {
                 List.of(), new CalendarAssemblyInput.Completeness(Set.of(), Set.of(key)));
         when(interestReader.read(USER_ID)).thenReturn(interest);
         when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
-        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
 
         assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
 
         verifyNoInteractions(scheduleProvider, synchronizer);
+        verifyNoInteractions(watchedReader);
     }
 
     @Test
@@ -321,13 +327,13 @@ class CalendarServiceImplTest {
         when(interestReader.read(USER_ID)).thenReturn(interest);
         when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(empty);
         when(scheduleProvider.loadMovie("550", "BR", "pt-BR")).thenReturn(new CalendarScheduleLookup.NotFound());
-        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
 
         assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
 
         when(scheduleProvider.loadMovie("550", "BR", "pt-BR")).thenReturn(new CalendarScheduleLookup.Unavailable());
         assertThatThrownBy(() -> service().getMonth(USER_ID, YearMonth.of(2026, 9)))
                 .isInstanceOf(TmdbUnavailableException.class);
+        verifyNoInteractions(watchedReader);
     }
 
     @Test
@@ -417,6 +423,105 @@ class CalendarServiceImplTest {
         assertThat(response.events().get(1).releaseContext())
                 .isEqualTo(new CalendarReleaseContext(null, "AMC"));
         assertThat(response.events().get(1).sources()).containsExactly(CalendarSource.IN_PROGRESS);
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(ints = {24, 276})
+    void readsOnlyMonthlyWatchedCoordinatesWithoutChangingGroupingOrOrdering(int candidateCount) {
+        String seriesId = "1396";
+        var sources = new LinkedHashMap<CalendarScheduleKey, Set<CalendarSource>>();
+        var snapshots = new ArrayList<CalendarScheduleSnapshot>();
+        sources.put(key(ContentType.SERIES, seriesId), Set.of(CalendarSource.IN_PROGRESS));
+        sources.put(key(ContentType.SERIES, "1397"), Set.of(CalendarSource.WATCHLIST));
+        snapshots.add(episode(seriesId, 1, 1, LocalDate.of(2026, 12, 31)));
+        snapshots.add(episode(seriesId, 1, 2, LocalDate.of(2027, 1, 1)));
+        snapshots.add(episode(seriesId, 2, 1, LocalDate.of(2026, 12, 31)));
+        snapshots.add(episode(seriesId, 2, 2, LocalDate.of(2026, 12, 31)));
+        snapshots.add(episode("1397", 1, 1, LocalDate.of(2026, 12, 31)));
+        snapshots.add(episode("1397", 1, 2, LocalDate.of(2026, 12, 31)));
+        for (int i = 0; i < candidateCount - 2; i++) {
+            String id = String.valueOf(500 + i);
+            sources.put(key(ContentType.MOVIE, id), Set.of(CalendarSource.WATCHLIST));
+            snapshots.add(movie(id, i == 0 ? LocalDate.of(2026, 12, 31) : LocalDate.of(2026, 11, 30)));
+        }
+        CalendarInterest interest = interest(sources);
+        var completeness = new CalendarAssemblyInput.Completeness(
+                Set.of(new CalendarAssemblyInput.CompleteSeasonKey(seriesId, 1),
+                        new CalendarAssemblyInput.CompleteSeasonKey(seriesId, 2)),
+                Set.of(key(ContentType.SERIES, seriesId), key(ContentType.SERIES, "1397")));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleReadModel(snapshots, completeness));
+        when(watchedReader.readWatchedKeys(eq(USER_ID), any())).thenReturn(Set.of(
+                WatchedCalendarKey.episode(seriesId, 2, 1)));
+
+        CalendarResponseDTO response = service().getMonth(USER_ID, YearMonth.of(2026, 12));
+
+        assertThat(response.events()).extracting(CalendarEventDTO::eventType)
+                .containsExactly(CalendarEventType.MOVIE, CalendarEventType.SERIES,
+                        CalendarEventType.SEASON, CalendarEventType.EPISODE);
+        assertThat(response.events().get(2).watchStatus())
+                .isEqualTo(WatchStatus.PARTIALLY_WATCHED);
+        verify(watchedReader).readWatchedKeys(USER_ID, Set.of(WatchedCalendarKey.movie("500"),
+                WatchedCalendarKey.episode(seriesId, 1, 1), WatchedCalendarKey.episode(seriesId, 2, 1),
+                WatchedCalendarKey.episode(seriesId, 2, 2), WatchedCalendarKey.episode("1397", 1, 1),
+                WatchedCalendarKey.episode("1397", 1, 2)));
+        verifyNoInteractions(scheduleProvider, synchronizer);
+
+        CalendarResponseDTO january = service().getMonth(USER_ID, YearMonth.of(2027, 1));
+        assertThat(january.events()).singleElement().satisfies(event -> {
+            assertThat(event.date()).isEqualTo(LocalDate.of(2027, 1, 1));
+            assertThat(event.eventType()).isEqualTo(CalendarEventType.EPISODE);
+        });
+        verify(watchedReader).readWatchedKeys(USER_ID, Set.of(WatchedCalendarKey.episode(seriesId, 1, 2)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void reconcilesAbsentOrDueMovieOutsideTheRequestedMonth(boolean hasDueSnapshot) {
+        CalendarScheduleKey key = key(ContentType.MOVIE, "550");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        LocalDate release = LocalDate.of(2026, 8, 12);
+        List<CalendarScheduleSnapshot> before = hasDueSnapshot
+                ? List.of(movie("550", release).toBuilder()
+                        .nextCheckAt(LocalDateTime.of(2026, 9, 11, 10, 0)).build())
+                : List.of();
+        var initial = new CalendarScheduleReadModel(before, CalendarAssemblyInput.Completeness.empty());
+        var refreshed = new CalendarScheduleReadModel(
+                List.of(movie("550", release)), CalendarAssemblyInput.Completeness.empty());
+        var batch = CalendarScheduleBatch.movie(key, TmdbLookupOrigin.REMOTE,
+                new CalendarMovieSchedule("550", "BR", "pt-BR", release, "Movie 550", null, null, null));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(initial, refreshed);
+        when(scheduleProvider.loadMovie("550", "BR", "pt-BR")).thenReturn(new CalendarScheduleLookup.Found(batch));
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
+
+        var order = inOrder(snapshotStore, scheduleProvider, synchronizer);
+        order.verify(snapshotStore).findForInterest(interest, "BR", "pt-BR");
+        order.verify(scheduleProvider).loadMovie("550", "BR", "pt-BR");
+        order.verify(synchronizer).synchronize(batch, CLOCK.instant());
+        order.verify(snapshotStore).findForInterest(interest, "BR", "pt-BR");
+        verifyNoInteractions(watchedReader);
+    }
+
+    @Test
+    void stillResolvesIncompleteSeriesWithoutKnownEventsInTheMonth() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        var initial = new CalendarScheduleReadModel(
+                List.of(episode("1396", 1, 1, LocalDate.of(2026, 8, 12))),
+                CalendarAssemblyInput.Completeness.empty());
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(initial);
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.Unavailable());
+
+        assertThatThrownBy(() -> service().getMonth(USER_ID, YearMonth.of(2026, 9)))
+                .isInstanceOf(TmdbUnavailableException.class);
+        verify(scheduleProvider).loadSeries("1396", "BR", "pt-BR");
+        verifyNoInteractions(watchedReader, synchronizer);
     }
 
     private CalendarService service() {

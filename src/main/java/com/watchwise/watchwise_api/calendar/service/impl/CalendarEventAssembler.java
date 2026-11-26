@@ -20,10 +20,12 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +40,38 @@ public class CalendarEventAssembler {
             .thenComparing(AssembledEvent::externalId)
             .thenComparingInt(AssembledEvent::seasonNumber)
             .thenComparingInt(AssembledEvent::episodeNumber);
+
+    MonthlySchedule selectMonth(
+            YearMonth month,
+            List<CalendarScheduleSnapshot> snapshots,
+            String region,
+            String language,
+            CalendarAssemblyInput.Completeness completeness) {
+        var completeSeries = new HashSet<>(completeness.completeSeriesKeys());
+        var completeSeasons = new HashSet<>(completeness.completeSeasonKeys());
+        var monthlySnapshots = new ArrayList<CalendarScheduleSnapshot>();
+        for (CalendarScheduleSnapshot snapshot : snapshots) {
+            if (!hasValidCoordinates(snapshot) || !hasLocale(snapshot, region, language)) {
+                continue;
+            }
+            LocalDate date = snapshot.getReleaseDate();
+            if (date != null && date.getYear() == month.getYear() && date.getMonth() == month.getMonth()) {
+                monthlySnapshots.add(snapshot);
+            } else if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.EPISODE) {
+                // A group with a missing date or a date outside the month cannot group the retained episodes.
+                String seriesId = snapshot.getSeriesTmdbId();
+                completeSeries.remove(new CalendarScheduleKey(ContentType.SERIES, seriesId, language, region));
+                completeSeasons.remove(new CompleteSeasonKey(seriesId, snapshot.getSeasonNumber()));
+            }
+        }
+        return new MonthlySchedule(monthlySnapshots,
+                new CalendarAssemblyInput.Completeness(completeSeasons, completeSeries));
+    }
+
+    record MonthlySchedule(
+            List<CalendarScheduleSnapshot> snapshots,
+            CalendarAssemblyInput.Completeness completeness) {
+    }
 
     public List<CalendarEventDTO> assemble(CalendarAssemblyInput input) {
         return assembleEvents(input).stream()
@@ -64,7 +98,7 @@ public class CalendarEventAssembler {
 
         List<CalendarScheduleSnapshot> validSnapshots = input.snapshots().stream()
                 .filter(this::hasValidCoordinates)
-                .filter(snapshot -> hasInputLocale(snapshot, input))
+                .filter(snapshot -> hasLocale(snapshot, input.region(), input.preferredLanguage()))
                 .toList();
         List<AssembledEvent> events = new ArrayList<>();
 
@@ -209,9 +243,8 @@ public class CalendarEventAssembler {
                 && snapshot.getEpisodeNumber() > 0;
     }
 
-    private boolean hasInputLocale(CalendarScheduleSnapshot snapshot, CalendarAssemblyInput input) {
-        return input.region().equals(snapshot.getRegion())
-                && input.preferredLanguage().equals(snapshot.getLanguage());
+    private boolean hasLocale(CalendarScheduleSnapshot snapshot, String region, String language) {
+        return region.equals(snapshot.getRegion()) && language.equals(snapshot.getLanguage());
     }
 
     private boolean isCompleteSeasonWithOneDate(

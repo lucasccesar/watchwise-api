@@ -36,6 +36,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.net.URI;
 import java.time.YearMonth;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -64,7 +65,14 @@ class CalendarControllerIntegrationTest {
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        String jdbcUrl = postgres.getJdbcUrl();
+        URI datasource = URI.create(jdbcUrl.substring("jdbc:".length()));
+        assertThat(postgres.isRunning()).isTrue();
+        assertThat(datasource.getHost()).isEqualTo(postgres.getHost());
+        assertThat(datasource.getPort()).isEqualTo(postgres.getMappedPort(5432))
+                .isPositive().isNotIn(15432, 15433);
+        assertThat(datasource.getPath()).isEqualTo("/" + postgres.getDatabaseName());
+        registry.add("spring.datasource.url", () -> jdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.docker.compose.enabled", () -> "false");

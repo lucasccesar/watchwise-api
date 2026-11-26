@@ -94,7 +94,11 @@ public class CalendarServiceImpl implements CalendarService {
     @Override
     public CalendarResponseDTO getMonth(UUID userId, YearMonth month) {
         CalendarReadResult read = readCalendar(userId);
-        List<CalendarEventDTO> events = eventAssembler.assemble(assemblyInput(read, month));
+        var monthly = eventAssembler.selectMonth(month, read.snapshots(), read.interest().preferredRegion(),
+                read.interest().preferredLanguage(), read.completeness());
+        List<CalendarEventDTO> events = eventAssembler.assemble(
+                assemblyInput(read, month, monthly.snapshots(), monthly.completeness(),
+                        readWatchedKeys(userId, monthly.snapshots())));
         return new CalendarResponseDTO(
                 month,
                 read.interest().preferredRegion(),
@@ -150,9 +154,11 @@ public class CalendarServiceImpl implements CalendarService {
             return List.of();
         }
         CalendarReadResult read = readCalendar(userId);
+        Set<WatchedCalendarKey> watchedKeys = readWatchedKeys(userId, read.snapshots());
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.systemDefault()));
         return eventAssembler.assembleUpcoming(
-                assemblyInput(read, YearMonth.from(today)), today, limit);
+                assemblyInput(read, YearMonth.from(today), read.snapshots(), read.completeness(), watchedKeys),
+                today, limit);
     }
 
     private CalendarReadResult readCalendar(UUID userId) {
@@ -161,7 +167,7 @@ public class CalendarServiceImpl implements CalendarService {
         String language = interest.preferredLanguage();
         Set<CalendarScheduleKey> activeKeys = interest.sourcesByKey().keySet();
         if (activeKeys.isEmpty()) {
-            return new CalendarReadResult(interest, List.of(), Map.of(), Set.of(),
+            return new CalendarReadResult(interest, List.of(), Map.of(),
                     CalendarAssemblyInput.Completeness.empty());
         }
 
@@ -187,8 +193,6 @@ public class CalendarServiceImpl implements CalendarService {
         List<CalendarScheduleSnapshot> snapshots = mergeSnapshots(readModel.snapshots(), transientSnapshots).stream()
                 .filter(snapshot -> !omittedKeys.contains(snapshotKey(snapshot)))
                 .toList();
-        Set<WatchedCalendarKey> requestedWatchedKeys = watchedKeysFor(snapshots);
-        Set<WatchedCalendarKey> watchedKeys = watchedContentReader.readWatchedKeys(userId, requestedWatchedKeys);
         Map<CalendarScheduleKey, Set<CalendarSource>> sources = new LinkedHashMap<>();
         interest.sourcesByKey().forEach((key, value) -> {
             if (!omittedKeys.contains(key)) {
@@ -201,27 +205,35 @@ public class CalendarServiceImpl implements CalendarService {
                 interest,
                 snapshots,
                 sources,
-                watchedKeys,
                 completeness);
     }
 
-    private CalendarAssemblyInput assemblyInput(CalendarReadResult read, YearMonth month) {
+    private Set<WatchedCalendarKey> readWatchedKeys(UUID userId, List<CalendarScheduleSnapshot> snapshots) {
+        Set<WatchedCalendarKey> requestedWatchedKeys = watchedKeysFor(snapshots);
+        return requestedWatchedKeys.isEmpty() ? Set.of() : watchedContentReader.readWatchedKeys(userId, requestedWatchedKeys);
+    }
+
+    private CalendarAssemblyInput assemblyInput(
+            CalendarReadResult read,
+            YearMonth month,
+            List<CalendarScheduleSnapshot> snapshots,
+            CalendarAssemblyInput.Completeness completeness,
+            Set<WatchedCalendarKey> watchedKeys) {
         return new CalendarAssemblyInput(
                 month,
                 clock,
-                read.snapshots(),
+                snapshots,
                 read.sourcesByKey(),
-                read.watchedKeys(),
+                watchedKeys,
                 read.interest().preferredRegion(),
                 read.interest().preferredLanguage(),
-                read.completeness());
+                completeness);
     }
 
     private record CalendarReadResult(
             CalendarInterest interest,
             List<CalendarScheduleSnapshot> snapshots,
             Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey,
-            Set<WatchedCalendarKey> watchedKeys,
             CalendarAssemblyInput.Completeness completeness) {
     }
 

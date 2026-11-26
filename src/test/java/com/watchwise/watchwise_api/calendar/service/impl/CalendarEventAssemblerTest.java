@@ -44,6 +44,34 @@ class CalendarEventAssemblerTest {
     private final CalendarEventAssembler assembler = new CalendarEventAssembler();
 
     @Test
+    void monthlySelectionKeepsOnlyEventsToAssembleAndPreservesTheOriginalGrouping() {
+        CalendarAssemblyInput.Completeness markers = completeness(
+                Set.of(season("1396", 1), season("1396", 2)), Set.of(seriesKey("1396")));
+        var monthlyMovie = movie("1", RELEASE_DATE);
+        var dated = episode("1396", 1, 1, RELEASE_DATE);
+        var groupedOne = episode("1396", 2, 1, RELEASE_DATE);
+        var groupedTwo = episode("1396", 2, 2, RELEASE_DATE);
+        List<CalendarScheduleSnapshot> snapshots = new ArrayList<>(List.of(
+                monthlyMovie, dated, groupedOne, groupedTwo,
+                episode("1396", 1, 2, null),
+                episode("1396", 2, 3, RELEASE_DATE.plusMonths(1)).toBuilder().language("en-US").build(),
+                episode("1396", 2, 4, RELEASE_DATE.plusMonths(1)).toBuilder().presentInLastTmdbSnapshot(false).build()));
+        for (int i = 2; i <= 275; i++) {
+            snapshots.add(movie(String.valueOf(i), RELEASE_DATE.minusMonths(1)));
+        }
+        var watched = Set.of(WatchedCalendarKey.episode("1396", 2, 1));
+        var selected = assembler.selectMonth(MONTH, snapshots, "BR", "pt-BR", markers);
+
+        assertThat(selected.snapshots()).containsExactly(monthlyMovie, dated, groupedOne, groupedTwo);
+        assertThat(selected.completeness().completeSeriesKeys()).isEmpty();
+        assertThat(selected.completeness().completeSeasonKeys()).containsExactly(season("1396", 2));
+        var monthly = assemble(selected.snapshots(), Map.of(), watched, selected.completeness());
+        assertThat(monthly).isEqualTo(assemble(snapshots, Map.of(), watched, markers));
+        assertThat(monthly).extracting(CalendarEventDTO::eventType)
+                .containsExactly(CalendarEventType.MOVIE, CalendarEventType.SEASON, CalendarEventType.EPISODE);
+    }
+
+    @Test
     void shouldReturnAtMostSixEventsFromTodayInCalendarOrder() {
         List<CalendarEventDTO> events = assembler.assembleUpcoming(
                 assemblyInput(
