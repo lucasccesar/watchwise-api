@@ -234,16 +234,16 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             @Param("offset") int offset, @Param("delta") int delta);
 
     @Query("""
-            SELECT uli FROM UserListItem uli
+            SELECT uli FROM UserList ownerList
+            JOIN LATERAL (
+                SELECT item.id AS id FROM UserListItem item
+                WHERE item.userList.id = ownerList.id AND item.content.id IS NOT NULL
+                ORDER BY item.position ASC
+                LIMIT 5
+            ) preview ON true
+            JOIN UserListItem uli ON uli.id = preview.id
             JOIN FETCH uli.content
-            WHERE uli.userList.id IN :userListIds
-            AND (
-                SELECT COUNT(previousItem)
-                FROM UserListItem previousItem
-                WHERE previousItem.userList.id = uli.userList.id
-                AND previousItem.content.id IS NOT NULL
-                AND previousItem.position <= uli.position
-            ) <= 5
+            WHERE ownerList.id IN :userListIds
             ORDER BY uli.userList.id ASC, uli.position ASC
             """)
     List<UserListItem> findContentItemsByUserListIdInOrderByPosition(@Param("userListIds") Collection<UUID> userListIds);

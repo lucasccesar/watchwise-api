@@ -530,6 +530,70 @@ class UserListDetailViewControllerIntegrationTest {
                 .createdAt(LocalDateTime.now()).build());
     }
 
+
+    @Test
+    @DisplayName("Owned and discover views preserve the first five previews with sparse positions")
+    void shouldPreserveSparsePreviewOrderAndVisibilityAcrossListViews() throws Exception {
+        RegisteredUser owner = register("sparsepreviewowner");
+        RegisteredUser viewer = register("sparsepreviewviewer");
+        User user = users.findById(owner.id()).orElseThrow();
+        UserList large = persistList(user, "A public long list", UserListVisibility.PUBLIC);
+        UserList small = persistList(user, "B public short list", UserListVisibility.PUBLIC);
+        UserList empty = persistList(user, "C public empty list", UserListVisibility.PUBLIC);
+        UserList parent = persistList(user, "D public nested list", UserListVisibility.PUBLIC);
+        UserList hidden = persistList(user, "Private child", UserListVisibility.PRIVATE);
+
+        for (int position : new int[] {90, 70, 31, 23, 8, 2}) {
+            persistContentItem(large, position == 8 ? ContentType.SERIES : ContentType.MOVIE,
+                    position, "77" + position);
+        }
+        persistContentItem(small, ContentType.MOVIE, 9, "7789");
+        persistNestedItem(parent, small, 2);
+        persistNestedItem(parent, hidden, 10);
+
+        when(tmdbClient.getCardMetadata(any(TmdbCardMetadataKey.class), anyString()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata(
+                        "Replay title", "/poster.jpg", "2024-03-04", 100)));
+
+        for (int index = 0; index < 7; index++) {
+            persistList(user, "Other " + index, UserListVisibility.PRIVATE);
+        }
+        var owned = "/users/me/lists/view";
+        var discover = "/lists/discover/view";
+        var ownedRequest = get(owned).cookie(owner.accessToken()).param("source", "OWNED");
+        var discoverRequest = get(discover).cookie(viewer.accessToken());
+
+        mockMvc.perform(ownedRequest.param("sortBy", "name").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(12))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content.length()").value(10))
+                .andExpect(jsonPath("$.content[0].id").value(large.getId().toString()))
+                .andExpect(jsonPath("$.content[0].previewCards[*].tmdbId",
+                        contains("772", "778", "7723", "7731", "7770")));
+        mockMvc.perform(get(owned).cookie(owner.accessToken()).param("source", "OWNED")
+                        .param("sortBy", "name").param("size", "10").param("page", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2));
+
+        mockMvc.perform(discoverRequest.param("sortBy", "name").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.content[0].itemsCount").value(6))
+                .andExpect(jsonPath("$.content[0].previewCards[*].tmdbId",
+                        contains("772", "778", "7723", "7731", "7770")))
+                .andExpect(jsonPath("$.content[0].previewCards[0].posterPath").value("/poster.jpg"))
+                .andExpect(jsonPath("$.content[1].id").value(small.getId().toString()))
+                .andExpect(jsonPath("$.content[1].previewCards[*].tmdbId", contains("7789")))
+                .andExpect(jsonPath("$.content[2].id").value(empty.getId().toString()))
+                .andExpect(jsonPath("$.content[2].previewCards").isEmpty())
+                .andExpect(jsonPath("$.content[3].id").value(parent.getId().toString()))
+                .andExpect(jsonPath("$.content[3].previewCards").isEmpty())
+                .andExpect(jsonPath("$.content[3].nestedListPreviews[*].id",
+                        contains(small.getId().toString())));
+    }
+
     private MockHttpServletRequestBuilder detailView(RegisteredUser viewer, UUID listId) {
         return get("/lists/{listId}/view", listId).cookie(viewer.accessToken());
     }
